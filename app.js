@@ -1,6 +1,7 @@
 import { currentUser, login, register, logout, loadState, saveState, resetState, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
+import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
 
 let state = null;
 let user = null;
@@ -47,11 +48,11 @@ function showToast(message) {
 }
 
 function iconFor(page) {
-  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',settings:'⚙'})[page] || '•';
+  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',reports:'▤',settings:'⚙'})[page] || '•';
 }
 
 function titleFor(page) {
-  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
+  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
 }
 
 function subFor(page) {
@@ -60,6 +61,7 @@ function subFor(page) {
     people:'Track each person separately with a clean running statement.',
     accounts:'Bank accounts, cash, cards and transfers between them.',
     transactions:'Every movement that affects a person or one of your accounts.',
+    reports:'Analyze balances and create Excel workbooks and polished PDF reports.',
     settings:'Account, security, currency defaults and backup controls.',
     person:'A chronological statement with a running balance.'
   })[page] || '';
@@ -71,8 +73,8 @@ function render() {
     <div class="layout">
       <aside class="sidebar">
         <div class="brand"><div class="brand-mark">M</div><div><h1>${escapeHtml(state.settings.displayName || 'My Ledger')}</h1><small>Money owed tracker</small></div></div>
-        <nav class="nav">${['dashboard','people','accounts','transactions','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
-        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Block A · secure server ledger<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
+        <nav class="nav">${['dashboard','people','accounts','transactions','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server ledger · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
@@ -81,7 +83,7 @@ function render() {
         </header>
         <main class="main" id="main"></main>
       </section>
-      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
@@ -94,6 +96,7 @@ function render() {
   else if (route.page === 'people') renderPeople(main);
   else if (route.page === 'accounts') renderAccounts(main);
   else if (route.page === 'transactions') renderTransactions(main);
+  else if (route.page === 'reports') renderReports(main,state,route,{money,escapeHtml,today});
   else if (route.page === 'settings') renderSettings(main);
   else if (route.page === 'person') renderPerson(main, route.params.get('id'));
   else { location.hash = '#dashboard'; }
@@ -171,10 +174,11 @@ function renderPerson(main, personId) {
   const balances=personBalances(state.entries,state.people)[person.id]||{};
   const personEntries=state.entries.filter(e=>e.personId===person.id && PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
   main.innerHTML=`
-    <div class="detail-header"><div class="detail-title"><div class="avatar">${escapeHtml(person.name.slice(0,2).toUpperCase())}</div><div><h2>${escapeHtml(person.name)}</h2><p>${escapeHtml(person.note||'Personal statement')}</p></div></div><div class="page-actions"><button class="btn" id="editPerson">✎ Edit</button><button class="btn primary" id="personTxn">＋ Add transaction</button></div></div>
+    <div class="detail-header"><div class="detail-title"><div class="avatar">${escapeHtml(person.name.slice(0,2).toUpperCase())}</div><div><h2>${escapeHtml(person.name)}</h2><p>${escapeHtml(person.note||'Personal statement')}</p></div></div><div class="page-actions"><button class="btn" id="personPdf">↓ PDF statement</button><button class="btn" id="editPerson">✎ Edit</button><button class="btn primary" id="personTxn">＋ Add transaction</button></div></div>
     <div class="statement-summary">${Object.keys(balances).length?Object.entries(balances).map(([c,v])=>`<span class="pill ${v>0?'green':v<0?'red':''}">${v>0?'Owes you':v<0?'You owe':'Settled'} · ${money(Math.abs(v),c)}</span>`).join(''):'<span class="pill">Settled</span>'}</div>
     <section class="card panel"><div class="panel-head"><div><h3>Statement</h3><p>Positive change means the person owes you more; negative means less.</p></div></div>${personEntries.length?statementTable(personEntries):'<div class="empty"><strong>No statement entries yet</strong>Add the first purchase, repayment, borrowing or opening balance.</div>'}</section>`;
   main.querySelector('#personTxn')?.addEventListener('click',()=>openTransactionModal(null,{personId:person.id}));
+  main.querySelector('#personPdf')?.addEventListener('click',()=>exportPersonPdf(state,person,today));
   main.querySelector('#editPerson')?.addEventListener('click',()=>openPersonModal(person));
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));
@@ -232,7 +236,7 @@ function renderSettings(main) {
   main.innerHTML=`<div class="settings-grid">
     <section class="card settings-card"><h3>General</h3><div class="form-grid"><div class="field span-2"><label>Ledger name</label><input id="settingName" class="input" maxlength="80" value="${escapeHtml(state.settings.displayName||'My Ledger')}"></div><div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div></div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Sessions use an HttpOnly cookie; ledger writes require a CSRF token and are isolated to your account.</p><button class="btn" id="settingsLogout">Sign out on this device</button></section>
-    <section class="card settings-card"><h3>Backup</h3><p class="muted">JSON backup is included as a safety bridge. Excel/PDF imports and polished exports belong to later blocks.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export backup</button><button class="btn" id="importBackup">↑ Import backup</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
+    <section class="card settings-card"><h3>Backup & exports</h3><p class="muted">JSON backup remains available for recovery. Use Reports & Exports for formatted Excel workbooks and PDF reports.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export backup</button><button class="btn" id="importBackup">↑ Import backup</button><button class="btn" id="openReports">Open reports</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
     <section class="card settings-card"><h3>Ledger rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
     <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts and transactions from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all ledger data</button></section>
   </div>`;
@@ -240,6 +244,7 @@ function renderSettings(main) {
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
   main.querySelector('#exportBackup')?.addEventListener('click',()=>downloadText(`my-ledger-backup-${today()}.json`,JSON.stringify({...state,version:undefined},null,2)));
   main.querySelector('#importBackup')?.addEventListener('click',()=>main.querySelector('#backupFile').click());
+  main.querySelector('#openReports')?.addEventListener('click',()=>{location.hash='#reports';});
   main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(!Array.isArray(parsed.people)||!Array.isArray(parsed.accounts)||!Array.isArray(parsed.entries))throw new Error();state={...state,settings:{...state.settings,...parsed.settings},people:parsed.people,accounts:parsed.accounts,entries:parsed.entries};await persist('Backup imported.');}catch(error){showToast(error.message||'That file is not a valid ledger backup.');}});
   main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all people, accounts and transactions?')){try{state=await resetState();showToast('Ledger data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset ledger.');}}});
 }

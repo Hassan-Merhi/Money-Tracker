@@ -1,0 +1,26 @@
+name: Money Tracker CI
+
+on:
+  push:
+    branches: [main, block-d-exports-reporting]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.5.1'
+      - name: Run test suite
+        run: npm test
+      - name: Check browser JavaScript syntax
+        run: |
+          node --check app.js
+          node --check service-worker.js
+          node --check lib/reports-ui.js
+          node --check lib/reporting.js
+          node --check lib/xlsx.js
+          node --check lib/pdf.js

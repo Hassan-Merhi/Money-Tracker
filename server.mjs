@@ -283,7 +283,7 @@ function validateState(input, user) {
     if(!validDate(base.date)) throw new Error('Invalid transaction date.');
     if(e.type==='account_transfer'){
       if(!aSeen.has(base.fromAccountId)||!aSeen.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
-      base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;
+      base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
     } else if(e.type==='split_paid_for_people'){
       if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Split transaction account is missing.');
       const source=Array.isArray(e.splits)?e.splits:[];
@@ -297,7 +297,7 @@ function validateState(input, user) {
       });
       if(Math.abs(splitTotal-amount)>0.005) throw new Error('Split amounts must equal the transaction total.');
       base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
-      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
+      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
     } else if(e.type==='account_expense'||e.type==='account_income'){
       if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Account-only transaction account is missing.');
       if(base.categoryId) insights.validateCategory(user.user_id,base.categoryId,{kind:e.type==='account_income'?'income':'expense'});
@@ -360,7 +360,7 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
   if(amount===null || amount<0 || amount>1e15) throw new Error('Invalid recurring amount.');
   if(raw.type==='account_transfer'){
     if(!accountById.has(base.fromAccountId)||!accountById.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Choose two different accounts and valid transfer amounts.');
-    base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;
+    base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
   } else if(raw.type==='split_paid_for_people'){
     if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring split.');
     const source=Array.isArray(raw.splits)?raw.splits:[];

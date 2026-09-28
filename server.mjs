@@ -622,7 +622,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); q.deleteAttachments.run(a.user_id); return json(res,200,{...saved,entries:[]});
+      const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); return json(res,200,{...saved,entries:[]});
     }
     if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

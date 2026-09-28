@@ -55,11 +55,15 @@ test('person-filtered reports use only that persons split allocation',()=>{
 });
 
 
-test('bank-imported account expenses appear in top merchants without affecting person activity',()=>{
-  const withExpense={...state,entries:[...state.entries,{id:'e-bank',type:'account_expense',personId:null,accountId:'a1',amount:45,currency:'USD',date:'2026-09-22',merchant:'Grocer',description:'Food',createdAt:t,updatedAt:t}]};
+test('bank-imported account expenses appear in category and merchant reports without affecting person activity',()=>{
+  const withExpense={...state,categories:[{id:'category_food',name:'Food',kind:'expense',icon:'🍽️',archived:false}],budgets:[{id:'budget_food',categoryId:'category_food',currency:'USD',monthlyLimit:100}],entries:[...state.entries,{id:'e-bank',type:'account_expense',personId:null,accountId:'a1',amount:45,currency:'USD',date:'2026-09-22',merchant:'Grocer',description:'Food',categoryId:'category_food',createdAt:t,updatedAt:t}]};
   const s=reportingSnapshot(withExpense);
   assert.equal(s.transactionCount,4);
   assert.equal(s.activity.USD.netPersonChange,50);
+  assert.equal(s.personalCashFlow.USD.expense,45);
+  assert.equal(s.categorySpending.find(row=>row.categoryId==='category_food').amount,45);
   assert.equal(s.merchants.find(row=>row.merchant==='Grocer').amount,45);
   assert.equal(s.accounts[0].balance,905);
+  const exported=exportRows(withExpense).find(row=>row.Type==='account_expense');assert.equal(exported.Category,'Food');
+  const sheets=workbookSheets(withExpense);assert.ok(sheets.find(sheet=>sheet.name==='Budgets').rows.some(row=>row.includes('Food')));
 });

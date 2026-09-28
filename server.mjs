@@ -421,11 +421,13 @@ function cleanRecurringRule(input,userId,defaultCurrency='USD',{existing=null}={
 function assertRecurringReferences(userId,cleanState) {
   const people=new Set(cleanState.people.map(row=>row.id));
   const accounts=new Set(cleanState.accounts.map(row=>row.id));
+  const categories=new Set(insights.list(userId).categories.map(row=>row.id));
   for(const rule of loadRecurringRules(userId)){
     const t=rule.template||{};
     const personIds=t.type==='split_paid_for_people'?(t.splits||[]).map(split=>split.personId):(t.personId?[t.personId]:[]);
     const accountIds=[t.accountId,t.fromAccountId,t.toAccountId].filter(Boolean);
     if(personIds.some(id=>!people.has(id))||accountIds.some(id=>!accounts.has(id))) throw new Error('A recurring schedule still uses a person or account you are trying to delete. Update or delete that schedule first.');
+    if(t.categoryId&&!categories.has(t.categoryId))throw new Error('A recurring schedule still uses a category missing from this backup. Restore that category or update the schedule first.');
   }
 }
 

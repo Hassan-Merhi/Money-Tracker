@@ -43,6 +43,14 @@ test('transaction import creates dependencies and skips an obvious duplicate',()
   assert.equal(out.result.entries,0);assert.equal(out.result.skipped,1);
 });
 
+test('debt transaction import works without an Account column',()=>{
+  const rows=[{Date:'2026-09-28',Type:'borrowed_from_person',Person:'Alice',Amount:75,Currency:'USD',Description:'Covered dinner'}];
+  const mapping={date:'Date',type:'Type',person:'Person',amount:'Amount',currency:'Currency',description:'Description'};
+  const out=applyImport({state:baseState(),rows,mode:'transactions',mapping,uidFactory:ids()});
+  assert.equal(out.result.people,1);assert.equal(out.result.accounts,0);assert.equal(out.result.entries,1);
+  assert.equal(out.state.entries[0].accountId,null);assert.equal(out.state.entries[0].currency,'USD');
+});
+
 test('transfer import creates two accounts without changing people',()=>{
   const out=applyImport({state:baseState(),rows:[{Date:'2026-09-28',Type:'account_transfer',From:'Bank',To:'Cash',Amount:100,Currency:'USD','From Amount':100,'To Amount':100}],mode:'transactions',mapping:{date:'Date',type:'Type',fromAccount:'From',toAccount:'To',amount:'Amount',currency:'Currency',fromAmount:'From Amount',toAmount:'To Amount'},uidFactory:ids()});
   assert.equal(out.result.accounts,2);assert.equal(out.result.people,0);assert.equal(out.result.entries,1);

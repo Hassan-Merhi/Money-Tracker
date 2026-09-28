@@ -54,6 +54,8 @@ test('categorized account expenses persist while wrong category types are reject
   const salary=state.categories.find(c=>c.id==='category_salary');
   const bad={...state,entries:state.entries.map(e=>({...e,categoryId:salary.id}))};
   const rejected=await request('/api/state',{method:'PUT',body:bad});assert.equal(rejected.res.status,400);
+  const retype=await request(`/api/categories/${customCategoryId}`,{method:'PUT',body:{name:'Coffee',kind:'income',icon:'☕'}});
+  assert.equal(retype.res.status,400);
 });
 
 test('archiving a category removes its budget but preserves historical categorization',async()=>{
@@ -82,6 +84,9 @@ test('categorized recurring account expenses post into the ledger',async()=>{
   assert.equal(posted.res.status,200);state=posted.data.state;
   const entry=state.entries.find(e=>e.description==='Recurring coffee');
   assert.equal(entry.type,'account_expense');assert.equal(entry.categoryId,customCategoryId);
+  const archiveBlocked=await request(`/api/categories/${customCategoryId}/archive`,{method:'POST',body:{}});
+  assert.equal(archiveBlocked.res.status,400);
+  assert.match(archiveBlocked.data.error,/recurring schedule/i);
 });
 
 test('atomic JSON backup restore preserves category IDs and budgets',async()=>{

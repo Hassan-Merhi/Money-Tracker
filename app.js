@@ -3,6 +3,7 @@ import { personBalances, accountBalances, totalsFromBalances, personDelta, accou
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
 import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
+import { renderBankFeedPage } from './block-f-bank-feed.js';
 
 let state = null;
 let user = null;
@@ -51,11 +52,11 @@ function showToast(message) {
 }
 
 function iconFor(page) {
-  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
+  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',bank:'🏦',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
 }
 
 function titleFor(page) {
-  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
+  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',bank:'Bank Feed',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
 }
 
 function subFor(page) {
@@ -64,6 +65,7 @@ function subFor(page) {
     people:'Track each person separately with a clean running statement.',
     accounts:'Bank accounts, cash, cards and transfers between them.',
     transactions:'Every movement that affects a person or one of your accounts.',
+    bank:'Import statements, auto-classify rows, and review them before posting.',
     scheduled:'Recurring transactions, due dates and reminders you review before posting.',
     reports:'Analyze balances and create Excel workbooks and polished PDF reports.',
     settings:'Account, security, currency defaults and backup controls.',
@@ -77,7 +79,7 @@ function render() {
     <div class="layout">
       <aside class="sidebar">
         <div class="brand"><div class="brand-mark">M</div><div><h1>${escapeHtml(state.settings.displayName || 'My Ledger')}</h1><small>Money owed tracker</small></div></div>
-        <nav class="nav">${['dashboard','people','accounts','transactions','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <nav class="nav">${['dashboard','people','accounts','transactions','bank','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
         <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server ledger · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
@@ -88,7 +90,7 @@ function render() {
         <main class="main" id="main"></main>
       </section>
       <button class="mobile-fab" id="mobileQuickEntry" aria-label="Quick add transaction">＋</button>
-      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','bank','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
@@ -102,6 +104,7 @@ function render() {
   else if (route.page === 'people') renderPeople(main);
   else if (route.page === 'accounts') renderAccounts(main);
   else if (route.page === 'transactions') renderTransactions(main);
+  else if (route.page === 'bank') renderBankFeedPage(main,state,{showToast,replaceState(next){state=next;render();}});
   else if (route.page === 'scheduled') renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
   else if (route.page === 'reports') renderReports(main,state,route,{money,escapeHtml,today});
   else if (route.page === 'settings') renderSettings(main);
@@ -234,7 +237,7 @@ function transactionTable(entries,{compact=false}={}){
   return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
-    const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):escapeHtml(p?.name||'—');
+    const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
     return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
@@ -354,25 +357,25 @@ function openTransactionModal(existing=null,prefill={}){
   amountEl.addEventListener('input',updateSplitTotal);
   bindSplitRows();
 
-  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE;form.querySelector('#txnPersonField').style.display=split?'none':'grid';personEl.required=!split;form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
+  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
   typeEl.addEventListener('change',sync);accEl.addEventListener('change',sync);sync();
   const filesEl=form.querySelector('#txnFiles');filesEl.addEventListener('change',()=>{const files=[...(filesEl.files||[])];form.querySelector('#fileSelection').textContent=files.length?files.map(file=>`${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`).join(' · '):'JPG, PNG, WebP, GIF, PDF or text · max 8 MB each';});
   if(existing) refreshAttachmentPanel(existing.id);
 
   form.addEventListener('submit',async e=>{
     e.preventDefault();
-    const fd=new FormData(form),t=fd.get('type'),split=t===SPLIT_ENTRY_TYPE,person=fd.get('personId'),amount=Number(fd.get('amount')),files=[...(filesEl.files||[])];
+    const fd=new FormData(form),t=fd.get('type'),split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income',person=fd.get('personId'),amount=Number(fd.get('amount')),files=[...(filesEl.files||[])];
     if(!(amount>0)){showToast('Enter an amount greater than zero.');return}
-    if(!split&&!person){showToast('Choose a person.');return}
+    if(!split&&!accountOnly&&!person){showToast('Choose a person.');return}
     if(t!=='person_adjustment'&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}
     if(files.some(file=>file.size>8*1024*1024)){showToast('Each attachment must be 8 MB or smaller.');return}
     const splits=split?readSplits():[];
     if(split){const error=validateSplit(splits,amount);if(error){showToast(error);return}}
     const acc=state.accounts.find(a=>a.id===fd.get('accountId'));
-    const item={id:existing?.id||uid('entry'),type:t,personId:split?null:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
     if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
     if(existing)Object.assign(existing,item);else state.entries.push(item);
-    rememberUsed(split?'':person,item.accountId,t);
+    rememberUsed((split||accountOnly)?'':person,item.accountId,t);
     const saved=await persist('');
     if(!saved)return;
     try{
@@ -411,7 +414,7 @@ function deleteAccount(id){const linked=state.entries.some(e=>e.accountId===id||
 
 function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}" ${selected===c?'selected':''}>${c}</option>`).join('')}
 function entryTypeOptions(selected,includeTransfer=true){
-  const types=[['paid_for_person','Paid for someone'],[SPLIT_ENTRY_TYPE,'Split purchase'],['received_from_person','Received repayment'],['borrowed_from_person','Borrowed from person'],['paid_to_person','Paid person back'],['person_adjustment','Balance adjustment']];
+  const types=[['paid_for_person','Paid for someone'],[SPLIT_ENTRY_TYPE,'Split purchase'],['received_from_person','Received repayment'],['borrowed_from_person','Borrowed from person'],['paid_to_person','Paid person back'],['account_expense','Account expense'],['account_income','Account income'],['person_adjustment','Balance adjustment']];
   if(includeTransfer)types.push(['account_transfer','Account transfer']);
   return types.map(([v,l])=>`<option value="${v}" ${selected===v?'selected':''}>${l}</option>`).join('');
 }

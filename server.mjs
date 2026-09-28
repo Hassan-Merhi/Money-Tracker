@@ -458,6 +458,7 @@ function saveState(user, input) {
     for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
     q.deleteOrphanAttachments.run(user.user_id,user.user_id);
     bankFeed.reopenOrphans(user.user_id);
+    bankFeed.reconcileReferences(user.user_id);
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);

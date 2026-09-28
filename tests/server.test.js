@@ -53,7 +53,7 @@ test('persists validated split allocations',async()=>{
   state.people.push({id:'person_bob',name:'Bob',note:'Friend',createdAt:t});
   const invalid={...state,entries:[...state.entries,{id:'entry_bad_split',type:'split_paid_for_people',accountId:'account_bank',amount:100,currency:'USD',date:'2026-09-28',merchant:'Shop',description:'Bad split',splits:[{personId:'person_alice',amount:40},{personId:'person_bob',amount:50}],createdAt:t,updatedAt:t}]};
   const bad=await request('/api/state',{method:'PUT',cookie,csrf,body:invalid});
-  assert.equal(bad.res.status,500);
+  assert.equal(bad.res.status,400);
 
   state.entries.push({id:'entry_split',type:'split_paid_for_people',accountId:'account_bank',amount:100,currency:'USD',date:'2026-09-28',merchant:'Shop',description:'Shared order',splits:[{personId:'person_alice',amount:40,note:'Item A'},{personId:'person_bob',amount:60,note:'Item B'}],createdAt:t,updatedAt:t});
   const put=await request('/api/state',{method:'PUT',cookie,csrf,body:state});

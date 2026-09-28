@@ -23,15 +23,19 @@ async function requestRaw(path,{method='GET',cookie,csrf}={}){
   return {res,data};
 }
 
-let cookie,csrf,state,attachmentId;
+let cookie,csrf,state,attachmentId,secondUserEmail;
 
-test('registers securely and starts with an empty scoped ledger',async()=>{
+test('allows public signup only for the first owner account',async()=>{
+  const before=await request('/api/auth/status'); assert.equal(before.res.status,200); assert.equal(before.data.registrationOpen,true);
   const email=`owner-${Date.now()}@example.com`;
-  const r=await request('/api/auth/register',{method:'POST',body:{email,password:'correct horse battery staple',displayName:'Family Ledger'}});
-  assert.equal(r.res.status,201); assert.ok(r.cookie?.startsWith('mot_session=')); assert.ok(r.data.csrfToken);
+  const r=await request('/api/auth/register',{method:'POST',body:{email,password:'correct horse battery staple'}});
+  assert.equal(r.res.status,201); assert.ok(r.cookie?.startsWith('mot_session=')); assert.ok(r.data.csrfToken); assert.equal(r.data.user.isOwner,true);
   cookie=r.cookie; csrf=r.data.csrfToken;
-  const me=await request('/api/auth/me',{cookie}); assert.equal(me.res.status,200); assert.equal(me.data.user.email,email);
-  const s=await request('/api/state',{cookie}); assert.equal(s.res.status,200); assert.equal(s.data.settings.displayName,'Family Ledger'); assert.deepEqual(s.data.people,[]);state=s.data;
+  const me=await request('/api/auth/me',{cookie}); assert.equal(me.res.status,200); assert.equal(me.data.user.email,email); assert.equal(me.data.user.isOwner,true);
+  const after=await request('/api/auth/status'); assert.equal(after.data.registrationOpen,false);
+  const blocked=await request('/api/auth/register',{method:'POST',body:{email:`blocked-${Date.now()}@example.com`,password:'another secure password'}});
+  assert.equal(blocked.res.status,403);
+  const s=await request('/api/state',{cookie}); assert.equal(s.res.status,200); assert.equal(s.data.settings.displayName,'Money Tracker'); assert.deepEqual(s.data.people,[]);state=s.data;
 });
 
 test('rejects writes without CSRF',async()=>{
@@ -80,10 +84,17 @@ test('blocks stale-tab overwrites with optimistic revision checks',async()=>{
   const r=await request('/api/state',{method:'PUT',cookie,csrf,body:stale}); assert.equal(r.res.status,409);
 });
 
-test('isolates a second user from the first user ledger',async()=>{
-  const r=await request('/api/auth/register',{method:'POST',body:{email:`other-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'}});
-  assert.equal(r.res.status,201); const other=await request('/api/state',{cookie:r.cookie}); assert.equal(other.res.status,200); assert.deepEqual(other.data.people,[]); assert.deepEqual(other.data.entries,[]);
-  const hidden=await request(`/api/attachments/${attachmentId}`,{cookie:r.cookie}); assert.equal(hidden.res.status,404);
+test('owner can create additional accounts from Settings API and data stays isolated',async()=>{
+  secondUserEmail=`other-${Date.now()}@example.com`;
+  const created=await request('/api/users',{method:'POST',cookie,csrf,body:{email:secondUserEmail,password:'another secure password'}});
+  assert.equal(created.res.status,201); assert.equal(created.data.user.isOwner,false);
+  const users=await request('/api/users',{cookie}); assert.equal(users.res.status,200); assert.equal(users.data.users.length,2);
+  const loginOther=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:'another secure password'}});
+  assert.equal(loginOther.res.status,200); assert.equal(loginOther.data.user.isOwner,false);
+  const other=await request('/api/state',{cookie:loginOther.cookie}); assert.equal(other.res.status,200); assert.deepEqual(other.data.people,[]); assert.deepEqual(other.data.entries,[]);
+  const hidden=await request(`/api/attachments/${attachmentId}`,{cookie:loginOther.cookie}); assert.equal(hidden.res.status,404);
+  const forbidden=await request('/api/users',{method:'POST',cookie:loginOther.cookie,csrf:loginOther.data.csrfToken,body:{email:`third-${Date.now()}@example.com`,password:'another secure password'}});
+  assert.equal(forbidden.res.status,403);
 });
 
 test('logout invalidates the server-side session',async()=>{

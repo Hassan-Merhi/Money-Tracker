@@ -52,3 +52,13 @@ test('person-filtered reports use only that persons split allocation',()=>{
   assert.match(row['Split Details'],/Bob: 20/);
   assert.equal(row.Attachments,2);
 });
+
+
+test('bank-imported account expenses appear in top merchants without affecting person activity',()=>{
+  const withExpense={...state,entries:[...state.entries,{id:'e-bank',type:'account_expense',personId:null,accountId:'a1',amount:45,currency:'USD',date:'2026-09-22',merchant:'Grocer',description:'Food',createdAt:t,updatedAt:t}]};
+  const s=reportingSnapshot(withExpense);
+  assert.equal(s.transactionCount,4);
+  assert.equal(s.activity.USD.netPersonChange,50);
+  assert.equal(s.merchants.find(row=>row.merchant==='Grocer').amount,45);
+  assert.equal(s.accounts[0].balance,905);
+});

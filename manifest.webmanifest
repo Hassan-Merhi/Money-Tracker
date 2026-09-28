@@ -1,0 +1,12 @@
+{
+  "name": "My Ledger - Money Owed Tracker",
+  "short_name": "My Ledger",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#111827",
+  "description": "Track money people owe you, money you owe, account balances and transfers.",
+  "icons": [
+    {"src":"./assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}

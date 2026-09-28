@@ -32,6 +32,22 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 - Server-side split validation, attachment ownership isolation, and orphan cleanup
 - Sticky mobile modal controls and larger touch targets
 
+## Block C — Imports & migration
+
+- Excel `.xlsx` / `.xlsm` upload with protected server-side workbook parsing
+- CSV import directly in the browser
+- Downloadable import template using the existing Block D XLSX engine
+- Sheet/sample preview before any ledger write
+- Automatic column suggestions plus manual mapping
+- People and opening-balance imports
+- Account and opening-balance imports
+- Transaction history, transfers, adjustments, and Block B split-purchase imports
+- Missing people/accounts can be created from valid transaction rows
+- Matching by person name and account name + currency
+- Obvious duplicate transaction skipping
+- Re-import compatibility with Block D transaction exports, including `Split Details`
+- CSRF protection, optimistic revision checks, 8 MB upload limit, ZIP expansion limits, row/column limits, and malformed-workbook rejection
+
 ## Block D — Reports & exports
 
 - Date, person, and account report filters
@@ -67,12 +83,12 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The automated suite covers core ledger math, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, and PDF generation.
+The automated suite covers core ledger math, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase migration, and protected import previews.
 
 ## Render
 
 `render.yaml` defines a Node web service with a persistent disk mounted at `/var/data` for the SQLite database. The health endpoint is `/api/health`.
 
-## Still outside Blocks A/B/D
+## Still outside Blocks A/B/C/D
 
-Spreadsheet import, recurring reminders, and automatic bank/expense ingestion remain separate future blocks.
+Recurring reminders and automatic bank/expense ingestion remain separate future blocks.

@@ -169,16 +169,19 @@ function paint(main,state,ctx){
   bind(main,state,ctx);
 }
 
-function syncRow(card){
+function syncRow(card,state){
   const action=card.querySelector('.bank-action')?.value||'expense';
   card.querySelector('.bank-person-wrap')?.classList.toggle('hidden',!PERSON_ACTIONS.has(action));
   card.querySelector('.bank-target-wrap')?.classList.toggle('hidden',action!=='transfer');
   card.querySelector('.bank-category-wrap')?.classList.toggle('hidden',!['expense','income'].includes(action));
-  const category=card.querySelector('.bank-category');if(category&&['expense','income'].includes(action)){const selected=category.value;category.innerHTML=categoryOptions(window.__moneyTrackerStateForBank||{categories:[]},action,selected);}
+  const category=card.querySelector('.bank-category');
+  if(category&&['expense','income'].includes(action)){
+    const selected=category.value;
+    category.innerHTML=categoryOptions(state,action,selected);
+  }
 }
 
 function bind(main,state,ctx){
-  window.__moneyTrackerStateForBank=state;
   main.querySelector('#bankAccount')?.addEventListener('change',e=>{selectedAccountId=e.target.value;});
   main.querySelector('#bankFile')?.addEventListener('change',async e=>{await readStatementFile(e.target.files?.[0],ctx);paint(main,state,ctx);});
   main.querySelector('#bankSheet')?.addEventListener('change',e=>{setDraftSheet(Number(e.target.value));paint(main,state,ctx);});
@@ -198,7 +201,7 @@ function bind(main,state,ctx){
     }catch(error){ctx.showToast(error.message||'Could not import the statement.');}
   });
   main.querySelectorAll('[data-bank-status]').forEach(btn=>btn.addEventListener('click',()=>{statusFilter=btn.dataset.bankStatus;paint(main,state,ctx);}));
-  main.querySelectorAll('[data-bank-item]').forEach(card=>{card.querySelector('.bank-action')?.addEventListener('change',()=>syncRow(card));syncRow(card);});
+  main.querySelectorAll('[data-bank-item]').forEach(card=>{card.querySelector('.bank-action')?.addEventListener('change',()=>syncRow(card,state));syncRow(card,state);});
   main.querySelectorAll('.bank-post').forEach(btn=>btn.addEventListener('click',async()=>{
     const card=btn.closest('[data-bank-item]'),id=card.dataset.bankItem,action=card.querySelector('.bank-action').value;
     const payload={expectedRevision:state.version,classification:action,personId:card.querySelector('.bank-person')?.value||null,targetAccountId:card.querySelector('.bank-target')?.value||null,categoryId:card.querySelector('.bank-category')?.value||null,note:card.querySelector('.bank-note')?.value||'',saveRule:!!card.querySelector('.bank-save-rule')?.checked,ruleMatchText:card.querySelector('.bank-rule-text')?.value||''};

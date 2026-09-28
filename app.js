@@ -2,6 +2,7 @@ import { currentUser, login, register, logout, loadState, saveState, resetState,
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
+import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
 
 let state = null;
 let user = null;
@@ -50,11 +51,11 @@ function showToast(message) {
 }
 
 function iconFor(page) {
-  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',reports:'▤',settings:'⚙'})[page] || '•';
+  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
 }
 
 function titleFor(page) {
-  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
+  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
 }
 
 function subFor(page) {
@@ -63,6 +64,7 @@ function subFor(page) {
     people:'Track each person separately with a clean running statement.',
     accounts:'Bank accounts, cash, cards and transfers between them.',
     transactions:'Every movement that affects a person or one of your accounts.',
+    scheduled:'Recurring transactions, due dates and reminders you review before posting.',
     reports:'Analyze balances and create Excel workbooks and polished PDF reports.',
     settings:'Account, security, currency defaults and backup controls.',
     person:'A chronological statement with a running balance.'
@@ -75,7 +77,7 @@ function render() {
     <div class="layout">
       <aside class="sidebar">
         <div class="brand"><div class="brand-mark">M</div><div><h1>${escapeHtml(state.settings.displayName || 'My Ledger')}</h1><small>Money owed tracker</small></div></div>
-        <nav class="nav">${['dashboard','people','accounts','transactions','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <nav class="nav">${['dashboard','people','accounts','transactions','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
         <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server ledger · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
@@ -86,7 +88,7 @@ function render() {
         <main class="main" id="main"></main>
       </section>
       <button class="mobile-fab" id="mobileQuickEntry" aria-label="Quick add transaction">＋</button>
-      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
@@ -100,6 +102,7 @@ function render() {
   else if (route.page === 'people') renderPeople(main);
   else if (route.page === 'accounts') renderAccounts(main);
   else if (route.page === 'transactions') renderTransactions(main);
+  else if (route.page === 'scheduled') renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
   else if (route.page === 'reports') renderReports(main,state,route,{money,escapeHtml,today});
   else if (route.page === 'settings') renderSettings(main);
   else if (route.page === 'person') renderPerson(main, route.params.get('id'));
@@ -144,7 +147,9 @@ function renderDashboard(main) {
           <button class="quick" data-action="account"><span class="qicon">🏦</span><strong>Add an account</strong><small>Bank, cash or wallet</small></button>
         </div>
       </section>
+      <section class="card panel"><div id="recurringDashboardWidget"><div class="muted">Loading scheduled reminders…</div></div></section>
     </div>`;
+  mountRecurringDashboardWidget(main.querySelector('#recurringDashboardWidget'),state,{showToast,replaceState(next){state=next;render();}});
   main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;

@@ -1,4 +1,4 @@
-# Money Tracker — Secure Ledger, Bank Feed, Reporting & Recurring Reminders
+# Money Tracker — Secure Ledger, Bank Feed, Budgets & Spending Insights
 
 Money Tracker is a server-backed personal ledger for tracking money people owe you, money you owe people, bank/cash balances, transfers, shared purchases, receipts, notes, statements, and exports.
 
@@ -45,7 +45,7 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 - Missing people/accounts can be created from valid transaction rows
 - Matching by person name and account name + currency
 - Obvious duplicate transaction skipping
-- Re-import compatibility with Block D transaction exports, including `Split Details` and Block F account expense/income entries
+- Re-import compatibility with Block D transaction exports, including `Split Details`, Block F account expense/income entries, and Block G category names
 - CSRF protection, optimistic revision checks, 8 MB upload limit, ZIP expansion limits, row/column limits, and malformed-workbook rejection
 
 ## Block D — Reports & exports
@@ -54,9 +54,9 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 - Period activity summaries grouped by currency
 - Current outstanding and account-balance reports
 - Top merchant/source summary
-- Excel `.xlsx` export with Overview, Outstanding, People, Accounts, and Transactions sheets
+- Excel `.xlsx` export with Overview, Outstanding, People, Accounts, Categories, Budgets, Spending, and Transactions sheets
 - PDF summary reports and one-click per-person PDF statements
-- Split allocations and attachment counts included in exported transaction data
+- Categories, split allocations, and attachment counts included in exported transaction data
 - Dependency-free XLSX/PDF generation in the browser
 - Reporting modules cached by the PWA for offline shell use
 
@@ -75,7 +75,7 @@ Report filters apply to activity and exported transaction rows. Current outstand
 - Optimistic ledger revision checks and occurrence checks prevent stale-tab or duplicate posting
 - Skip, pause/resume, edit, and delete schedule controls
 - Optional end dates and last-posted occurrence tracking
-- Templates for payments, repayments, borrowing, paybacks, balance adjustments, account transfers, and split purchases
+- Templates for payments, repayments, borrowing, paybacks, balance adjustments, account transfers, split purchases, categorized account expenses, and categorized account income
 - Schedule reference protection prevents deleting a person/account still used by a recurring rule
 - Recurring modules included in the PWA offline shell
 
@@ -93,14 +93,40 @@ Report filters apply to activity and exported transaction rows. Current outstand
 - Account-only **expense** and **income** ledger entries for transactions that do not involve another person
 - Review actions can instead classify a row as paid for someone, repayment received, borrowed money, paid someone back, or a same-currency transfer between your own accounts
 - If both sides of the same transfer are imported from separate account statements, the second reviewed side links to the existing transfer instead of creating a duplicate ledger movement
-- Merchant/description rules can remember classifications for future imports
+- Merchant/description rules can remember classifications and expense/income categories for future imports
 - Ignore, reopen, and delete controls for unposted feed rows
 - Atomic posting updates the ledger revision and feed status together
 - Direction validation prevents posting money-in rows as expenses or money-out rows as income/repayments
 - Stale-tab revision checks, CSRF protection, per-user feed/rule isolation, and rule/reference cleanup
 - Deleting a posted ledger entry reopens its feed item; deleting referenced accounts cleans unusable unposted rows/rules
-- Bank-imported expenses participate in account balances, transaction editing/filtering, exports, re-imports, and top-merchant reports
+- Bank-imported expenses participate in account balances, transaction editing/filtering, category budgets, exports, re-imports, and merchant/category reports
 - Block F modules are included in the PWA offline shell
+
+
+## Block G — Categories, budgets & spending insights
+
+- First-class expense/income categories with sensible defaults plus custom categories
+- Category types can be **Expense**, **Income**, or **Both**
+- Categories can be renamed, edited, archived, and restored without losing historical transaction labels
+- Category lifecycle protection prevents incompatible type changes once history or recurring schedules depend on a category
+- Active recurring schedules prevent accidental category archival until the schedule is updated or paused
+- Monthly budgets are scoped to an expense category and currency
+- Budget progress shows spent, remaining/over amount, percentage used, and near/over-limit status
+- Dedicated **Insights & Budgets** page with month selection, personal expenses, account income, net personal cash flow, category breakdown, and six-month trends
+- Dashboard budget-watch widget highlights near-limit and over-budget categories
+- Personal expense/income analytics deliberately exclude transfers and money exchanged with people so debt tracking does not distort spending budgets
+- Manual account expense/income entry supports categories directly
+- Transaction history can filter by category, including uncategorized and archived historical categories
+- Bank Feed review supports category selection and category-aware merchant/description rules
+- Recurring account expense/income schedules support categories and revalidate them before posting
+- Reports include personal category spending; PDF reports include a category-spending section
+- Excel exports include **Categories**, **Budgets**, and **Spending** sheets plus a Category column in Transactions
+- Block C migration can map exported Category names back to existing compatible categories; unknown categories safely import as uncategorized with a warning
+- JSON backup restore preserves exact category IDs and monthly budgets atomically with the core ledger
+- Older JSON backups without category metadata remain restorable and receive the default category set
+- Ledger reset also removes recurring schedules, Bank Feed data, custom categories, and budgets, then reseeds defaults
+- Category/budget APIs remain CSRF-protected and isolated per user
+- Block G modules are included in the PWA offline shell
 
 ## Ledger rules
 
@@ -108,8 +134,9 @@ Report filters apply to activity and exported transaction rows. Current outstand
 - Negative personal balance: you owe them
 - Account balances start at opening balance and then move through ledger transactions
 - Transfers affect accounts only, never a person's balance
-- Account expenses reduce the linked account without changing a person's balance
+- Account expenses reduce the linked account without changing a person's balance and may count toward a category budget
 - Account income increases the linked account without changing a person's balance
+- Budgets and spending insights count only account expense/income entries; person debt flows and transfers are excluded
 - A split purchase reduces the source account by the transaction total exactly once
 
 ## Run locally
@@ -125,12 +152,12 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The automated suite covers core ledger math, account-only expense/income movements, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase and bank-entry migration, protected import previews, bank CSV parsing and normalization, feed deduplication, rules, atomic posting, two-sided transfer deduplication, direction/revision safety, reference cleanup, recurrence date math, recurring schedule isolation, atomic occurrence posting, duplicate-post rejection, skipping, pausing, and recurring reference protection.
+The automated suite covers core ledger math, account-only expense/income movements, category insight math, monthly budget states, category lifecycle protection, categorized recurring entries, atomic category/budget backup restore, CSRF and user isolation, split allocation math and validation, receipt attachments, category-aware reporting and PDF/XLSX exports, XLSX parsing, category-preserving import mapping, bank CSV parsing and normalization, category-aware Bank Feed rules, feed deduplication, atomic posting, two-sided transfer deduplication, direction/revision safety, reference cleanup, recurrence date math, recurring schedule isolation, duplicate-post rejection, skipping, pausing, and reset cleanup.
 
 ## Render
 
 `render.yaml` defines a Node web service with a persistent disk mounted at `/var/data` for the SQLite database. The health endpoint is `/api/health`.
 
-## Still outside Blocks A/B/C/D/E/F
+## Still outside Blocks A/B/C/D/E/F/G
 
-Live bank-provider connections (OAuth/open-banking APIs), background provider syncing, and provider-specific credential management are outside the current scope. Block F supports statement-file ingestion with automatic mapping, deduplication, rules, and review-before-post.
+Live bank-provider connections (OAuth/open-banking APIs), background provider syncing, and provider-specific credential management remain outside the current scope. The current app supports statement-file ingestion, automatic classification/category rules, review-before-post, budgets, and personal cash-flow insights without storing bank credentials.

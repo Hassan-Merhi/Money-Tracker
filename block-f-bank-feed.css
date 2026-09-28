@@ -29,7 +29,7 @@
 .bank-rule-check .bank-rule-text{max-width:420px;padding:7px 9px;font-size:12px}
 .bank-row-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
 .bank-rules{margin-top:22px}
-.bank-rule-form{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:14px}
+.bank-rule-form{display:grid;grid-template-columns:1.5fr repeat(4,minmax(120px,1fr)) auto;gap:10px;align-items:end;margin-bottom:14px}
 .bank-rule-list{display:grid;gap:8px}
 .bank-rule-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fafafa}
 .bank-rule-item div{min-width:0}

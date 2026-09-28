@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from
 import { DatabaseSync } from 'node:sqlite';
 import { parseWorkbook } from './lib/xlsx-import.js';
 import { nextRecurringDate } from './lib/recurring.js';
+import { createBankFeedService } from './lib/bank-server.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -160,6 +161,8 @@ const q = {
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
 };
 
+const bankFeed = createBankFeedService(db);
+
 function nowIso() { return new Date().toISOString(); }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 function safeStr(value, max=180) { return String(value ?? '').trim().slice(0,max); }
@@ -267,7 +270,7 @@ function validateState(input, user) {
     if(!name||!allowedAccountTypes.has(type)||!validCurrency(currency)||opening===null||Math.abs(opening)>1e15) throw new Error('Invalid account record.');
     return {id:a.id,name,type,currency,openingBalance:opening,createdAt:a.createdAt||nowIso()};
   });
-  const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people']);
+  const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income']);
   const accountById=new Map(cleanAccounts.map(a=>[a.id,a]));
   const cleanEntries=entries.map(e=>{
     if(!idOk(e.id,'entry')||eSeen.has(e.id)||!allowedTypes.has(e.type)) throw new Error('Invalid transaction record.'); eSeen.add(e.id);
@@ -289,6 +292,10 @@ function validateState(input, user) {
         return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
       });
       if(Math.abs(splitTotal-amount)>0.005) throw new Error('Split amounts must equal the transaction total.');
+      base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
+    } else if(e.type==='account_expense'||e.type==='account_income'){
+      if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Account-only transaction account is missing.');
       base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
     } else {
@@ -450,6 +457,7 @@ function saveState(user, input) {
     for(const a of clean.accounts) q.insertAccount.run(user.user_id,a.id,a.name,a.type,a.currency,a.openingBalance,a.createdAt);
     for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
     q.deleteOrphanAttachments.run(user.user_id,user.user_id);
+    bankFeed.reopenOrphans(user.user_id);
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);
@@ -576,6 +584,34 @@ export const server=http.createServer(async(req,res)=>{
         }catch(error){db.exec('ROLLBACK');throw error;}
       }
       return fail(res,405,'Recurring schedule action not supported.');
+    }
+    if(url.pathname==='/api/bank-feed'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return; return json(res,200,bankFeed.list(a.user_id));
+    }
+    if(url.pathname==='/api/bank-feed/import'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const body=await bodyJson(req,12_000_000); return json(res,200,bankFeed.importRows(a.user_id,body));
+    }
+    if(url.pathname==='/api/bank-rules'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const body=await bodyJson(req); return json(res,201,{rule:bankFeed.createRule(a.user_id,body)});
+    }
+    if(url.pathname.startsWith('/api/bank-rules/')&&req.method==='DELETE'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/bank-rules/'.length)); return json(res,200,bankFeed.deleteRule(a.user_id,id));
+    }
+    if(url.pathname.startsWith('/api/bank-feed/')){
+      const a=requireAuth(req,res,{csrf:req.method!=='GET'}); if(!a)return;
+      const parts=url.pathname.slice('/api/bank-feed/'.length).split('/').filter(Boolean);
+      const id=decodeURIComponent(parts[0]||''),action=parts[1]||'';
+      if(action==='post'&&req.method==='POST'){
+        const body=await bodyJson(req),result=bankFeed.post(a.user_id,id,body);
+        return json(res,200,{...result,state:loadState(a.user_id)});
+      }
+      if(action==='ignore'&&req.method==='POST')return json(res,200,{item:bankFeed.ignore(a.user_id,id)});
+      if(action==='reopen'&&req.method==='POST')return json(res,200,{item:bankFeed.reopen(a.user_id,id)});
+      if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));
+      return fail(res,405,'Bank feed action not supported.');
     }
     if(url.pathname==='/api/state'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,loadState(a.user_id));

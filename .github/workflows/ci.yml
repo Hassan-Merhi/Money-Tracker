@@ -19,6 +19,7 @@ jobs:
       - name: Check browser JavaScript syntax
         run: |
           node --check app.js
+          node --check server.mjs
           node --check service-worker.js
           node --check lib/reports-ui.js
           node --check lib/reporting.js
@@ -30,3 +31,9 @@ jobs:
           node --check block-e-recurring.js
           node --check lib/recurring-rule-form.js
           node --check lib/recurring.js
+          node --check block-f-bank-feed.js
+          node --check lib/bank-feed.js
+          node --check lib/bank-server.js
+          node --check block-g-insights.js
+          node --check lib/insights.js
+          node --check lib/insights-server.js

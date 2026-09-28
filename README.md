@@ -92,6 +92,7 @@ Report filters apply to activity and exported transaction rows. Current outstand
 - Review-before-post workflow: imported rows never change balances until explicitly posted
 - Account-only **expense** and **income** ledger entries for transactions that do not involve another person
 - Review actions can instead classify a row as paid for someone, repayment received, borrowed money, paid someone back, or a same-currency transfer between your own accounts
+- If both sides of the same transfer are imported from separate account statements, the second reviewed side links to the existing transfer instead of creating a duplicate ledger movement
 - Merchant/description rules can remember classifications for future imports
 - Ignore, reopen, and delete controls for unposted feed rows
 - Atomic posting updates the ledger revision and feed status together
@@ -124,7 +125,7 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The automated suite covers core ledger math, account-only expense/income movements, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase and bank-entry migration, protected import previews, bank CSV parsing and normalization, feed deduplication, rules, atomic posting, direction/revision safety, reference cleanup, recurrence date math, recurring schedule isolation, atomic occurrence posting, duplicate-post rejection, skipping, pausing, and recurring reference protection.
+The automated suite covers core ledger math, account-only expense/income movements, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase and bank-entry migration, protected import previews, bank CSV parsing and normalization, feed deduplication, rules, atomic posting, two-sided transfer deduplication, direction/revision safety, reference cleanup, recurrence date math, recurring schedule isolation, atomic occurrence posting, duplicate-post rejection, skipping, pausing, and recurring reference protection.
 
 ## Render
 

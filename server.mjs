@@ -293,7 +293,8 @@ function validateState(input, user) {
       if(!aSeen.has(base.fromAccountId)||!aSeen.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
       base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
     } else if(e.type==='split_paid_for_people'){
-      if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Split transaction account is missing.');
+      if(!(amount>0)) throw new Error('Split transaction amount is missing.');
+      if(base.accountId&&!aSeen.has(base.accountId)) throw new Error('Split transaction account is invalid.');
       const source=Array.isArray(e.splits)?e.splits:[];
       if(source.length<2||source.length>100) throw new Error('A split needs at least two people.');
       const seenPeople=new Set(); let splitTotal=0;
@@ -304,7 +305,10 @@ function validateState(input, user) {
         return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
       });
       if(Math.abs(splitTotal-amount)>0.005) throw new Error('Split amounts must equal the transaction total.');
-      base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+      base.personId=null;
+      if(base.accountId)base.currency=accountById.get(base.accountId).currency;
+      else if(!validCurrency(base.currency))throw new Error('Split transaction currency is missing.');
+      base.signedAmount=null;
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
     } else if(e.type==='account_expense'||e.type==='account_income'){
       if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Account-only transaction account is missing.');
@@ -317,8 +321,12 @@ function validateState(input, user) {
         base.accountId=null;
         if(!(amount>0)||base.signedAmount===null||Math.abs(base.signedAmount)!==amount||!validCurrency(base.currency)) throw new Error('Invalid balance adjustment.');
       } else {
-        if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Transaction account is missing.');
-        base.currency=accountById.get(base.accountId).currency; base.signedAmount=null;
+        if(!(amount>0)) throw new Error('Transaction amount is missing.');
+        if(base.accountId){
+          if(!aSeen.has(base.accountId)) throw new Error('Transaction account is invalid.');
+          base.currency=accountById.get(base.accountId).currency;
+        } else if(!validCurrency(base.currency)) throw new Error('Transaction currency is missing.');
+        base.signedAmount=null;
       }
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
       base.categoryId=null;
@@ -370,7 +378,8 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
     if(!accountById.has(base.fromAccountId)||!accountById.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Choose two different accounts and valid transfer amounts.');
     base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
   } else if(raw.type==='split_paid_for_people'){
-    if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring split.');
+    if(!(amount>0)) throw new Error('Choose an amount for the recurring split.');
+    if(base.accountId&&!accountById.has(base.accountId)) throw new Error('Choose a valid account or leave it blank.');
     const source=Array.isArray(raw.splits)?raw.splits:[];
     if(source.length<2||source.length>100) throw new Error('A recurring split needs at least two people.');
     const seen=new Set(); let total=0;
@@ -381,7 +390,10 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
       return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
     });
     if(Math.abs(total-amount)>0.005) throw new Error('Recurring split amounts must equal the total.');
-    base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+    base.personId=null;
+    base.currency=base.accountId?accountById.get(base.accountId).currency:String(base.currency||defaultCurrency).toUpperCase();
+    if(!validCurrency(base.currency))throw new Error('Choose a valid currency.');
+    base.signedAmount=null;
     base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
   } else if(raw.type==='account_expense'||raw.type==='account_income'){
     if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
@@ -395,8 +407,15 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
       base.currency=String(base.currency||defaultCurrency).toUpperCase();
       if(!(amount>0)||base.signedAmount===null||Math.abs(base.signedAmount)!==amount||!validCurrency(base.currency)) throw new Error('Invalid recurring balance adjustment.');
     } else {
-      if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
-      base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+      if(!(amount>0)) throw new Error('Choose an amount for the recurring transaction.');
+      if(base.accountId){
+        if(!accountById.has(base.accountId)) throw new Error('Choose a valid account or leave it blank.');
+        base.currency=accountById.get(base.accountId).currency;
+      }else{
+        base.currency=String(base.currency||defaultCurrency).toUpperCase();
+        if(!validCurrency(base.currency))throw new Error('Choose a valid currency.');
+      }
+      base.signedAmount=null;
     }
     base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
   }

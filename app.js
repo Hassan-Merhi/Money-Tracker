@@ -4,6 +4,8 @@ import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prett
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
 import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
 import { renderBankFeedPage } from './block-f-bank-feed.js';
+import { renderInsightsPage, mountBudgetDashboardWidget } from './block-g-insights.js';
+import { categoryOptionsForType } from './lib/insights.js';
 
 let state = null;
 let user = null;
@@ -52,11 +54,11 @@ function showToast(message) {
 }
 
 function iconFor(page) {
-  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',bank:'🏦',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
+  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',bank:'🏦',insights:'◫',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
 }
 
 function titleFor(page) {
-  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',bank:'Bank Feed',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
+  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',bank:'Bank Feed',insights:'Insights & Budgets',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
 }
 
 function subFor(page) {
@@ -66,6 +68,7 @@ function subFor(page) {
     accounts:'Bank accounts, cash, cards and transfers between them.',
     transactions:'Every movement that affects a person or one of your accounts.',
     bank:'Import statements, auto-classify rows, and review them before posting.',
+    insights:'Categorize personal cash flow, set monthly budgets, and see spending trends.',
     scheduled:'Recurring transactions, due dates and reminders you review before posting.',
     reports:'Analyze balances and create Excel workbooks and polished PDF reports.',
     settings:'Account, security, currency defaults and backup controls.',
@@ -79,7 +82,7 @@ function render() {
     <div class="layout">
       <aside class="sidebar">
         <div class="brand"><div class="brand-mark">M</div><div><h1>${escapeHtml(state.settings.displayName || 'My Ledger')}</h1><small>Money owed tracker</small></div></div>
-        <nav class="nav">${['dashboard','people','accounts','transactions','bank','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <nav class="nav">${['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
         <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server ledger · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
@@ -90,7 +93,7 @@ function render() {
         <main class="main" id="main"></main>
       </section>
       <button class="mobile-fab" id="mobileQuickEntry" aria-label="Quick add transaction">＋</button>
-      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','bank','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
@@ -105,6 +108,7 @@ function render() {
   else if (route.page === 'accounts') renderAccounts(main);
   else if (route.page === 'transactions') renderTransactions(main);
   else if (route.page === 'bank') renderBankFeedPage(main,state,{showToast,replaceState(next){state=next;render();}});
+  else if (route.page === 'insights') renderInsightsPage(main,state,route,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
   else if (route.page === 'scheduled') renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
   else if (route.page === 'reports') renderReports(main,state,route,{money,escapeHtml,today});
   else if (route.page === 'settings') renderSettings(main);
@@ -151,8 +155,10 @@ function renderDashboard(main) {
         </div>
       </section>
       <section class="card panel"><div id="recurringDashboardWidget"><div class="muted">Loading scheduled reminders…</div></div></section>
+      <section class="card panel"><div id="budgetDashboardWidget"><div class="muted">Loading monthly budgets…</div></div></section>
     </div>`;
   mountRecurringDashboardWidget(main.querySelector('#recurringDashboardWidget'),state,{showToast,replaceState(next){state=next;render();}});
+  mountBudgetDashboardWidget(main.querySelector('#budgetDashboardWidget'),state);
   main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
@@ -221,13 +227,14 @@ function openAccountDetail(accountId){
 }
 
 function renderTransactions(main) {
-  const type=route.params.get('type')||''; const person=route.params.get('person')||''; const account=route.params.get('account')||'';
+  const type=route.params.get('type')||''; const person=route.params.get('person')||''; const account=route.params.get('account')||''; const category=route.params.get('category')||'';
   let entries=[...state.entries].sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
   if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>entryTouchesPerson(e,person)); if(account) entries=entries.filter(e=>e.accountId===account||e.fromAccountId===account||e.toAccountId===account);
-  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All types</option>${entryTypeOptions(type)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class="select" id="filterAccount"><option value="">All accounts</option>${state.accounts.map(a=>`<option value="${a.id}" ${account===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add transaction</button></div>
+  if(category) entries=entries.filter(e=>category==='uncategorized'?(['account_expense','account_income'].includes(e.type)&&!e.categoryId):e.categoryId===category);
+  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All types</option>${entryTypeOptions(type)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class="select" id="filterAccount"><option value="">All accounts</option>${state.accounts.map(a=>`<option value="${a.id}" ${account===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}</select><select class="select" id="filterCategory"><option value="">All categories</option><option value="uncategorized" ${category==='uncategorized'?'selected':''}>Uncategorized</option>${(state.categories||[]).map(c=>`<option value="${c.id}" ${category===c.id?'selected':''}>${escapeHtml((c.icon?c.icon+' ':'')+c.name)}${c.archived?' (archived)':''}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add transaction</button></div>
   <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching transactions</strong>Try another filter or add a new transaction.</div>'}</section>`;
-  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value,a=main.querySelector('#filterAccount').value;if(t)q.set('type',t);if(p)q.set('person',p);if(a)q.set('account',a);location.hash=`#transactions${q.toString()?'?'+q:''}`};
-  ['#filterType','#filterPerson','#filterAccount'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
+  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value,a=main.querySelector('#filterAccount').value,g=main.querySelector('#filterCategory').value;if(t)q.set('type',t);if(p)q.set('person',p);if(a)q.set('account',a);if(g)q.set('category',g);location.hash=`#transactions${q.toString()?'?'+q:''}`};
+  ['#filterType','#filterPerson','#filterAccount','#filterCategory'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
   main.querySelector('#addTxn')?.addEventListener('click',()=>openTransactionModal());
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));
@@ -239,7 +246,8 @@ function transactionTable(entries,{compact=false}={}){
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
     const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
-    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
+    const category=state.categories?.find(x=>x.id===e.categoryId);
+    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderSettings(main) {
@@ -248,7 +256,7 @@ function renderSettings(main) {
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Sessions use an HttpOnly cookie; ledger writes require a CSRF token and are isolated to your account.</p><button class="btn" id="settingsLogout">Sign out on this device</button></section>
     <section class="card settings-card"><h3>Backup & exports</h3><p class="muted">JSON backup remains available for recovery. Use Reports & Exports for formatted Excel workbooks and PDF reports.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export backup</button><button class="btn" id="importBackup">↑ Import backup</button><button class="btn" id="openReports">Open reports</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
     <section class="card settings-card"><h3>Ledger rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
-    <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts, transactions, attachments, and Bank Feed rows/rules from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all ledger data</button></section>
+    <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts, transactions, attachments, recurring schedules, Bank Feed rows/rules, categories, and budgets from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all ledger data</button></section>
   </div>`;
   main.querySelector('#saveSettings')?.addEventListener('click',()=>{state.settings.displayName=main.querySelector('#settingName').value.trim()||'My Ledger';state.settings.defaultCurrency=main.querySelector('#settingCurrency').value;persist('Settings saved.');});
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
@@ -256,7 +264,7 @@ function renderSettings(main) {
   main.querySelector('#importBackup')?.addEventListener('click',()=>main.querySelector('#backupFile').click());
   main.querySelector('#openReports')?.addEventListener('click',()=>{location.hash='#reports';});
   main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(!Array.isArray(parsed.people)||!Array.isArray(parsed.accounts)||!Array.isArray(parsed.entries))throw new Error();state={...state,settings:{...state.settings,...parsed.settings},people:parsed.people,accounts:parsed.accounts,entries:parsed.entries};await persist('Backup imported.');}catch(error){showToast(error.message||'That file is not a valid ledger backup.');}});
-  main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all people, accounts and transactions?')){try{state=await resetState();showToast('Ledger data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset ledger.');}}});
+  main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all ledger data, schedules, Bank Feed data, categories, and budgets?')){try{state=await resetState();showToast('Ledger data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset ledger.');}}});
 }
 
 function openPersonModal(existing=null){
@@ -295,7 +303,9 @@ function openQuickMenu(){
     ['received_from_person','💵','Got paid back','They owe you less'],
     [SPLIT_ENTRY_TYPE,'👥','Split a purchase','One payment, multiple people'],
     ['borrowed_from_person','🤝','Borrowed money','You owe them more'],
-    ['paid_to_person','✅','Paid someone back','You owe them less']
+    ['paid_to_person','✅','Paid someone back','You owe them less'],
+    ['account_expense','🧾','Personal expense','Track spending and budgets'],
+    ['account_income','＋','Account income','Track personal income']
   ];
   openModal('Quick add',`<div class="quick-menu">${actions.map(([type,icon,title,note])=>`<button class="quick" data-fast-type="${type}"><span class="qicon">${icon}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}<button class="quick" data-fast-transfer><span class="qicon">⇄</span><strong>Transfer money</strong><small>Between your accounts</small></button></div><div class="shortcut-hint">Keyboard: <kbd>N</kbd> quick add · <kbd>T</kbd> transfer</div>`,null,false);
   document.querySelectorAll('[data-fast-type]').forEach(button=>button.addEventListener('click',()=>{const type=button.dataset.fastType;closeModal();openTransactionModal(null,{type,personId:recent.personId,accountId:recent.accountId});}));
@@ -337,6 +347,7 @@ function openTransactionModal(existing=null,prefill={}){
     <div class="field" id="currencyField"><label>Currency</label><select class="select" name="currency" id="txnCurrency">${currencyOptions(inferredCurrency)}</select></div>
     <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||today()}"></div>
     <div class="field"><label>Merchant / source</label><input class="input" name="merchant" maxlength="100" value="${escapeHtml(existing?.merchant||'')}" placeholder="e.g. Amazon" autocomplete="off"></div>
+    <div class="field" id="txnCategoryField"><label>Category</label><select class="select" name="categoryId" id="txnCategory"></select></div>
     <div class="field span-2"><label>Notes / details</label><textarea class="textarea compact-textarea" name="description" maxlength="500" placeholder="e.g. Headphones, order #123, delivery details…">${escapeHtml(existing?.description||'')}</textarea></div>
     <div class="field span-2" id="splitSection" hidden>
       <div class="split-head"><div><label>Split between people</label><div class="muted tiny">The account is charged once; each person gets only their allocated amount.</div></div><div class="page-actions"><button class="btn small" type="button" id="equalSplit">Equal split</button><button class="btn small" type="button" id="addSplitRow">＋ Person</button></div></div>
@@ -348,7 +359,8 @@ function openTransactionModal(existing=null,prefill={}){
     ${existing?`<div class="field span-2"><label>Attached files</label><div id="attachmentPanel" class="attachment-panel"></div></div>`:''}
   </form>`,()=>document.querySelector('#txnForm').requestSubmit());
 
-  const form=document.querySelector('#txnForm'),typeEl=form.querySelector('#txnType'),personEl=form.querySelector('#txnPerson'),accEl=form.querySelector('#txnAccount'),curEl=form.querySelector('#txnCurrency'),amountEl=form.querySelector('#txnAmount'),splitSection=form.querySelector('#splitSection'),splitRows=form.querySelector('#splitRows');
+  const form=document.querySelector('#txnForm'),typeEl=form.querySelector('#txnType'),personEl=form.querySelector('#txnPerson'),accEl=form.querySelector('#txnAccount'),curEl=form.querySelector('#txnCurrency'),amountEl=form.querySelector('#txnAmount'),categoryEl=form.querySelector('#txnCategory'),splitSection=form.querySelector('#splitSection'),splitRows=form.querySelector('#splitRows');
+  const fillCategories=()=>{const t=typeEl.value,current=categoryEl.value||existing?.categoryId||'';const choices=categoryOptionsForType(state.categories||[],t);const archived=(state.categories||[]).find(x=>x.id===current&&x.archived);categoryEl.innerHTML='<option value="">Uncategorized</option>'+choices.map(cat=>`<option value="${cat.id}" ${cat.id===current?'selected':''}>${escapeHtml((cat.icon?cat.icon+' ':'')+cat.name)}</option>`).join('')+(archived?`<option value="${archived.id}" selected>${escapeHtml((archived.icon?archived.icon+' ':'')+archived.name)} (archived)</option>`:'');};
   const readSplits=()=>[...splitRows.querySelectorAll('[data-split-row]')].map(row=>({personId:row.querySelector('[data-split-person]').value,amount:Number(row.querySelector('[data-split-amount]').value||0),note:row.querySelector('[data-split-note]').value.trim()}));
   const updateSplitTotal=()=>{const rows=readSplits(),sum=rows.reduce((n,row)=>n+Number(row.amount||0),0),total=Number(amountEl.value||0),diff=total-sum;form.querySelector('#splitTotal').innerHTML=`Allocated <strong>${sum.toFixed(2)}</strong> of <strong>${total.toFixed(2)}</strong> · <span class="${Math.abs(diff)<=0.005?'amount-pos':'amount-neg'}">${Math.abs(diff)<=0.005?'Balanced':`${diff>0?'Remaining':'Over'} ${Math.abs(diff).toFixed(2)}`}</span>`;};
   const bindSplitRows=()=>{splitRows.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',updateSplitTotal));splitRows.querySelectorAll('[data-remove-split]').forEach(button=>button.addEventListener('click',()=>{const draft=readSplits();draft.splice(Number(button.dataset.removeSplit),1);splitRows.innerHTML=draft.map(splitRowMarkup).join('');bindSplitRows();updateSplitTotal();}));};
@@ -357,8 +369,8 @@ function openTransactionModal(existing=null,prefill={}){
   amountEl.addEventListener('input',updateSplitTotal);
   bindSplitRows();
 
-  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
-  typeEl.addEventListener('change',sync);accEl.addEventListener('change',sync);sync();
+  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
+  typeEl.addEventListener('change',()=>{fillCategories();sync();});accEl.addEventListener('change',sync);fillCategories();sync();
   const filesEl=form.querySelector('#txnFiles');filesEl.addEventListener('change',()=>{const files=[...(filesEl.files||[])];form.querySelector('#fileSelection').textContent=files.length?files.map(file=>`${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`).join(' · '):'JPG, PNG, WebP, GIF, PDF or text · max 8 MB each';});
   if(existing) refreshAttachmentPanel(existing.id);
 
@@ -372,7 +384,7 @@ function openTransactionModal(existing=null,prefill={}){
     const splits=split?readSplits():[];
     if(split){const error=validateSplit(splits,amount);if(error){showToast(error);return}}
     const acc=state.accounts.find(a=>a.id===fd.get('accountId'));
-    const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
     if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
     if(existing)Object.assign(existing,item);else state.entries.push(item);
     rememberUsed((split||accountOnly)?'':person,item.accountId,t);

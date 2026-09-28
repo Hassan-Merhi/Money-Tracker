@@ -1,4 +1,4 @@
-# Money Tracker — Secure Ledger, Daily-Use App, Reporting & Recurring Reminders
+# Money Tracker — Secure Ledger, Bank Feed, Reporting & Recurring Reminders
 
 Money Tracker is a server-backed personal ledger for tracking money people owe you, money you owe people, bank/cash balances, transfers, shared purchases, receipts, notes, statements, and exports.
 
@@ -45,7 +45,7 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 - Missing people/accounts can be created from valid transaction rows
 - Matching by person name and account name + currency
 - Obvious duplicate transaction skipping
-- Re-import compatibility with Block D transaction exports, including `Split Details`
+- Re-import compatibility with Block D transaction exports, including `Split Details` and Block F account expense/income entries
 - CSRF protection, optimistic revision checks, 8 MB upload limit, ZIP expansion limits, row/column limits, and malformed-workbook rejection
 
 ## Block D — Reports & exports
@@ -80,12 +80,35 @@ Report filters apply to activity and exported transaction rows. Current outstand
 - Recurring modules included in the PWA offline shell
 
 
+## Block F — Bank statement ingestion & expense feed
+
+- Dedicated **Bank Feed** page with a review inbox separate from posted ledger transactions
+- CSV, semicolon-delimited CSV, `.xlsx`, and `.xlsm` statement ingestion
+- Automatic statement column suggestions with manual mapping for date, description, merchant, amount, debit, credit, transaction ID, and currency
+- Configurable day/month vs month/day parsing and signed-amount direction
+- Separate debit/credit-column support
+- Statement rows are normalized and validated before reaching the server
+- User-scoped, server-persisted feed rows with deterministic duplicate detection, so re-importing the same statement safely skips duplicates
+- Review-before-post workflow: imported rows never change balances until explicitly posted
+- Account-only **expense** and **income** ledger entries for transactions that do not involve another person
+- Review actions can instead classify a row as paid for someone, repayment received, borrowed money, paid someone back, or a same-currency transfer between your own accounts
+- Merchant/description rules can remember classifications for future imports
+- Ignore, reopen, and delete controls for unposted feed rows
+- Atomic posting updates the ledger revision and feed status together
+- Direction validation prevents posting money-in rows as expenses or money-out rows as income/repayments
+- Stale-tab revision checks, CSRF protection, per-user feed/rule isolation, and rule/reference cleanup
+- Deleting a posted ledger entry reopens its feed item; deleting referenced accounts cleans unusable unposted rows/rules
+- Bank-imported expenses participate in account balances, transaction editing/filtering, exports, re-imports, and top-merchant reports
+- Block F modules are included in the PWA offline shell
+
 ## Ledger rules
 
 - Positive personal balance: they owe you
 - Negative personal balance: you owe them
 - Account balances start at opening balance and then move through ledger transactions
 - Transfers affect accounts only, never a person's balance
+- Account expenses reduce the linked account without changing a person's balance
+- Account income increases the linked account without changing a person's balance
 - A split purchase reduces the source account by the transaction total exactly once
 
 ## Run locally
@@ -101,12 +124,12 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The automated suite covers core ledger math, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase migration, protected import previews, recurrence date math, recurring schedule isolation, atomic occurrence posting, duplicate-post rejection, skipping, pausing, and recurring reference protection.
+The automated suite covers core ledger math, account-only expense/income movements, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase and bank-entry migration, protected import previews, bank CSV parsing and normalization, feed deduplication, rules, atomic posting, direction/revision safety, reference cleanup, recurrence date math, recurring schedule isolation, atomic occurrence posting, duplicate-post rejection, skipping, pausing, and recurring reference protection.
 
 ## Render
 
 `render.yaml` defines a Node web service with a persistent disk mounted at `/var/data` for the SQLite database. The health endpoint is `/api/health`.
 
-## Still outside Blocks A/B/C/D/E
+## Still outside Blocks A/B/C/D/E/F
 
-Automatic bank/expense ingestion remains a separate future block.
+Live bank-provider connections (OAuth/open-banking APIs), background provider syncing, and provider-specific credential management are outside the current scope. Block F supports statement-file ingestion with automatic mapping, deduplication, rules, and review-before-post.

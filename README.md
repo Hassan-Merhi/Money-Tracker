@@ -90,7 +90,7 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The full suite now contains 19 tests: the original 14 ledger/security tests plus Block D coverage for reporting calculations, date filtering, workbook structure, XLSX generation, and PDF generation.
+The full suite now contains 27 tests: the original 14 ledger/security tests, 5 Block D reporting/export tests, and 8 Block C import/parser/security tests.
 
 ## Render
 

@@ -32,6 +32,25 @@ Block A is the secure core of the money-transfer / money-owed tracker. It tracks
 - Automated ledger and server integration tests
 - Render deployment blueprint
 
+## Block C — Imports & Migration
+
+Block C adds a safe migration path for existing money records without duplicating Block D's reporting/export features:
+
+- Excel `.xlsx` / `.xlsm` upload with server-side workbook parsing
+- CSV upload directly in the browser
+- Import-template workbook generated from the existing Block D XLSX engine
+- Preview of workbook sheets and sample rows before any ledger write
+- Automatic column suggestions with manual mapping controls
+- People + opening-balance imports
+- Account + opening-balance imports
+- Transaction-history imports, including account transfers and manual person adjustments
+- Automatic creation of missing people/accounts when a valid transaction row needs them
+- Matching by person name and account name + currency
+- Obvious duplicate transaction skipping
+- Optimistic revision protection remains active when the import is finally saved
+- CSRF-protected XLSX preview endpoint
+- 8 MB upload cap, row/column limits, ZIP expansion limits, and malformed-workbook rejection
+
 ## Block D — Reports & Exports
 
 Block D adds a dedicated **Reports & Exports** workspace without changing the secure ledger model:
@@ -79,4 +98,4 @@ The full suite now contains 19 tests: the original 14 ledger/security tests plus
 
 ## Outside this branch
 
-Block D intentionally does not implement spreadsheet import, receipt/attachment capture, recurring reminders, or automatic bank/expense ingestion. Those features can evolve independently on their own build branches while this reporting block remains mergeable against the secure core.
+Spreadsheet import is now implemented in Block C. Receipt/attachment capture, recurring reminders, and automatic bank/expense ingestion remain outside Blocks C/D and can evolve independently.

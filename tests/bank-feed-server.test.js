@@ -79,6 +79,18 @@ test('supports ignore and reopen without changing the ledger revision',async()=>
   const after=(await request('/api/state')).data;assert.equal(after.version,before);
 });
 
+test('deleting an account cleans unposted feed rows and rules that reference it',async()=>{
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_cash',sourceName:'cash.csv',rows:[{date:'2026-09-30',description:'Cash row',signedAmount:-5,currency:'USD',externalId:'cash-orphan'}]}});
+  assert.equal(imported.res.status,200);
+  const rule=await request('/api/bank-rules',{method:'POST',body:{matchText:'move cash',classification:'transfer',targetAccountId:'account_cash'}});
+  assert.equal(rule.res.status,201);
+  const saved=await request('/api/state',{method:'PUT',body:{...state,accounts:state.accounts.filter(a=>a.id!=='account_cash')}});
+  assert.equal(saved.res.status,200);state=saved.data;
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.some(item=>item.externalId==='cash-orphan'),false);
+  assert.equal(feed.rules.some(item=>item.targetAccountId==='account_cash'),false);
+});
+
 test('bank feed is isolated per user',async()=>{
   const r=await request('/api/auth/register',{method:'POST',body:{email:`other-bank-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'},cookie:'',csrf:''});
   const otherCookie=r.cookie,otherCsrf=r.data.csrfToken;

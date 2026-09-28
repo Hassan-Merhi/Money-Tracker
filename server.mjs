@@ -505,13 +505,18 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/auth/register'&&req.method==='POST'){
       if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
-      if(Number(q.userCount.get()?.count||0)>0)return fail(res,403,'Account creation is locked. Sign in and add another account from Settings.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||'');
       if(!/^\S+@\S+\.\S+$/.test(email))return fail(res,400,'Enter a valid email.');
       if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
-      if(q.userByEmail.get(email))return fail(res,409,'An account with that email already exists.');
-      const id=`user_${randomUUID()}`, created=nowIso(), display='Money Tracker'; q.createUser.run(id,email,display,hashPassword(password),'USD',1,created);
-      const s=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
+      const id=`user_${randomUUID()}`, created=nowIso(), display='Money Tracker', passwordHash=hashPassword(password);
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        if(Number(q.userCount.get()?.count||0)>0)throw Object.assign(new Error('Account creation is locked. Sign in and add another account from Settings.'),{status:403});
+        if(q.userByEmail.get(email))throw Object.assign(new Error('An account with that email already exists.'),{status:409});
+        q.createUser.run(id,email,display,passwordHash,'USD',1,created);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      const session=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:session.csrf}, {'Set-Cookie':cookie(session.token)});
     }
     if(url.pathname==='/api/auth/login'&&req.method==='POST'){
       if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');

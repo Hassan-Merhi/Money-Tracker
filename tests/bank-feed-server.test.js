@@ -79,6 +79,30 @@ test('supports ignore and reopen without changing the ledger revision',async()=>
   const after=(await request('/api/state')).data;assert.equal(after.version,before);
 });
 
+test('posting both statement sides of one transfer creates only one ledger movement',async()=>{
+  const beforeBalances=accountBalances(state.entries,state.accounts),beforeEntries=state.entries.length;
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'bank-transfer.csv',rows:[{date:'2026-09-30',description:'Transfer to cash',signedAmount:-100,currency:'USD',externalId:'transfer-out'}]}});
+  assert.equal(imported.res.status,200);
+  const importedOther=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_cash',sourceName:'cash-transfer.csv',rows:[{date:'2026-09-30',description:'Transfer from bank',signedAmount:100,currency:'USD',externalId:'transfer-in'}]}});
+  assert.equal(importedOther.res.status,200);
+  let feed=(await request('/api/bank-feed')).data;
+  const outgoing=feed.items.find(i=>i.externalId==='transfer-out'),incoming=feed.items.find(i=>i.externalId==='transfer-in');
+  const first=await request(`/api/bank-feed/${outgoing.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_cash'}});
+  assert.equal(first.res.status,200);assert.equal(first.data.linkedExistingTransfer,false);state=first.data.state;
+  assert.equal(state.entries.length,beforeEntries+1);
+  assert.equal(accountBalances(state.entries,state.accounts).account_bank,beforeBalances.account_bank-100);
+  assert.equal(accountBalances(state.entries,state.accounts).account_cash,beforeBalances.account_cash+100);
+  const revisionAfterFirst=state.version,entriesAfterFirst=state.entries.length;
+  const second=await request(`/api/bank-feed/${incoming.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_bank'}});
+  assert.equal(second.res.status,200);assert.equal(second.data.linkedExistingTransfer,true);state=second.data.state;
+  assert.equal(state.version,revisionAfterFirst);
+  assert.equal(state.entries.length,entriesAfterFirst);
+  assert.equal(second.data.entryId,first.data.entryId);
+  feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(i=>i.id===outgoing.id).postedEntryId,first.data.entryId);
+  assert.equal(feed.items.find(i=>i.id===incoming.id).postedEntryId,first.data.entryId);
+});
+
 test('deleting an account cleans unposted feed rows and rules that reference it',async()=>{
   const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_cash',sourceName:'cash.csv',rows:[{date:'2026-09-30',description:'Cash row',signedAmount:-5,currency:'USD',externalId:'cash-orphan'}]}});
   assert.equal(imported.res.status,200);

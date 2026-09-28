@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.5.1'
+          node-version: '22.13.1'
       - name: Run test suite
         run: npm test
       - name: Check browser JavaScript syntax

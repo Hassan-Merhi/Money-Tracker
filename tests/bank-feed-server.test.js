@@ -43,11 +43,11 @@ test('imports statement rows and skips duplicate re-imports',async()=>{
 test('posts an expense atomically into the ledger and updates account balance',async()=>{
   const feed=(await request('/api/bank-feed')).data;
   const expense=feed.items.find(i=>i.externalId==='tx-1');
-  const posted=await request(`/api/bank-feed/${expense.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'expense',note:'Personal Amazon order',saveRule:true,ruleMatchText:'amazon'}});
+  const posted=await request(`/api/bank-feed/${expense.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'expense',categoryId:'category_shopping',note:'Personal Amazon order',saveRule:true,ruleMatchText:'amazon'}});
   assert.equal(posted.res.status,200);state=posted.data.state;
-  const entry=state.entries.find(e=>e.id===posted.data.entryId);assert.equal(entry.type,'account_expense');assert.equal(entry.accountId,'account_bank');assert.equal(entry.amount,25);
+  const entry=state.entries.find(e=>e.id===posted.data.entryId);assert.equal(entry.type,'account_expense');assert.equal(entry.accountId,'account_bank');assert.equal(entry.amount,25);assert.equal(entry.categoryId,'category_shopping');
   assert.equal(accountBalances(state.entries,state.accounts).account_bank,975);
-  assert.equal(posted.data.item.status,'posted');assert.equal(posted.data.rules[0].matchText,'amazon');
+  assert.equal(posted.data.item.status,'posted');assert.equal(posted.data.rules[0].matchText,'amazon');assert.equal(posted.data.rules[0].categoryId,'category_shopping');
 });
 
 test('posting is stale-safe and direction-safe',async()=>{
@@ -65,7 +65,7 @@ test('posting is stale-safe and direction-safe',async()=>{
 test('saved rules auto-classify future matching rows and person posting works',async()=>{
   const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'next.csv',rows:[{date:'2026-09-29',description:'Amazon Marketplace',merchant:'Amazon',signedAmount:-40,currency:'USD',externalId:'tx-3'}]}});
   assert.equal(imported.res.status,200);
-  const item=imported.data.items.find(i=>i.externalId==='tx-3');assert.equal(item.suggestedType,'expense');
+  const item=imported.data.items.find(i=>i.externalId==='tx-3');assert.equal(item.suggestedType,'expense');assert.equal(item.suggestedCategoryId,'category_shopping');
   const post=await request(`/api/bank-feed/${item.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'paid_for_person',personId:'person_alice',saveRule:true,ruleMatchText:'marketplace'}});
   assert.equal(post.res.status,200);state=post.data.state;
   const entry=state.entries.find(e=>e.id===post.data.entryId);assert.equal(entry.type,'paid_for_person');assert.equal(entry.personId,'person_alice');

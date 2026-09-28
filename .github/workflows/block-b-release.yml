@@ -1,0 +1,63 @@
+name: Block B Release Helper
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  release:
+    if: github.event.issue.title == '[Block B release bundle]' && github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unpack owner release bundle
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python - <<'PY'
+          import base64, io, os, pathlib, zipfile
+          marker = "BLOCK_B_ZIP_BASE64="
+          body = os.environ["ISSUE_BODY"]
+          if marker not in body:
+              raise SystemExit("release marker missing")
+          payload = body.split(marker, 1)[1].strip()
+          raw = base64.b64decode(payload, validate=True)
+          allowed_files = {
+              "README.md", "app.js", "manifest.webmanifest", "package.json",
+              "server.mjs", "service-worker.js", "styles.css"
+          }
+          allowed_prefixes = ("lib/", "tests/")
+          root = pathlib.Path(".").resolve()
+          with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+              for info in zf.infolist():
+                  name = info.filename
+                  if name.endswith("/"):
+                      continue
+                  if not (name in allowed_files or name.startswith(allowed_prefixes)):
+                      raise SystemExit(f"unexpected path: {name}")
+                  target = (root / name).resolve()
+                  if root not in target.parents:
+                      raise SystemExit(f"unsafe path: {name}")
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(zf.read(info))
+          PY
+      - name: Syntax and test certification
+        run: |
+          node --check app.js
+          node --check server.mjs
+          npm test
+      - name: Commit Block B
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md app.js lib manifest.webmanifest package.json server.mjs service-worker.js styles.css tests
+          git diff --cached --check
+          git commit -m "Complete Block B daily-use app"
+          git push origin HEAD:main

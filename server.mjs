@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { parseWorkbook } from './lib/xlsx-import.js';
+import { nextRecurringDate } from './lib/recurring.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -94,6 +95,25 @@ CREATE TABLE IF NOT EXISTS attachments (
   PRIMARY KEY (user_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_user_entry ON attachments(user_id, entry_id);
+CREATE TABLE IF NOT EXISTS recurring_rules (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  frequency TEXT NOT NULL,
+  interval_value INTEGER NOT NULL DEFAULT 1,
+  anchor_date TEXT NOT NULL,
+  next_due_date TEXT,
+  end_date TEXT,
+  remind_days_before INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  template_json TEXT NOT NULL,
+  last_posted_at TEXT,
+  last_occurrence_date TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is_active, next_due_date);
 `);
 const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
 if (!entryColumns.has('split_json')) db.exec("ALTER TABLE entries ADD COLUMN split_json TEXT NOT NULL DEFAULT '[]'");
@@ -128,7 +148,15 @@ const q = {
   deleteAttachment: db.prepare('DELETE FROM attachments WHERE user_id=? AND id=?'),
   deleteOrphanAttachments: db.prepare('DELETE FROM attachments WHERE user_id=? AND entry_id NOT IN (SELECT id FROM entries WHERE user_id=?)'),
   deleteAttachments: db.prepare('DELETE FROM attachments WHERE user_id=?'),
+  recurringRules: db.prepare('SELECT id,title,frequency,interval_value AS interval,anchor_date AS anchorDate,next_due_date AS nextDueDate,end_date AS endDate,remind_days_before AS remindDaysBefore,is_active AS isActive,template_json AS templateJson,last_posted_at AS lastPostedAt,last_occurrence_date AS lastOccurrenceDate,created_at AS createdAt,updated_at AS updatedAt FROM recurring_rules WHERE user_id=? ORDER BY CASE WHEN next_due_date IS NULL THEN 1 ELSE 0 END,next_due_date,title COLLATE NOCASE'),
+  recurringRuleById: db.prepare('SELECT id,title,frequency,interval_value AS interval,anchor_date AS anchorDate,next_due_date AS nextDueDate,end_date AS endDate,remind_days_before AS remindDaysBefore,is_active AS isActive,template_json AS templateJson,last_posted_at AS lastPostedAt,last_occurrence_date AS lastOccurrenceDate,created_at AS createdAt,updated_at AS updatedAt FROM recurring_rules WHERE user_id=? AND id=?'),
+  recurringCount: db.prepare('SELECT COUNT(*) AS count FROM recurring_rules WHERE user_id=?'),
+  insertRecurring: db.prepare('INSERT INTO recurring_rules(user_id,id,title,frequency,interval_value,anchor_date,next_due_date,end_date,remind_days_before,is_active,template_json,last_posted_at,last_occurrence_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'),
+  updateRecurring: db.prepare('UPDATE recurring_rules SET title=?,frequency=?,interval_value=?,anchor_date=?,next_due_date=?,end_date=?,remind_days_before=?,is_active=?,template_json=?,updated_at=? WHERE user_id=? AND id=?'),
+  deleteRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=? AND id=?'),
+  advanceRecurring: db.prepare('UPDATE recurring_rules SET next_due_date=?,is_active=?,last_posted_at=?,last_occurrence_date=?,updated_at=? WHERE user_id=? AND id=? AND next_due_date=?'),
   updateUserState: db.prepare('UPDATE users SET display_name=?, default_currency=?, revision=revision+1 WHERE id=? AND revision=?'),
+  bumpRevision: db.prepare('UPDATE users SET revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
 };
 
@@ -279,6 +307,127 @@ function validateState(input, user) {
   return {settings:{displayName,defaultCurrency},people:cleanPeople,accounts:cleanAccounts,entries:cleanEntries};
 }
 
+
+const RECURRING_TYPES = new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people']);
+const RECURRING_FREQUENCIES = new Set(['daily','weekly','monthly','yearly']);
+
+function recurringRow(row) {
+  if(!row) return null;
+  let template={}; try{template=JSON.parse(row.templateJson||'{}');}catch{}
+  const {templateJson,...rest}=row;
+  return {...rest,isActive:!!row.isActive,template};
+}
+
+function loadRecurringRules(userId) {
+  return q.recurringRules.all(userId).map(recurringRow);
+}
+
+function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
+  if(!raw || typeof raw!=='object' || !RECURRING_TYPES.has(raw.type)) throw new Error('Choose a valid recurring transaction type.');
+  const people=new Set(q.people.all(userId).map(row=>row.id));
+  const accounts=q.accounts.all(userId);
+  const accountById=new Map(accounts.map(row=>[row.id,row]));
+  const amount=finite(raw.amount);
+  const base={
+    type:raw.type,
+    personId:raw.personId||null,
+    accountId:raw.accountId||null,
+    fromAccountId:raw.fromAccountId||null,
+    toAccountId:raw.toAccountId||null,
+    amount,
+    currency:raw.currency?String(raw.currency).toUpperCase():null,
+    fromAmount:raw.fromAmount==null?null:finite(raw.fromAmount),
+    toAmount:raw.toAmount==null?null:finite(raw.toAmount),
+    signedAmount:raw.signedAmount==null?null:finite(raw.signedAmount),
+    merchant:safeStr(raw.merchant,100),
+    description:safeStr(raw.description,500),
+    splits:[]
+  };
+  if(amount===null || amount<0 || amount>1e15) throw new Error('Invalid recurring amount.');
+  if(raw.type==='account_transfer'){
+    if(!accountById.has(base.fromAccountId)||!accountById.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Choose two different accounts and valid transfer amounts.');
+    base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;
+  } else if(raw.type==='split_paid_for_people'){
+    if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring split.');
+    const source=Array.isArray(raw.splits)?raw.splits:[];
+    if(source.length<2||source.length>100) throw new Error('A recurring split needs at least two people.');
+    const seen=new Set(); let total=0;
+    base.splits=source.map(split=>{
+      const personId=String(split?.personId||''), splitAmount=finite(split?.amount);
+      if(!people.has(personId)||seen.has(personId)||!(splitAmount>0)||splitAmount>1e15) throw new Error('Invalid recurring split allocation.');
+      seen.add(personId); total+=splitAmount;
+      return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
+    });
+    if(Math.abs(total-amount)>0.005) throw new Error('Recurring split amounts must equal the total.');
+    base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+    base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
+  } else {
+    if(!people.has(base.personId)) throw new Error('Choose a person for the recurring transaction.');
+    if(raw.type==='person_adjustment'){
+      base.accountId=null;
+      base.currency=String(base.currency||defaultCurrency).toUpperCase();
+      if(!(amount>0)||base.signedAmount===null||Math.abs(base.signedAmount)!==amount||!validCurrency(base.currency)) throw new Error('Invalid recurring balance adjustment.');
+    } else {
+      if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
+      base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+    }
+    base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
+  }
+  return base;
+}
+
+function cleanRecurringRule(input,userId,defaultCurrency='USD',{existing=null}={}) {
+  if(!input || typeof input!=='object') throw new Error('Invalid recurring schedule.');
+  const id=existing?.id || (idOk(input.id,'rule')?input.id:'rule_'+randomUUID());
+  if(!idOk(id,'rule')) throw new Error('Invalid recurring schedule id.');
+  const title=safeStr(input.title,100); if(!title) throw new Error('Give this schedule a name.');
+  const frequency=String(input.frequency||'monthly');
+  const interval=Number(input.interval||1);
+  if(!RECURRING_FREQUENCIES.has(frequency)||!Number.isInteger(interval)||interval<1||interval>99) throw new Error('Choose a valid recurring frequency.');
+  const nextDueDate=input.nextDueDate==null||input.nextDueDate===''?null:String(input.nextDueDate);
+  if(nextDueDate!==null&&!validDate(nextDueDate)) throw new Error('Choose a valid next due date.');
+  const isActive=input.isActive!==false;
+  if(isActive&&!nextDueDate) throw new Error('Active schedules need a next due date.');
+  const anchorDate=String(input.anchorDate||nextDueDate||existing?.anchorDate||'');
+  if(!validDate(anchorDate)) throw new Error('Choose a valid recurrence anchor date.');
+  const endDate=input.endDate?String(input.endDate):null;
+  if(endDate&&!validDate(endDate)) throw new Error('Choose a valid end date.');
+  if(isActive&&nextDueDate&&endDate&&endDate<nextDueDate) throw new Error('End date cannot be before the next due date.');
+  const remindDaysBefore=Number(input.remindDaysBefore||0);
+  if(!Number.isInteger(remindDaysBefore)||remindDaysBefore<0||remindDaysBefore>30) throw new Error('Reminder lead time must be between 0 and 30 days.');
+  const template=cleanRecurringTemplate(input.template,userId,defaultCurrency);
+  return {id,title,frequency,interval,anchorDate,nextDueDate,endDate,remindDaysBefore,isActive,template};
+}
+
+function assertRecurringReferences(userId,cleanState) {
+  const people=new Set(cleanState.people.map(row=>row.id));
+  const accounts=new Set(cleanState.accounts.map(row=>row.id));
+  for(const rule of loadRecurringRules(userId)){
+    const t=rule.template||{};
+    const personIds=t.type==='split_paid_for_people'?(t.splits||[]).map(split=>split.personId):(t.personId?[t.personId]:[]);
+    const accountIds=[t.accountId,t.fromAccountId,t.toAccountId].filter(Boolean);
+    if(personIds.some(id=>!people.has(id))||accountIds.some(id=>!accounts.has(id))) throw new Error('A recurring schedule still uses a person or account you are trying to delete. Update or delete that schedule first.');
+  }
+}
+
+function recurringEntryFromTemplate(template,date) {
+  const stamp=nowIso();
+  return {id:'entry_'+randomUUID(),...template,date,createdAt:stamp,updatedAt:stamp};
+}
+
+function insertLedgerEntry(userId,e) {
+  q.insertEntry.run(userId,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+}
+
+function advanceRecurringRule(userId,row,occurrenceDate,{posted=false}={}) {
+  if(!row?.nextDueDate||row.nextDueDate!==occurrenceDate) throw Object.assign(new Error('This schedule already moved to another occurrence. Refresh and try again.'),{status:409});
+  const next=nextRecurringDate(occurrenceDate,row.frequency,row.interval,row.anchorDate);
+  const complete=!!row.endDate && next>row.endDate;
+  const stamp=nowIso();
+  const result=q.advanceRecurring.run(complete?null:next,complete?0:1,posted?stamp:row.lastPostedAt||null,posted?occurrenceDate:row.lastOccurrenceDate||null,stamp,userId,row.id,occurrenceDate);
+  if(Number(result.changes)!==1) throw Object.assign(new Error('This schedule changed in another tab. Refresh and try again.'),{status:409});
+}
+
 function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
   const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
@@ -291,7 +440,7 @@ function loadState(userId) {
 }
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
-  let clean; try{clean=validateState(input,user);}catch(error){throw Object.assign(error,{status:400});}
+  let clean; try{clean=validateState(input,user);assertRecurringReferences(user.user_id,clean);}catch(error){throw Object.assign(error,{status:400});}
   db.exec('BEGIN IMMEDIATE');
   try{
     const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,user.user_id,expected);
@@ -368,6 +517,65 @@ export const server=http.createServer(async(req,res)=>{
       const result=q.deleteAttachment.run(a.user_id,id);
       if(!Number(result.changes))return fail(res,404,'Attachment not found.');
       return json(res,200,{ok:true});
+    }
+
+    if(url.pathname==='/api/recurring'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return; return json(res,200,{rules:loadRecurringRules(a.user_id)});
+    }
+    if(url.pathname==='/api/recurring'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      if(Number(q.recurringCount.get(a.user_id)?.count||0)>=500)return fail(res,400,'You can keep up to 500 recurring schedules.');
+      const body=await bodyJson(req); let clean;
+      try{clean=cleanRecurringRule(body,a.user_id,a.default_currency);}catch(error){return fail(res,400,error.message);}
+      const stamp=nowIso();
+      q.insertRecurring.run(a.user_id,clean.id,clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(clean.template),null,null,stamp,stamp);
+      return json(res,201,{rule:recurringRow(q.recurringRuleById.get(a.user_id,clean.id))});
+    }
+    if(url.pathname.startsWith('/api/recurring/')){
+      const a=requireAuth(req,res,{csrf:req.method!=='GET'}); if(!a)return;
+      const parts=url.pathname.slice('/api/recurring/'.length).split('/').filter(Boolean);
+      const id=decodeURIComponent(parts[0]||''), action=parts[1]||'';
+      if(!idOk(id,'rule'))return fail(res,400,'Invalid recurring schedule.');
+      const row=q.recurringRuleById.get(a.user_id,id); if(!row)return fail(res,404,'Recurring schedule not found.');
+      if(!action&&req.method==='PUT'){
+        const body=await bodyJson(req); let clean;
+        try{clean=cleanRecurringRule({...body,id},a.user_id,a.default_currency,{existing:row});}catch(error){return fail(res,400,error.message);}
+        q.updateRecurring.run(clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(clean.template),nowIso(),a.user_id,id);
+        return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id))});
+      }
+      if(!action&&req.method==='DELETE'){
+        q.deleteRecurring.run(a.user_id,id); return json(res,200,{ok:true});
+      }
+      if(action==='post'&&req.method==='POST'){
+        const body=await bodyJson(req), expected=Number(body.expectedRevision), occurrenceDate=String(body.occurrenceDate||''), transactionDate=String(body.transactionDate||occurrenceDate);
+        if(!Number.isInteger(expected)||!validDate(occurrenceDate)||!validDate(transactionDate))return fail(res,400,'Invalid recurring post request.');
+        db.exec('BEGIN IMMEDIATE');
+        try{
+          const current=q.recurringRuleById.get(a.user_id,id);
+          if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
+          const template=cleanRecurringTemplate(JSON.parse(current.templateJson||'{}'),a.user_id,a.default_currency);
+          if(current.nextDueDate!==occurrenceDate)throw Object.assign(new Error('This occurrence was already handled. Refresh and try again.'),{status:409});
+          const bumped=q.bumpRevision.run(a.user_id,expected);
+          if(Number(bumped.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
+          const entry=recurringEntryFromTemplate(template,transactionDate); insertLedgerEntry(a.user_id,entry);
+          advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:true});
+          db.exec('COMMIT');
+          return json(res,200,{state:loadState(a.user_id),rule:recurringRow(q.recurringRuleById.get(a.user_id,id)),entryId:entry.id});
+        }catch(error){db.exec('ROLLBACK');throw error;}
+      }
+      if(action==='skip'&&req.method==='POST'){
+        const body=await bodyJson(req), occurrenceDate=String(body.occurrenceDate||'');
+        if(!validDate(occurrenceDate))return fail(res,400,'Invalid recurring occurrence.');
+        db.exec('BEGIN IMMEDIATE');
+        try{
+          const current=q.recurringRuleById.get(a.user_id,id);
+          if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
+          advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:false});
+          db.exec('COMMIT');
+          return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id))});
+        }catch(error){db.exec('ROLLBACK');throw error;}
+      }
+      return fail(res,405,'Recurring schedule action not supported.');
     }
     if(url.pathname==='/api/state'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,loadState(a.user_id));

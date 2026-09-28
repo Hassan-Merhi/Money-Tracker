@@ -77,3 +77,15 @@ test('split validation rejects duplicates and totals that do not match', () => {
   assert.match(validateSplit([{personId:'p1',amount:40},{personId:'p1',amount:60}],100),/only once/);
   assert.match(validateSplit([{personId:'p1',amount:40},{personId:'p2',amount:50}],100),/add up/);
 });
+
+
+test('account-only expenses and income change account balance without changing people',()=>{
+  const accounts=[{id:'bank',openingBalance:1000}];
+  const entries=[
+    {type:'account_expense',amount:75,accountId:'bank',currency:'USD'},
+    {type:'account_income',amount:200,accountId:'bank',currency:'USD'}
+  ];
+  assert.equal(accountDelta(entries[0],'bank'),-75);
+  assert.equal(accountDelta(entries[1],'bank'),200);
+  assert.equal(accountBalances(entries,accounts).bank,1125);
+});

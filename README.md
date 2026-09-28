@@ -47,6 +47,8 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 - Missing people can be created from valid debt transaction rows; accounts remain optional for person transactions
 - Matching by person name and account name + currency
 - Obvious duplicate transaction skipping
+- Automatic recognition of the existing `Courses.xlsx`-style workbook, including side-by-side person ledgers, Troy/UWA course ledgers, shipping, monthly spending, and the safe Cash Money section
+- Safe legacy re-imports: unchanged rows are skipped, corrected legacy rows update in place, and summary sheets such as `COURSE PAYMENTS` are ignored to prevent double-counting
 - Re-import compatibility with Block D transaction exports, including `Split Details`, Block F account expense/income entries, and Block G category names
 - CSRF protection, optimistic revision checks, 8 MB upload limit, ZIP expansion limits, row/column limits, and malformed-workbook rejection
 

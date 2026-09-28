@@ -1,4 +1,4 @@
-# Money Tracker — Block A
+# Money Tracker — Block C
 
 Block A is the secure core of the money-transfer / money-owed tracker. It tracks money people owe you, money you owe people, your bank/cash balances, transfers between accounts, repayments, transaction history, and per-person statements.
 
@@ -32,6 +32,23 @@ Block A is the secure core of the money-transfer / money-owed tracker. It tracks
 - Automated ledger and server integration tests
 - Render deployment blueprint
 
+
+## Block C — Data & Documents
+
+Block C adds a complete import/export and statement layer on top of the secure ledger:
+
+- Real Excel (.xlsx) full-ledger export with People, Accounts, Transactions, and README sheets
+- Downloadable Excel import template
+- Excel (.xlsx/.xlsm) and CSV import preview
+- Automatic column suggestions plus manual column mapping
+- Append-only reviewed imports for people/opening balances, accounts, and transactions
+- Duplicate avoidance for obvious matching people/accounts/transactions
+- Ledger summary PDF export
+- Per-person, per-currency PDF statements with running balances
+- Authenticated export endpoints and CSRF-protected spreadsheet preview
+- File-size and workbook expansion limits for safer imports
+- No third-party runtime packages; XLSX/PDF generation uses Node built-ins
+
 ## Ledger rules
 
 Personal balances use one sign convention everywhere:
@@ -54,7 +71,7 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The current Block A suite contains 14 tests covering ledger behavior, registration, CSRF protection, database persistence, stale-update protection, user isolation, and logout/session invalidation.
+The suite includes the original 14 Block A tests plus Block C tests for XLSX round-trips, import templates, full-ledger workbook exports, and PDF generation.
 
 ## Render
 
@@ -62,4 +79,4 @@ The current Block A suite contains 14 tests covering ledger behavior, registrati
 
 ## Next blocks
 
-Not part of Block A: Excel import/export, polished PDF statements, receipt attachments, recurring reminders, automatic expense imports, and advanced reporting. Those can build on the ledger and security foundation here.
+Still reserved for later blocks: receipt attachments, recurring reminders, automatic bank/expense feeds, and advanced reporting. Excel import/export and PDF statements are now included in Block C.

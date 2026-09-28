@@ -2,7 +2,7 @@ name: Money Tracker CI
 
 on:
   push:
-    branches: [main, block-d-exports-reporting]
+    branches: [main, block-d-exports-reporting, block-c-imports-migration]
   pull_request:
     branches: [main]
 
@@ -24,3 +24,6 @@ jobs:
           node --check lib/reporting.js
           node --check lib/xlsx.js
           node --check lib/pdf.js
+          node --check block-c-import.js
+          node --check lib/importer.js
+          node --check lib/xlsx-import.js

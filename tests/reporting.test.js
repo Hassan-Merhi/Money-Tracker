@@ -33,8 +33,9 @@ test('date filters affect report activity but not current outstanding balances',
 
 test('workbook contains expected sheets and transaction columns',()=>{
   const sheets=workbookSheets(state);
-  assert.deepEqual(sheets.map(s=>s.name),['Overview','Outstanding','People','Accounts','Transactions']);
+  assert.deepEqual(sheets.map(s=>s.name),['Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Transactions']);
   assert.ok(sheets.at(-1).rows[0].includes('Merchant'));
+  assert.ok(sheets.at(-1).rows[0].includes('Category'));
   assert.equal(exportRows(state).length,3);
 });
 

@@ -11,6 +11,9 @@ mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = process.env.DB_PATH || join(DATA_DIR, 'ledger.sqlite');
 const SESSION_DAYS = 30;
 const BODY_LIMIT = 1_000_000;
+const ATTACHMENT_BODY_LIMIT = 12_000_000;
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const ALLOWED_ATTACHMENT_TYPES = new Set(['image/jpeg','image/png','image/webp','image/gif','application/pdf','text/plain']);
 const isProd = process.env.NODE_ENV === 'production';
 
 export const db = new DatabaseSync(DB_PATH);
@@ -66,6 +69,7 @@ CREATE TABLE IF NOT EXISTS entries (
   date TEXT NOT NULL,
   merchant TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
+  split_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, id),
@@ -77,7 +81,22 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE INDEX IF NOT EXISTS idx_entries_user_date ON entries(user_id, date, created_at);
 CREATE INDEX IF NOT EXISTS idx_entries_user_person ON entries(user_id, person_id);
 CREATE INDEX IF NOT EXISTS idx_entries_user_account ON entries(user_id, account_id);
+CREATE TABLE IF NOT EXISTS attachments (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  entry_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_user_entry ON attachments(user_id, entry_id);
 `);
+const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
+if (!entryColumns.has('split_json')) db.exec("ALTER TABLE entries ADD COLUMN split_json TEXT NOT NULL DEFAULT '[]'");
+
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
@@ -91,15 +110,23 @@ const q = {
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
   accounts: db.prepare('SELECT id,name,type,currency,opening_balance AS openingBalance,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
   entries: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
-    amount,currency,from_amount AS fromAmount,to_amount AS toAmount,signed_amount AS signedAmount,date,merchant,description,created_at AS createdAt,updated_at AS updatedAt
+    amount,currency,from_amount AS fromAmount,to_amount AS toAmount,signed_amount AS signedAmount,date,merchant,description,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
     FROM entries WHERE user_id=? ORDER BY date, created_at`),
   deleteEntries: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deletePeople: db.prepare('DELETE FROM people WHERE user_id=?'),
   deleteAccounts: db.prepare('DELETE FROM accounts WHERE user_id=?'),
   insertPerson: db.prepare('INSERT INTO people(user_id,id,name,note,created_at) VALUES(?,?,?,?,?)'),
   insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance,created_at) VALUES(?,?,?,?,?,?,?)'),
-  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount,currency,from_amount,to_amount,signed_amount,date,merchant,description,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount,currency,from_amount,to_amount,signed_amount,date,merchant,description,split_json,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+  entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
+  attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
+  attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
+  attachmentById: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,data,created_at AS createdAt FROM attachments WHERE user_id=? AND id=?'),
+  insertAttachment: db.prepare('INSERT INTO attachments(user_id,id,entry_id,name,mime_type,size_bytes,data,created_at) VALUES(?,?,?,?,?,?,?,?)'),
+  deleteAttachment: db.prepare('DELETE FROM attachments WHERE user_id=? AND id=?'),
+  deleteOrphanAttachments: db.prepare('DELETE FROM attachments WHERE user_id=? AND entry_id NOT IN (SELECT id FROM entries WHERE user_id=?)'),
+  deleteAttachments: db.prepare('DELETE FROM attachments WHERE user_id=?'),
   updateUserState: db.prepare('UPDATE users SET display_name=?, default_currency=?, revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
 };
@@ -152,10 +179,10 @@ function json(res, status, value, extra={}) {
   const body = JSON.stringify(value); res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(body);
 }
 function fail(res,status,message){ json(res,status,{error:message}); }
-async function bodyJson(req) {
+async function bodyJson(req, limit=BODY_LIMIT) {
   return await new Promise((resolve,reject)=>{
     const chunks=[]; let size=0;
-    req.on('data',c=>{ size+=c.length; if(size>BODY_LIMIT){reject(Object.assign(new Error('too large'),{status:413})); req.destroy(); return;} chunks.push(c); });
+    req.on('data',c=>{ size+=c.length; if(size>limit){reject(Object.assign(new Error('Request is too large.'),{status:413})); req.destroy(); return;} chunks.push(c); });
     req.on('end',()=>{ try{ resolve(chunks.length?JSON.parse(Buffer.concat(chunks).toString('utf8')):{}); }catch{ reject(Object.assign(new Error('invalid json'),{status:400})); } });
     req.on('error',reject);
   });
@@ -211,16 +238,30 @@ function validateState(input, user) {
     if(!name||!allowedAccountTypes.has(type)||!validCurrency(currency)||opening===null||Math.abs(opening)>1e15) throw new Error('Invalid account record.');
     return {id:a.id,name,type,currency,openingBalance:opening,createdAt:a.createdAt||nowIso()};
   });
-  const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer']);
+  const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people']);
   const accountById=new Map(cleanAccounts.map(a=>[a.id,a]));
   const cleanEntries=entries.map(e=>{
     if(!idOk(e.id,'entry')||eSeen.has(e.id)||!allowedTypes.has(e.type)) throw new Error('Invalid transaction record.'); eSeen.add(e.id);
     const amount=finite(e.amount); if(amount===null||amount<0||amount>1e15) throw new Error('Invalid transaction amount.');
-    const base={id:e.id,type:e.type,personId:e.personId||null,accountId:e.accountId||null,fromAccountId:e.fromAccountId||null,toAccountId:e.toAccountId||null,amount,currency:e.currency?String(e.currency).toUpperCase():null,fromAmount:e.fromAmount==null?null:finite(e.fromAmount),toAmount:e.toAmount==null?null:finite(e.toAmount),signedAmount:e.signedAmount==null?null:finite(e.signedAmount),date:String(e.date||''),merchant:safeStr(e.merchant,100),description:safeStr(e.description,500),createdAt:e.createdAt||nowIso(),updatedAt:e.updatedAt||nowIso()};
+    const base={id:e.id,type:e.type,personId:e.personId||null,accountId:e.accountId||null,fromAccountId:e.fromAccountId||null,toAccountId:e.toAccountId||null,amount,currency:e.currency?String(e.currency).toUpperCase():null,fromAmount:e.fromAmount==null?null:finite(e.fromAmount),toAmount:e.toAmount==null?null:finite(e.toAmount),signedAmount:e.signedAmount==null?null:finite(e.signedAmount),date:String(e.date||''),merchant:safeStr(e.merchant,100),description:safeStr(e.description,500),splits:[],createdAt:e.createdAt||nowIso(),updatedAt:e.updatedAt||nowIso()};
     if(!validDate(base.date)) throw new Error('Invalid transaction date.');
     if(e.type==='account_transfer'){
       if(!aSeen.has(base.fromAccountId)||!aSeen.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
       base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;
+    } else if(e.type==='split_paid_for_people'){
+      if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Split transaction account is missing.');
+      const source=Array.isArray(e.splits)?e.splits:[];
+      if(source.length<2||source.length>100) throw new Error('A split needs at least two people.');
+      const seenPeople=new Set(); let splitTotal=0;
+      base.splits=source.map(split=>{
+        const personId=String(split?.personId||''), splitAmount=finite(split?.amount);
+        if(!pSeen.has(personId)||seenPeople.has(personId)||!(splitAmount>0)||splitAmount>1e15) throw new Error('Invalid split allocation.');
+        seenPeople.add(personId); splitTotal+=splitAmount;
+        return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
+      });
+      if(Math.abs(splitTotal-amount)>0.005) throw new Error('Split amounts must equal the transaction total.');
+      base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
     } else {
       if(!pSeen.has(base.personId)) throw new Error('Transaction person is missing.');
       if(e.type==='person_adjustment'){
@@ -239,7 +280,13 @@ function validateState(input, user) {
 
 function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
-  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts:q.accounts.all(userId),entries:q.entries.all(userId)};
+  const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
+  const entries=q.entries.all(userId).map(row=>{
+    let splits=[]; try{splits=JSON.parse(row.splitJson||'[]');}catch{}
+    const {splitJson,...entry}=row;
+    return {...entry,splits:Array.isArray(splits)?splits:[],attachmentCount:counts.get(row.id)||0};
+  });
+  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts:q.accounts.all(userId),entries};
 }
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
@@ -251,7 +298,8 @@ function saveState(user, input) {
     q.deleteEntries.run(user.user_id); q.deletePeople.run(user.user_id); q.deleteAccounts.run(user.user_id);
     for(const p of clean.people) q.insertPerson.run(user.user_id,p.id,p.name,p.note,p.createdAt);
     for(const a of clean.accounts) q.insertAccount.run(user.user_id,a.id,a.name,a.type,a.currency,a.openingBalance,a.createdAt);
-    for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.createdAt,e.updatedAt);
+    for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+    q.deleteOrphanAttachments.run(user.user_id,user.user_id);
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);
@@ -290,6 +338,36 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return; q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
+    if(url.pathname==='/api/attachments'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      const entryId=String(url.searchParams.get('entry')||'');
+      if(!idOk(entryId,'entry'))return fail(res,400,'Choose a valid transaction.');
+      return json(res,200,{attachments:q.attachmentsForEntry.all(a.user_id,entryId)});
+    }
+    if(url.pathname==='/api/attachments'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const b=await bodyJson(req,ATTACHMENT_BODY_LIMIT), entryId=String(b.entryId||''), name=safeStr(b.name,180), mimeType=String(b.mimeType||'application/octet-stream').toLowerCase();
+      if(!idOk(entryId,'entry')||!q.entryExists.get(a.user_id,entryId))return fail(res,400,'Transaction not found.');
+      if(!name||!ALLOWED_ATTACHMENT_TYPES.has(mimeType))return fail(res,400,'Use a JPG, PNG, WebP, GIF, PDF, or text file.');
+      let data; try{data=Buffer.from(String(b.data||''),'base64');}catch{return fail(res,400,'Invalid attachment data.');}
+      if(!data.length||data.length>MAX_ATTACHMENT_BYTES)return fail(res,413,'Attachments must be 8 MB or smaller.');
+      const id=`attachment_${randomUUID()}`, createdAt=nowIso();
+      q.insertAttachment.run(a.user_id,id,entryId,name,mimeType,data.length,data,createdAt);
+      return json(res,201,{attachment:{id,entryId,name,mimeType,sizeBytes:data.length,createdAt}});
+    }
+    if(url.pathname.startsWith('/api/attachments/')&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/attachments/'.length)), row=q.attachmentById.get(a.user_id,id);
+      if(!row)return fail(res,404,'Attachment not found.');
+      securityHeaders(res);res.writeHead(200,{'Content-Type':row.mimeType,'Content-Length':String(row.sizeBytes),'Content-Disposition':`inline; filename*=UTF-8''${encodeURIComponent(row.name)}`,'Cache-Control':'private, max-age=300'});res.end(row.data);return;
+    }
+    if(url.pathname.startsWith('/api/attachments/')&&req.method==='DELETE'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/attachments/'.length));
+      const result=q.deleteAttachment.run(a.user_id,id);
+      if(!Number(result.changes))return fail(res,404,'Attachment not found.');
+      return json(res,200,{ok:true});
+    }
     if(url.pathname==='/api/state'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,loadState(a.user_id));
     }
@@ -298,7 +376,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); return json(res,200,saved);
+      const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); q.deleteAttachments.run(a.user_id); return json(res,200,{...saved,entries:[]});
     }
     if(url.pathname.startsWith('/api/')) return fail(res,404,'API route not found.');
     return staticFile(req,res,url);

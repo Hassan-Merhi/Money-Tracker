@@ -192,7 +192,7 @@ function bind(main,state,ctx){
     btn.disabled=true;
     try{
       const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;
-      ctx.showToast('Bank transaction posted to the ledger.');ctx.replaceState(result.state);
+      ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');ctx.replaceState(result.state);
     }catch(error){
       if(error.status===409){
         try{ctx.replaceState(await loadState());}catch{}

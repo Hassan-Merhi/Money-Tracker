@@ -28,3 +28,11 @@ test('supports positive-outflow amount statements and date order',()=>{
   assert.equal(out.items[0].date,'2026-09-28'); assert.equal(out.items[0].signedAmount,-19.99);
   assert.equal(parseBankDate('28/09/2026','dmy'),'2026-09-28');
 });
+
+
+test('parses semicolon-delimited bank CSV exports',()=>{
+  const parsed=parseBankCsv('Date;Description;Amount\n2026-09-28;Coffee;-4.50\n');
+  assert.deepEqual(parsed.headers,['Date','Description','Amount']);
+  assert.equal(parsed.rows[0].Description,'Coffee');
+  assert.equal(parsed.rows[0].Amount,'-4.50');
+});

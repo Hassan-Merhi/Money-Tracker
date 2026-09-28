@@ -1,4 +1,4 @@
-import { currentUser, login, register, logout, loadState, saveState, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
+import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, logout, loadState, saveState, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
@@ -35,9 +35,9 @@ async function persist(message) {
     if (error.status === 409) {
       state = await loadState();
       render();
-      showToast('Another tab changed the ledger. I reloaded the latest version.');
+      showToast('Another tab changed the data. I reloaded the latest version.');
     } else if (error.status === 401) {
-      user = null; state = null; renderAuth('Your session expired. Sign in again.');
+      user = null; state = null; showAuth('Your session expired. Sign in again.');
     } else { showToast(error.message || 'Could not save.'); }
     return false;
   } finally { saving = false; }
@@ -58,7 +58,7 @@ function iconFor(page) {
 }
 
 function titleFor(page) {
-  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',bank:'Bank Feed',insights:'Insights & Budgets',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'My Ledger';
+  return ({dashboard:'Dashboard',people:'People',accounts:'Accounts & Cash',transactions:'Transactions',bank:'Bank Feed',insights:'Insights & Budgets',scheduled:'Scheduled & Reminders',reports:'Reports & Exports',settings:'Settings',person:'Person statement'})[page] || 'Money Tracker';
 }
 
 function subFor(page) {
@@ -81,9 +81,9 @@ function render() {
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">M</div><div><h1>${escapeHtml(state.settings.displayName || 'My Ledger')}</h1><small>Money owed tracker</small></div></div>
+        <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Money owed tracker</small></div></div>
         <nav class="nav">${['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
-        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server ledger · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
+        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server storage · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
@@ -100,7 +100,7 @@ function render() {
   document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#mobileQuickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());
-  document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; renderAuth(); });
+  document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; showAuth(); });
 
   const main = document.querySelector('#main');
   if (route.page === 'dashboard') renderDashboard(main);
@@ -139,7 +139,7 @@ function renderDashboard(main) {
     </div>
     <div class="grid section-grid">
       <section class="card panel">
-        <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest ledger movements</p></div><button class="btn small" data-go="transactions">View all</button></div>
+        <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest money movements</p></div><button class="btn small" data-go="transactions">View all</button></div>
         ${recent.length ? transactionTable(recent, {compact:true}) : `<div class="empty"><strong>No transactions yet</strong>Start with “Add transaction” when you buy something for someone, receive money, borrow, or repay.</div>`}
       </section>
       <section class="card panel">
@@ -209,7 +209,7 @@ function statementTable(entries){
 
 function renderAccounts(main) {
   const balances=accountBalances(state.entries,state.accounts);
-  main.innerHTML=`<div class="panel-head"><div><p class="muted">Opening balance + all linked ledger movements.</p></div><div class="page-actions"><button class="btn" id="transferBtn">⇄ Transfer</button><button class="btn primary" id="addAccount">＋ Add account</button></div></div>
+  main.innerHTML=`<div class="panel-head"><div><p class="muted">Opening balance + all linked money movements.</p></div><div class="page-actions"><button class="btn" id="transferBtn">⇄ Transfer</button><button class="btn primary" id="addAccount">＋ Add account</button></div></div>
   ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
   main.querySelector('#addAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#emptyAddAccount')?.addEventListener('click',()=>openAccountModal());
@@ -252,19 +252,32 @@ function transactionTable(entries,{compact=false}={}){
 
 function renderSettings(main) {
   main.innerHTML=`<div class="settings-grid">
-    <section class="card settings-card"><h3>General</h3><div class="form-grid"><div class="field span-2"><label>Ledger name</label><input id="settingName" class="input" maxlength="80" value="${escapeHtml(state.settings.displayName||'My Ledger')}"></div><div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div></div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
-    <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Sessions use an HttpOnly cookie; ledger writes require a CSRF token and are isolated to your account.</p><button class="btn" id="settingsLogout">Sign out on this device</button></section>
+    <section class="card settings-card"><h3>General</h3><div class="form-grid"><div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div></div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
+    ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. Add any extra sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
+    <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Sessions use an HttpOnly cookie; protected changes require a CSRF token and data is isolated per account.</p><button class="btn" id="settingsLogout">Sign out on this device</button></section>
     <section class="card settings-card"><h3>Backup & exports</h3><p class="muted">JSON backup remains available for recovery. Use Reports & Exports for formatted Excel workbooks and PDF reports.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export backup</button><button class="btn" id="importBackup">↑ Import backup</button><button class="btn" id="openReports">Open reports</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
-    <section class="card settings-card"><h3>Ledger rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
-    <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts, transactions, attachments, recurring schedules, Bank Feed rows/rules, categories, and budgets from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all ledger data</button></section>
+    <section class="card settings-card"><h3>Balance rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
+    <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts, transactions, attachments, recurring schedules, Bank Feed rows/rules, categories, and budgets from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all app data</button></section>
   </div>`;
-  main.querySelector('#saveSettings')?.addEventListener('click',()=>{state.settings.displayName=main.querySelector('#settingName').value.trim()||'My Ledger';state.settings.defaultCurrency=main.querySelector('#settingCurrency').value;persist('Settings saved.');});
+  main.querySelector('#saveSettings')?.addEventListener('click',()=>{state.settings.defaultCurrency=main.querySelector('#settingCurrency').value;persist('Settings saved.');});
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
-  main.querySelector('#exportBackup')?.addEventListener('click',()=>downloadText(`my-ledger-backup-${today()}.json`,JSON.stringify({...state,version:undefined},null,2)));
+  main.querySelector('#exportBackup')?.addEventListener('click',()=>downloadText(`money-tracker-backup-${today()}.json`,JSON.stringify({...state,version:undefined},null,2)));
   main.querySelector('#importBackup')?.addEventListener('click',()=>main.querySelector('#backupFile').click());
   main.querySelector('#openReports')?.addEventListener('click',()=>{location.hash='#reports';});
-  main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(!Array.isArray(parsed.people)||!Array.isArray(parsed.accounts)||!Array.isArray(parsed.entries))throw new Error('That file is not a valid ledger backup.');state=await restoreBackup(parsed);showToast('Backup imported, including categories and budgets.');render();}catch(error){showToast(error.message||'That file is not a valid ledger backup.');}});
-  main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all ledger data, schedules, Bank Feed data, categories, and budgets?')){try{state=await resetState();showToast('Ledger data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset ledger.');}}});
+  main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(!Array.isArray(parsed.people)||!Array.isArray(parsed.accounts)||!Array.isArray(parsed.entries))throw new Error('That file is not a valid Money Tracker backup.');state=await restoreBackup(parsed);showToast('Backup imported, including categories and budgets.');render();}catch(error){showToast(error.message||'That file is not a valid Money Tracker backup.');}});
+  main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all Money Tracker data, schedules, Bank Feed data, categories, and budgets?')){try{state=await resetState();showToast('App data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset app data.');}}});
+  if(user?.isOwner){
+    refreshManagedUsers(main);
+    main.querySelector('#addUserForm')?.addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;try{await createUserAccount(fd.get('email'),fd.get('password'));form.reset();showToast('Account created.');await refreshManagedUsers(main);}catch(error){showToast(error.message||'Could not create account.');}finally{button.disabled=false;}});
+  }
+}
+
+async function refreshManagedUsers(main){
+  const host=main.querySelector('#managedUsers');if(!host)return;
+  try{
+    const data=await listUsers();
+    host.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>Email</th><th>Role</th><th>Created</th></tr></thead><tbody>${data.users.map(account=>`<tr><td><strong>${escapeHtml(account.email)}</strong></td><td>${account.isOwner?'<span class="pill">Owner</span>':'User'}</td><td>${escapeHtml(String(account.createdAt||'').slice(0,10))}</td></tr>`).join('')}</tbody></table></div>`;
+  }catch(error){host.textContent=error.message||'Could not load user accounts.';}
 }
 
 function openPersonModal(existing=null){
@@ -431,16 +444,22 @@ function entryTypeOptions(selected,includeTransfer=true){
   return types.map(([v,l])=>`<option value="${v}" ${selected===v?'selected':''}>${l}</option>`).join('');
 }
 
-function renderAuth(message='') {
-  app.innerHTML=`<div class="auth-shell"><div class="auth-card card"><div class="auth-brand"><div class="brand-mark">M</div><div><h1>Money Owed Tracker</h1><p>Secure personal ledger for money owed to you and money you owe.</p></div></div>${message?`<div class="auth-message">${escapeHtml(message)}</div>`:''}<div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="register">Create account</button></div><form id="authForm" class="auth-form"><div class="field register-only" hidden><label>Ledger name</label><input class="input" name="displayName" maxlength="80" value="My Ledger"></div><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="10" required></div><button class="btn primary full" type="submit">Sign in</button><p class="auth-hint">Passwords are hashed on the server. A password of 10+ characters is required.</p></form></div></div>`;
+async function showAuth(message=''){
+  let registrationOpen=false;
+  try{registrationOpen=Boolean((await registrationStatus()).registrationOpen);}catch{}
+  renderAuth(message,registrationOpen);
+}
+
+function renderAuth(message='',registrationOpen=false) {
+  app.innerHTML=`<div class="auth-shell"><div class="auth-card card"><div class="auth-brand"><div class="brand-mark">M</div><div><h1>Money Owed Tracker</h1><p>Track money people owe you and money you owe.</p></div></div>${message?`<div class="auth-message">${escapeHtml(message)}</div>`:''}${registrationOpen?`<div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="register">Create account</button></div>`:'<div class="auth-tabs"><button class="active">Sign in</button></div>'}<form id="authForm" class="auth-form"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="10" required></div><button class="btn primary full" type="submit">Sign in</button><p class="auth-hint">${registrationOpen?'Create the owner account once. After that, extra accounts can only be added from Settings.':'Additional accounts can only be created by the owner from Settings.'}</p></form></div></div>`;
   let mode='login'; const form=app.querySelector('#authForm');
-  app.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>{mode=btn.dataset.authTab;app.querySelectorAll('[data-auth-tab]').forEach(b=>b.classList.toggle('active',b===btn));form.querySelector('.register-only').hidden=mode!=='register';form.querySelector('button[type=submit]').textContent=mode==='register'?'Create account':'Sign in';form.password.autocomplete=mode==='register'?'new-password':'current-password';}));
-  form.addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;button.textContent=mode==='register'?'Creating…':'Signing in…';try{user=mode==='register'?await register(fd.get('email'),fd.get('password'),fd.get('displayName')):await login(fd.get('email'),fd.get('password'));state=await loadState();location.hash='#dashboard';render();}catch(error){renderAuth(error.message||'Could not sign in.');}finally{button.disabled=false;}});
+  app.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>{mode=btn.dataset.authTab||'login';app.querySelectorAll('[data-auth-tab]').forEach(b=>b.classList.toggle('active',b===btn));form.querySelector('button[type=submit]').textContent=mode==='register'?'Create account':'Sign in';form.password.autocomplete=mode==='register'?'new-password':'current-password';}));
+  form.addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;button.textContent=mode==='register'?'Creating…':'Signing in…';try{user=mode==='register'?await register(fd.get('email'),fd.get('password')):await login(fd.get('email'),fd.get('password'));state=await loadState();location.hash='#dashboard';render();}catch(error){showAuth(error.message||'Could not sign in.');}finally{button.disabled=false;}});
 }
 
 async function boot(){
-  app.innerHTML='<div class="boot">Loading your ledger…</div>';
-  try{user=await currentUser();if(!user){renderAuth();return;}state=await loadState();render();}catch(error){renderAuth(error.message||'Could not load your ledger.');}
+  app.innerHTML='<div class="boot">Loading Money Tracker…</div>';
+  try{user=await currentUser();if(!user){await showAuth();return;}state=await loadState();render();}catch(error){showAuth(error.message||'Could not load Money Tracker.');}
 }
 
 document.addEventListener('keydown',event=>{

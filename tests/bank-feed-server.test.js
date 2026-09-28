@@ -130,9 +130,12 @@ test('ledger reset also clears bank feed rows and rules',async()=>{
 });
 
 test('bank feed is isolated per user',async()=>{
-  const r=await request('/api/auth/register',{method:'POST',body:{email:`other-bank-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'},cookie:'',csrf:''});
-  const otherCookie=r.cookie,otherCsrf=r.data.csrfToken;
-  const other=await request('/api/bank-feed',{cookie:otherCookie,csrf:otherCsrf});assert.equal(other.res.status,200);assert.deepEqual(other.data.items,[]);assert.deepEqual(other.data.rules,[]);
+  const email=`other-bank-${Date.now()}@example.com`;
+  const created=await request('/api/users',{method:'POST',body:{email,password:'another secure password'}});
+  assert.equal(created.res.status,201);
+  const login=await request('/api/auth/login',{method:'POST',body:{email,password:'another secure password'},cookie:'',csrf:''});
+  assert.equal(login.res.status,200);
+  const other=await request('/api/bank-feed',{cookie:login.cookie,csrf:login.data.csrfToken});assert.equal(other.res.status,200);assert.deepEqual(other.data.items,[]);assert.deepEqual(other.data.rules,[]);
 });
 
 test.after(async()=>{await new Promise(resolve=>server.close(resolve));db.close();rmSync(dir,{recursive:true,force:true});});

@@ -109,9 +109,12 @@ test('recurring rules prevent deleting referenced people or accounts',async()=>{
 });
 
 test('recurring rules are isolated per user',async()=>{
-  const other=await request('/api/auth/register',{method:'POST',body:{email:`other-recurring-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'}});
-  assert.equal(other.res.status,201);
-  const list=await request('/api/recurring',{cookie:other.cookie});
+  const email=`other-recurring-${Date.now()}@example.com`;
+  const created=await request('/api/users',{method:'POST',cookie,csrf,body:{email,password:'another secure password'}});
+  assert.equal(created.res.status,201);
+  const login=await request('/api/auth/login',{method:'POST',body:{email,password:'another secure password'}});
+  assert.equal(login.res.status,200);
+  const list=await request('/api/recurring',{cookie:login.cookie});
   assert.equal(list.res.status,200);
   assert.deepEqual(list.data.rules,[]);
 });

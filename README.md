@@ -4,7 +4,7 @@ Money Tracker is a server-backed personal ledger for tracking money people owe y
 
 ## Block A — Secure core
 
-- User registration, login, logout, and server-backed sessions
+- One-time public owner registration, login/logout, owner-managed additional accounts from Settings, and server-backed sessions
 - Strong password hashing with Node `scrypt`
 - HttpOnly, SameSite session cookies and CSRF protection
 - Login/register rate limiting and request validation

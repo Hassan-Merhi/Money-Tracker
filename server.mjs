@@ -338,7 +338,7 @@ export const server=http.createServer(async(req,res)=>{
       const b=await bodyJson(req,12_000_000), filename=safeStr(b.filename,180), encoded=String(b.dataBase64||'');
       if(!encoded||encoded.length>11_000_000)return fail(res,400,'Spreadsheet is too large.');
       const data=Buffer.from(encoded,'base64'); if(!data.length||data.length>8_000_000)return fail(res,400,'Spreadsheet is too large.');
-      const parsed=parseWorkbook(data,{limitRows:5000});
+      let parsed; try{parsed=parseWorkbook(data,{limitRows:5000});}catch{return fail(res,400,'Could not read this XLSX file.');}
       return json(res,200,{filename,sheets:parsed.sheets});
     }
     if(url.pathname.startsWith('/api/')) return fail(res,404,'API route not found.');

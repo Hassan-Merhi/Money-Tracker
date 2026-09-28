@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { parseWorkbook } from './lib/xlsx-import.js';
 import { nextRecurringDate } from './lib/recurring.js';
 import { createBankFeedService } from './lib/bank-server.js';
+import { createInsightsService } from './lib/insights-server.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -118,7 +119,9 @@ CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is
 `);
 const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
 if (!entryColumns.has('split_json')) db.exec("ALTER TABLE entries ADD COLUMN split_json TEXT NOT NULL DEFAULT '[]'");
+if (!entryColumns.has('category_id')) db.exec("ALTER TABLE entries ADD COLUMN category_id TEXT");
 
+const insights = createInsightsService(db);
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
@@ -132,15 +135,15 @@ const q = {
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
   accounts: db.prepare('SELECT id,name,type,currency,opening_balance AS openingBalance,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
   entries: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
-    amount,currency,from_amount AS fromAmount,to_amount AS toAmount,signed_amount AS signedAmount,date,merchant,description,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
+    amount,currency,from_amount AS fromAmount,to_amount AS toAmount,signed_amount AS signedAmount,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
     FROM entries WHERE user_id=? ORDER BY date, created_at`),
   deleteEntries: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deletePeople: db.prepare('DELETE FROM people WHERE user_id=?'),
   deleteAccounts: db.prepare('DELETE FROM accounts WHERE user_id=?'),
   insertPerson: db.prepare('INSERT INTO people(user_id,id,name,note,created_at) VALUES(?,?,?,?,?)'),
   insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance,created_at) VALUES(?,?,?,?,?,?,?)'),
-  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount,currency,from_amount,to_amount,signed_amount,date,merchant,description,split_json,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount,currency,from_amount,to_amount,signed_amount,date,merchant,description,category_id,split_json,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
   attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
@@ -159,6 +162,7 @@ const q = {
   updateUserState: db.prepare('UPDATE users SET display_name=?, default_currency=?, revision=revision+1 WHERE id=? AND revision=?'),
   bumpRevision: db.prepare('UPDATE users SET revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
+  deleteAllRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=?'),
 };
 
 const bankFeed = createBankFeedService(db);
@@ -275,7 +279,7 @@ function validateState(input, user) {
   const cleanEntries=entries.map(e=>{
     if(!idOk(e.id,'entry')||eSeen.has(e.id)||!allowedTypes.has(e.type)) throw new Error('Invalid transaction record.'); eSeen.add(e.id);
     const amount=finite(e.amount); if(amount===null||amount<0||amount>1e15) throw new Error('Invalid transaction amount.');
-    const base={id:e.id,type:e.type,personId:e.personId||null,accountId:e.accountId||null,fromAccountId:e.fromAccountId||null,toAccountId:e.toAccountId||null,amount,currency:e.currency?String(e.currency).toUpperCase():null,fromAmount:e.fromAmount==null?null:finite(e.fromAmount),toAmount:e.toAmount==null?null:finite(e.toAmount),signedAmount:e.signedAmount==null?null:finite(e.signedAmount),date:String(e.date||''),merchant:safeStr(e.merchant,100),description:safeStr(e.description,500),splits:[],createdAt:e.createdAt||nowIso(),updatedAt:e.updatedAt||nowIso()};
+    const base={id:e.id,type:e.type,personId:e.personId||null,accountId:e.accountId||null,fromAccountId:e.fromAccountId||null,toAccountId:e.toAccountId||null,amount,currency:e.currency?String(e.currency).toUpperCase():null,fromAmount:e.fromAmount==null?null:finite(e.fromAmount),toAmount:e.toAmount==null?null:finite(e.toAmount),signedAmount:e.signedAmount==null?null:finite(e.signedAmount),date:String(e.date||''),merchant:safeStr(e.merchant,100),description:safeStr(e.description,500),categoryId:e.categoryId||null,splits:[],createdAt:e.createdAt||nowIso(),updatedAt:e.updatedAt||nowIso()};
     if(!validDate(base.date)) throw new Error('Invalid transaction date.');
     if(e.type==='account_transfer'){
       if(!aSeen.has(base.fromAccountId)||!aSeen.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
@@ -296,6 +300,7 @@ function validateState(input, user) {
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
     } else if(e.type==='account_expense'||e.type==='account_income'){
       if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Account-only transaction account is missing.');
+      if(base.categoryId) insights.validateCategory(user.user_id,base.categoryId,{kind:e.type==='account_income'?'income':'expense'});
       base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
     } else {
@@ -308,6 +313,7 @@ function validateState(input, user) {
         base.currency=accountById.get(base.accountId).currency; base.signedAmount=null;
       }
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
+      base.categoryId=null;
     }
     return base;
   });
@@ -315,7 +321,7 @@ function validateState(input, user) {
 }
 
 
-const RECURRING_TYPES = new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people']);
+const RECURRING_TYPES = new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income']);
 const RECURRING_FREQUENCIES = new Set(['daily','weekly','monthly','yearly']);
 
 function recurringRow(row) {
@@ -348,6 +354,7 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
     signedAmount:raw.signedAmount==null?null:finite(raw.signedAmount),
     merchant:safeStr(raw.merchant,100),
     description:safeStr(raw.description,500),
+    categoryId:raw.categoryId||null,
     splits:[]
   };
   if(amount===null || amount<0 || amount>1e15) throw new Error('Invalid recurring amount.');
@@ -367,6 +374,11 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
     });
     if(Math.abs(total-amount)>0.005) throw new Error('Recurring split amounts must equal the total.');
     base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+    base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
+  } else if(raw.type==='account_expense'||raw.type==='account_income'){
+    if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
+    if(base.categoryId) insights.validateCategory(userId,base.categoryId,{kind:raw.type==='account_income'?'income':'expense',active:true});
+    base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
     base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
   } else {
     if(!people.has(base.personId)) throw new Error('Choose a person for the recurring transaction.');
@@ -378,7 +390,7 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
       if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
       base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
     }
-    base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
+    base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
   }
   return base;
 }
@@ -423,7 +435,7 @@ function recurringEntryFromTemplate(template,date) {
 }
 
 function insertLedgerEntry(userId,e) {
-  q.insertEntry.run(userId,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+  q.insertEntry.run(userId,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
 }
 
 function advanceRecurringRule(userId,row,occurrenceDate,{posted=false}={}) {
@@ -437,13 +449,15 @@ function advanceRecurringRule(userId,row,occurrenceDate,{posted=false}={}) {
 
 function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
+  insights.ensureDefaults(userId);
   const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
   const entries=q.entries.all(userId).map(row=>{
     let splits=[]; try{splits=JSON.parse(row.splitJson||'[]');}catch{}
     const {splitJson,...entry}=row;
     return {...entry,splits:Array.isArray(splits)?splits:[],attachmentCount:counts.get(row.id)||0};
   });
-  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts:q.accounts.all(userId),entries};
+  const meta=insights.list(userId);
+  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts:q.accounts.all(userId),entries,categories:meta.categories,budgets:meta.budgets};
 }
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
@@ -455,7 +469,7 @@ function saveState(user, input) {
     q.deleteEntries.run(user.user_id); q.deletePeople.run(user.user_id); q.deleteAccounts.run(user.user_id);
     for(const p of clean.people) q.insertPerson.run(user.user_id,p.id,p.name,p.note,p.createdAt);
     for(const a of clean.accounts) q.insertAccount.run(user.user_id,a.id,a.name,a.type,a.currency,a.openingBalance,a.createdAt);
-    for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+    for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
     q.deleteOrphanAttachments.run(user.user_id,user.user_id);
     bankFeed.reopenOrphans(user.user_id);
     bankFeed.reconcileReferences(user.user_id);
@@ -586,6 +600,27 @@ export const server=http.createServer(async(req,res)=>{
       }
       return fail(res,405,'Recurring schedule action not supported.');
     }
+    if(url.pathname==='/api/categories'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const body=await bodyJson(req); return json(res,201,{category:insights.createCategory(a.user_id,body),...insights.list(a.user_id)});
+    }
+    if(url.pathname.startsWith('/api/categories/')){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const parts=url.pathname.slice('/api/categories/'.length).split('/').filter(Boolean),id=decodeURIComponent(parts[0]||''),action=parts[1]||'';
+      if(!idOk(id,'category'))return fail(res,400,'Invalid category.');
+      if(!action&&req.method==='PUT'){const body=await bodyJson(req);return json(res,200,{category:insights.updateCategory(a.user_id,id,body),...insights.list(a.user_id)});}
+      if(action==='archive'&&req.method==='POST')return json(res,200,{category:insights.archiveCategory(a.user_id,id),...insights.list(a.user_id)});
+      if(action==='restore'&&req.method==='POST')return json(res,200,{category:insights.restoreCategory(a.user_id,id),...insights.list(a.user_id)});
+      return fail(res,405,'Category action not supported.');
+    }
+    if(url.pathname==='/api/budgets'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const body=await bodyJson(req); return json(res,200,{budget:insights.saveBudget(a.user_id,body),...insights.list(a.user_id)});
+    }
+    if(url.pathname.startsWith('/api/budgets/')&&req.method==='DELETE'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/budgets/'.length)); return json(res,200,{...insights.deleteBudget(a.user_id,id),...insights.list(a.user_id)});
+    }
     if(url.pathname==='/api/bank-feed'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,bankFeed.list(a.user_id));
     }
@@ -622,7 +657,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); return json(res,200,{...saved,entries:[]});
+      q.deleteAllRecurring.run(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id); return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

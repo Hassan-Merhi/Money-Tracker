@@ -649,6 +649,26 @@ export const server=http.createServer(async(req,res)=>{
       if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));
       return fail(res,405,'Bank feed action not supported.');
     }
+    if(url.pathname==='/api/backup/restore'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const body=await bodyJson(req,12_000_000);
+      if(!body||typeof body!=='object'||!Array.isArray(body.people)||!Array.isArray(body.accounts)||!Array.isArray(body.entries))return fail(res,400,'That file is not a valid ledger backup.');
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        insights.replace(a.user_id,Array.isArray(body.categories)?body.categories:[],Array.isArray(body.budgets)?body.budgets:[]);
+        const clean=validateState({...body,version:a.revision},a);assertRecurringReferences(a.user_id,clean);
+        const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,a.user_id,a.revision);
+        if(Number(upd.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
+        q.deleteEntries.run(a.user_id);q.deletePeople.run(a.user_id);q.deleteAccounts.run(a.user_id);
+        for(const p of clean.people)q.insertPerson.run(a.user_id,p.id,p.name,p.note,p.createdAt);
+        for(const account of clean.accounts)q.insertAccount.run(a.user_id,account.id,account.name,account.type,account.currency,account.openingBalance,account.createdAt);
+        for(const e of clean.entries)q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+        q.deleteOrphanAttachments.run(a.user_id,a.user_id);
+        bankFeed.reopenOrphans(a.user_id);bankFeed.reconcileReferences(a.user_id);
+        db.exec('COMMIT');
+        return json(res,200,loadState(a.user_id));
+      }catch(error){db.exec('ROLLBACK');throw error;}
+    }
     if(url.pathname==='/api/state'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,loadState(a.user_id));
     }

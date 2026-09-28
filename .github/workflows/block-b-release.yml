@@ -25,14 +25,10 @@ jobs:
           REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
-          gh api "repos/$REPO/issues/$ISSUE" --jq '.body // ""' \
-            | sed -n 's/^BLOCK_B_ZIP_BASE64=//p' > /tmp/block-b.b64
-          if [ ! -s /tmp/block-b.b64 ]; then
-            gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate --jq '.[].body' \
-              | sed -n 's/^BLOCK_B_PART_[0-9][0-9]*=//p' \
-              | tr -d '\n' > /tmp/block-b.b64
-          fi
-          test -s /tmp/block-b.b64
+          gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate --jq '.[].body' \
+            | sed -n 's/^BLOCK_B_PART_[0-9][0-9]*=//p' \
+            | tr -d '\n' > /tmp/block-b.b64
+          test "$(wc -c < /tmp/block-b.b64)" -eq 47640
           python - <<'PY'
           import base64, io, pathlib, zipfile
           payload = pathlib.Path("/tmp/block-b.b64").read_text().strip()

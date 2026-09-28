@@ -60,7 +60,7 @@ Account balances start at their opening balance and then change through ledger t
 
 ## Run locally
 
-Requires Node.js 22.5+.
+Requires Node.js 22.13+ (the first Node 22 release line where `node:sqlite` is available without the experimental flag).
 
 ```bash
 npm test

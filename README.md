@@ -1,4 +1,4 @@
-# Money Tracker — Secure Ledger, Daily-Use App & Reporting
+# Money Tracker — Secure Ledger, Daily-Use App, Reporting & Recurring Reminders
 
 Money Tracker is a server-backed personal ledger for tracking money people owe you, money you owe people, bank/cash balances, transfers, shared purchases, receipts, notes, statements, and exports.
 
@@ -62,6 +62,24 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 
 Report filters apply to activity and exported transaction rows. Current outstanding and account balances remain current ledger balances so historical filters do not accidentally present old balances as today's balances.
 
+## Block E — Recurring schedules & reminders
+
+- Server-persisted recurring transaction schedules isolated per user
+- Daily, weekly, monthly, and yearly recurrence with configurable intervals
+- Month-end and leap-day recurrence anchoring so dates advance predictably
+- Due, overdue, and configurable reminder-window statuses
+- Scheduled page plus a dashboard reminder widget
+- Optional browser notifications while Money Tracker is open
+- Review-before-post workflow: schedules never silently mutate the ledger
+- Atomic **Post now** action creates one ledger transaction and advances the schedule together
+- Optimistic ledger revision checks and occurrence checks prevent stale-tab or duplicate posting
+- Skip, pause/resume, edit, and delete schedule controls
+- Optional end dates and last-posted occurrence tracking
+- Templates for payments, repayments, borrowing, paybacks, balance adjustments, account transfers, and split purchases
+- Schedule reference protection prevents deleting a person/account still used by a recurring rule
+- Recurring modules included in the PWA offline shell
+
+
 ## Ledger rules
 
 - Positive personal balance: they owe you
@@ -83,12 +101,12 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The automated suite covers core ledger math, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase migration, and protected import previews.
+The automated suite covers core ledger math, split allocation math and validation, authenticated server persistence, CSRF and user isolation, receipt attachments, reporting calculations and filters, XLSX generation, PDF generation, XLSX parsing, import mapping/deduplication, split-purchase migration, protected import previews, recurrence date math, recurring schedule isolation, atomic occurrence posting, duplicate-post rejection, skipping, pausing, and recurring reference protection.
 
 ## Render
 
 `render.yaml` defines a Node web service with a persistent disk mounted at `/var/data` for the SQLite database. The health endpoint is `/api/health`.
 
-## Still outside Blocks A/B/C/D
+## Still outside Blocks A/B/C/D/E
 
-Recurring reminders and automatic bank/expense ingestion remain separate future blocks.
+Automatic bank/expense ingestion remains a separate future block.

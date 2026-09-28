@@ -27,3 +27,6 @@ jobs:
           node --check block-c-import.js
           node --check lib/importer.js
           node --check lib/xlsx-import.js
+          node --check block-e-recurring.js
+          node --check lib/recurring-rule-form.js
+          node --check lib/recurring.js

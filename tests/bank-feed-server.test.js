@@ -104,15 +104,18 @@ test('posting both statement sides of one transfer creates only one ledger movem
 });
 
 test('deleting an account cleans unposted feed rows and rules that reference it',async()=>{
-  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_cash',sourceName:'cash.csv',rows:[{date:'2026-09-30',description:'Cash row',signedAmount:-5,currency:'USD',externalId:'cash-orphan'}]}});
+  const t=new Date().toISOString();
+  const added=await request('/api/state',{method:'PUT',body:{...state,accounts:[...state.accounts,{id:'account_unused',name:'Unused Wallet',type:'wallet',currency:'USD',openingBalance:0,createdAt:t}]}});
+  assert.equal(added.res.status,200);state=added.data;
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_unused',sourceName:'unused.csv',rows:[{date:'2026-09-30',description:'Unused row',signedAmount:-5,currency:'USD',externalId:'unused-orphan'}]}});
   assert.equal(imported.res.status,200);
-  const rule=await request('/api/bank-rules',{method:'POST',body:{matchText:'move cash',classification:'transfer',targetAccountId:'account_cash'}});
+  const rule=await request('/api/bank-rules',{method:'POST',body:{matchText:'move unused',classification:'transfer',targetAccountId:'account_unused'}});
   assert.equal(rule.res.status,201);
-  const saved=await request('/api/state',{method:'PUT',body:{...state,accounts:state.accounts.filter(a=>a.id!=='account_cash')}});
+  const saved=await request('/api/state',{method:'PUT',body:{...state,accounts:state.accounts.filter(a=>a.id!=='account_unused')}});
   assert.equal(saved.res.status,200);state=saved.data;
   const feed=(await request('/api/bank-feed')).data;
-  assert.equal(feed.items.some(item=>item.externalId==='cash-orphan'),false);
-  assert.equal(feed.rules.some(item=>item.targetAccountId==='account_cash'),false);
+  assert.equal(feed.items.some(item=>item.externalId==='unused-orphan'),false);
+  assert.equal(feed.rules.some(item=>item.targetAccountId==='account_unused'),false);
 });
 
 test('bank feed is isolated per user',async()=>{

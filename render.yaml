@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: money-owed-tracker
+    runtime: node
+    plan: starter
+    region: frankfurt
+    buildCommand: echo "No dependencies to install"
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: ledger-data
+      mountPath: /var/data
+      sizeGB: 1

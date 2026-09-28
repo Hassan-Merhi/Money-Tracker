@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { personDelta, accountDelta, personBalances, accountBalances, runningStatement, validateTransfer } from '../lib/ledger.js';
+import { personDelta, accountDelta, personBalances, accountBalances, runningStatement, validateTransfer, validateSplit, entryTouchesPerson } from '../lib/ledger.js';
 
 test('paying for someone increases what they owe me and reduces my account', () => {
   const e = { type:'paid_for_person', amount:120, accountId:'bank', personId:'p1', currency:'USD' };
@@ -55,4 +55,25 @@ test('running statement orders chronologically', () => {
 test('transfer validation blocks same account', () => {
   const a = {id:'x'};
   assert.ok(validateTransfer(a,a,1,1));
+});
+
+
+test('split purchase charges one account once and allocates each person separately', () => {
+  const people=[{id:'p1'},{id:'p2'}];
+  const accounts=[{id:'bank',openingBalance:500}];
+  const entry={id:'split1',type:'split_paid_for_people',accountId:'bank',amount:90,currency:'USD',date:'2026-09-28',createdAt:'2026-09-28T10:00:00Z',splits:[{personId:'p1',amount:40,note:'Shoes'},{personId:'p2',amount:50,note:'Book'}]};
+  const balances=personBalances([entry],people);
+  assert.equal(balances.p1.USD,40);
+  assert.equal(balances.p2.USD,50);
+  assert.equal(accountBalances([entry],accounts).bank,410);
+  assert.equal(personDelta(entry,'p1'),40);
+  assert.equal(personDelta(entry,'p2'),50);
+  assert.equal(entryTouchesPerson(entry,'p2'),true);
+  assert.equal(runningStatement([entry],'p1','USD')[0].description,'Shoes');
+});
+
+test('split validation rejects duplicates and totals that do not match', () => {
+  assert.equal(validateSplit([{personId:'p1',amount:40},{personId:'p2',amount:60}],100),'');
+  assert.match(validateSplit([{personId:'p1',amount:40},{personId:'p1',amount:60}],100),/only once/);
+  assert.match(validateSplit([{personId:'p1',amount:40},{personId:'p2',amount:50}],100),/add up/);
 });

@@ -102,7 +102,7 @@ test('paused schedules cannot be posted',async()=>{
 });
 
 test('recurring rules prevent deleting referenced people or accounts',async()=>{
-  const invalid={...state,people:[]};
+  const invalid={...state,people:[],entries:[]};
   const saved=await request('/api/state',{method:'PUT',cookie,csrf,body:invalid});
   assert.equal(saved.res.status,400);
   assert.match(saved.data.error,/recurring schedule/i);

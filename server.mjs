@@ -4,6 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { parseWorkbook } from './lib/xlsx-import.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -152,10 +153,10 @@ function json(res, status, value, extra={}) {
   const body = JSON.stringify(value); res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(body);
 }
 function fail(res,status,message){ json(res,status,{error:message}); }
-async function bodyJson(req) {
+async function bodyJson(req, limit=BODY_LIMIT) {
   return await new Promise((resolve,reject)=>{
     const chunks=[]; let size=0;
-    req.on('data',c=>{ size+=c.length; if(size>BODY_LIMIT){reject(Object.assign(new Error('too large'),{status:413})); req.destroy(); return;} chunks.push(c); });
+    req.on('data',c=>{ size+=c.length; if(size>limit){reject(Object.assign(new Error('too large'),{status:413})); req.destroy(); return;} chunks.push(c); });
     req.on('end',()=>{ try{ resolve(chunks.length?JSON.parse(Buffer.concat(chunks).toString('utf8')):{}); }catch{ reject(Object.assign(new Error('invalid json'),{status:400})); } });
     req.on('error',reject);
   });
@@ -299,6 +300,15 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
       const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); return json(res,200,saved);
+    }
+    if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const body=await bodyJson(req,12_000_000), filename=safeStr(body.filename,180), encoded=String(body.dataBase64||'');
+      if(!encoded||encoded.length>11_000_000)return fail(res,400,'Spreadsheet is too large.');
+      const data=Buffer.from(encoded,'base64');
+      if(!data.length||data.length>8_000_000)return fail(res,400,'Spreadsheet is too large.');
+      let parsed; try{parsed=parseWorkbook(data,{limitRows:5000,limitCols:100});}catch{return fail(res,400,'Could not read this XLSX file.');}
+      return json(res,200,{filename,sheets:parsed.sheets});
     }
     if(url.pathname.startsWith('/api/')) return fail(res,404,'API route not found.');
     return staticFile(req,res,url);

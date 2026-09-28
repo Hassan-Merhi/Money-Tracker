@@ -83,3 +83,25 @@ test('Block D bank expense and income rows round-trip through transaction import
   assert.deepEqual(out.state.entries.map(e=>e.type),['account_expense','account_income']);
   assert.ok(out.state.entries.every(e=>e.accountId===out.state.accounts[0].id));
 });
+
+
+test('categorized account expense export rows re-import into matching existing categories',()=>{
+  const state=baseState();
+  state.categories=[
+    {id:'category_food',name:'Food',kind:'expense',icon:'🍽️',archived:false},
+    {id:'category_salary',name:'Salary',kind:'income',icon:'💼',archived:false}
+  ];
+  const rows=[
+    {Date:'2026-09-28',Type:'account_expense',Account:'Bank',Amount:20,Currency:'USD',Category:'Food',Description:'Lunch'},
+    {Date:'2026-09-28',Type:'account_income',Account:'Bank',Amount:300,Currency:'USD',Category:'Salary',Description:'Pay'}
+  ];
+  const out=applyImport({state,rows,mode:'transactions',mapping:{date:'Date',type:'Type',account:'Account',amount:'Amount',currency:'Currency',category:'Category',description:'Description'},uidFactory:ids()});
+  assert.equal(out.result.entries,2);
+  assert.deepEqual(out.state.entries.map(e=>e.categoryId),['category_food','category_salary']);
+});
+
+test('unknown imported categories do not block account expense migration',()=>{
+  const state=baseState();state.categories=[{id:'category_food',name:'Food',kind:'expense',icon:'',archived:false}];
+  const out=applyImport({state,rows:[{Date:'2026-09-28',Type:'account_expense',Account:'Bank',Amount:20,Currency:'USD',Category:'Unknown'}],mode:'transactions',mapping:{date:'Date',type:'Type',account:'Account',amount:'Amount',currency:'Currency',category:'Category'},uidFactory:ids()});
+  assert.equal(out.result.entries,1);assert.equal(out.state.entries[0].categoryId,null);assert.match(out.result.errors[0],/uncategorized/);
+});

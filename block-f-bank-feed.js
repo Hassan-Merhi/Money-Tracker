@@ -194,7 +194,11 @@ function bind(main,state,ctx){
       const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;
       ctx.showToast('Bank transaction posted to the ledger.');ctx.replaceState(result.state);
     }catch(error){
-      if(error.status===409){try{ctx.replaceState(await loadState());}catch{}}
+      if(error.status===409){
+        try{ctx.replaceState(await loadState());}catch{}
+        ctx.showToast(error.message||'Could not post this bank transaction.');
+        return;
+      }
       ctx.showToast(error.message||'Could not post this bank transaction.');paint(main,state,ctx);
     }
   }));

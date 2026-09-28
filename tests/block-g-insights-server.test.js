@@ -102,9 +102,12 @@ test('atomic JSON backup restore preserves category IDs and budgets',async()=>{
 });
 
 test('categories and budgets are isolated by user',async()=>{
-  const reg=await request('/api/auth/register',{method:'POST',body:{email:`blockg-other-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'},cookie:'',csrf:''});
-  assert.equal(reg.res.status,201);
-  const other=(await request('/api/state',{cookie:reg.cookie,csrf:reg.data.csrfToken})).data;
+  const email=`blockg-other-${Date.now()}@example.com`;
+  const created=await request('/api/users',{method:'POST',body:{email,password:'another secure password'}});
+  assert.equal(created.res.status,201);
+  const login=await request('/api/auth/login',{method:'POST',body:{email,password:'another secure password'},cookie:'',csrf:''});
+  assert.equal(login.res.status,200);
+  const other=(await request('/api/state',{cookie:login.cookie,csrf:login.data.csrfToken})).data;
   assert.equal(other.categories.some(c=>c.id===customCategoryId),false);
   assert.deepEqual(other.budgets,[]);
   assert.ok(other.categories.some(c=>c.id==='category_food'));

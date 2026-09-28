@@ -608,8 +608,20 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
       const parts=url.pathname.slice('/api/categories/'.length).split('/').filter(Boolean),id=decodeURIComponent(parts[0]||''),action=parts[1]||'';
       if(!idOk(id,'category'))return fail(res,400,'Invalid category.');
-      if(!action&&req.method==='PUT'){const body=await bodyJson(req);return json(res,200,{category:insights.updateCategory(a.user_id,id,body),...insights.list(a.user_id)});}
-      if(action==='archive'&&req.method==='POST')return json(res,200,{category:insights.archiveCategory(a.user_id,id),...insights.list(a.user_id)});
+      if(!action&&req.method==='PUT'){
+        const body=await bodyJson(req),newKind=String(body?.kind||'expense');
+        const supports=type=>newKind==='both'||(type==='account_expense'&&newKind==='expense')||(type==='account_income'&&newKind==='income');
+        const incompatibleEntry=q.entries.all(a.user_id).find(entry=>entry.categoryId===id&&!supports(entry.type));
+        const incompatibleRule=loadRecurringRules(a.user_id).find(rule=>rule.template?.categoryId===id&&!supports(rule.template?.type));
+        if(incompatibleEntry||incompatibleRule)return fail(res,400,'That category type is already used by transactions or recurring schedules. Use “Both” or keep its current type.');
+        const category=insights.updateCategory(a.user_id,id,body);bankFeed.reconcileReferences(a.user_id);
+        return json(res,200,{category,...insights.list(a.user_id)});
+      }
+      if(action==='archive'&&req.method==='POST'){
+        if(loadRecurringRules(a.user_id).some(rule=>rule.isActive&&rule.template?.categoryId===id))return fail(res,400,'An active recurring schedule still uses this category. Update or pause that schedule first.');
+        const category=insights.archiveCategory(a.user_id,id);bankFeed.reconcileReferences(a.user_id);
+        return json(res,200,{category,...insights.list(a.user_id)});
+      }
       if(action==='restore'&&req.method==='POST')return json(res,200,{category:insights.restoreCategory(a.user_id,id),...insights.list(a.user_id)});
       return fail(res,405,'Category action not supported.');
     }

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL DEFAULT 'My Ledger',
   password_hash TEXT NOT NULL,
   default_currency TEXT NOT NULL DEFAULT 'USD',
+  is_owner INTEGER NOT NULL DEFAULT 0,
   revision INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );
@@ -117,6 +118,11 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is_active, next_due_date);
 `);
+const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(row => row.name));
+if (!userColumns.has('is_owner')) db.exec("ALTER TABLE users ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0");
+const ownerCount = Number(db.prepare('SELECT COUNT(*) AS count FROM users WHERE is_owner=1').get()?.count || 0);
+if (!ownerCount) db.prepare("UPDATE users SET is_owner=1 WHERE id=(SELECT id FROM users ORDER BY created_at LIMIT 1)").run();
+
 const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
 if (!entryColumns.has('split_json')) db.exec("ALTER TABLE entries ADD COLUMN split_json TEXT NOT NULL DEFAULT '[]'");
 if (!entryColumns.has('category_id')) db.exec("ALTER TABLE entries ADD COLUMN category_id TEXT");
@@ -125,9 +131,11 @@ const insights = createInsightsService(db);
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
-  userById: db.prepare('SELECT id,email,display_name,default_currency,revision,created_at FROM users WHERE id = ?'),
-  createUser: db.prepare('INSERT INTO users(id,email,display_name,password_hash,default_currency,revision,created_at) VALUES(?,?,?,?,?,1,?)'),
-  sessionByHash: db.prepare(`SELECT s.token_hash,s.csrf_token,s.expires_at,u.id AS user_id,u.email,u.display_name,u.default_currency,u.revision
+  userById: db.prepare('SELECT id,email,display_name,default_currency,is_owner AS isOwner,revision,created_at FROM users WHERE id = ?'),
+  userCount: db.prepare('SELECT COUNT(*) AS count FROM users'),
+  managedUsers: db.prepare('SELECT id,email,is_owner AS isOwner,created_at AS createdAt FROM users ORDER BY created_at'),
+  createUser: db.prepare('INSERT INTO users(id,email,display_name,password_hash,default_currency,is_owner,revision,created_at) VALUES(?,?,?,?,?,?,1,?)'),
+  sessionByHash: db.prepare(`SELECT s.token_hash,s.csrf_token,s.expires_at,u.id AS user_id,u.email,u.display_name,u.default_currency,u.is_owner,u.revision
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?`),
   insertSession: db.prepare('INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
@@ -492,26 +500,46 @@ export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
     if(url.pathname==='/api/health'){return json(res,200,{ok:true});}
+    if(url.pathname==='/api/auth/status'&&req.method==='GET'){
+      return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
+    }
     if(url.pathname==='/api/auth/register'&&req.method==='POST'){
       if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
-      const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), display=safeStr(b.displayName,80)||'My Ledger', password=String(b.password||'');
+      if(Number(q.userCount.get()?.count||0)>0)return fail(res,403,'Account creation is locked. Sign in and add another account from Settings.');
+      const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||'');
       if(!/^\S+@\S+\.\S+$/.test(email))return fail(res,400,'Enter a valid email.');
       if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
       if(q.userByEmail.get(email))return fail(res,409,'An account with that email already exists.');
-      const id=`user_${randomUUID()}`, created=nowIso(); q.createUser.run(id,email,display,hashPassword(password),'USD',created);
-      const s=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD'},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
+      const id=`user_${randomUUID()}`, created=nowIso(), display='Money Tracker'; q.createUser.run(id,email,display,hashPassword(password),'USD',1,created);
+      const s=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
     }
     if(url.pathname==='/api/auth/login'&&req.method==='POST'){
       if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||''), u=q.userByEmail.get(email);
       if(!u||!verifyPassword(password,u.password_hash))return fail(res,401,'Email or password is incorrect.');
-      const s=createSession(u.id); return json(res,200,{user:{id:u.id,email:u.email,displayName:u.display_name,defaultCurrency:u.default_currency},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
+      const s=createSession(u.id); return json(res,200,{user:{id:u.id,email:u.email,displayName:u.display_name,defaultCurrency:u.default_currency,isOwner:Boolean(u.is_owner)},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
     }
     if(url.pathname==='/api/auth/me'&&req.method==='GET'){
-      const a=requireAuth(req,res); if(!a)return; return json(res,200,{user:{id:a.user_id,email:a.email,displayName:a.display_name,defaultCurrency:a.default_currency},csrfToken:a.csrf_token});
+      const a=requireAuth(req,res); if(!a)return; return json(res,200,{user:{id:a.user_id,email:a.email,displayName:a.display_name,defaultCurrency:a.default_currency,isOwner:Boolean(a.is_owner)},csrfToken:a.csrf_token});
     }
     if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return; q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
+    }
+    if(url.pathname==='/api/users'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      if(!a.is_owner)return fail(res,403,'Only the owner can manage user accounts.');
+      return json(res,200,{users:q.managedUsers.all().map(row=>({...row,isOwner:Boolean(row.isOwner)}))});
+    }
+    if(url.pathname==='/api/users'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      if(!a.is_owner)return fail(res,403,'Only the owner can manage user accounts.');
+      const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||'');
+      if(!/^\S+@\S+\.\S+$/.test(email))return fail(res,400,'Enter a valid email.');
+      if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
+      if(q.userByEmail.get(email))return fail(res,409,'An account with that email already exists.');
+      const id=`user_${randomUUID()}`, createdAt=nowIso(), display='Money Tracker';
+      q.createUser.run(id,email,display,hashPassword(password),a.default_currency,0,createdAt);
+      return json(res,201,{user:{id,email,isOwner:false,createdAt}});
     }
     if(url.pathname==='/api/attachments'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return;

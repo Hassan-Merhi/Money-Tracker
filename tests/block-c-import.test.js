@@ -68,3 +68,18 @@ test('Block D split details round-trip into a Block B split purchase',()=>{
   assert.equal(out.state.entries[0].type,'split_paid_for_people');
   assert.deepEqual(out.state.entries[0].splits.map(s=>s.amount),[10,15]);
 });
+
+
+test('Block D bank expense and income rows round-trip through transaction import',()=>{
+  const rows=[
+    {Date:'2026-09-27',Type:'account_expense',Account:'Bank',Amount:25,Currency:'USD',Merchant:'Amazon',Description:'Personal order'},
+    {Date:'2026-09-28',Type:'account_income',Account:'Bank',Amount:500,Currency:'USD',Merchant:'Employer',Description:'Payroll'}
+  ];
+  const mapping={date:'Date',type:'Type',account:'Account',amount:'Amount',currency:'Currency',merchant:'Merchant',description:'Description'};
+  const out=applyImport({state:baseState(),rows,mode:'transactions',mapping,uidFactory:ids()});
+  assert.equal(out.result.accounts,1);
+  assert.equal(out.result.people,0);
+  assert.equal(out.result.entries,2);
+  assert.deepEqual(out.state.entries.map(e=>e.type),['account_expense','account_income']);
+  assert.ok(out.state.entries.every(e=>e.accountId===out.state.accounts[0].id));
+});

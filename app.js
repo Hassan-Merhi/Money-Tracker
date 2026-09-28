@@ -137,6 +137,7 @@ function renderDashboard(main) {
         <div class="quick-grid">
           <button class="quick" data-action="paid_for_person"><span class="qicon">🛒</span><strong>I paid for someone</strong><small>They owe you more</small></button>
           <button class="quick" data-action="received_from_person"><span class="qicon">💵</span><strong>I got paid back</strong><small>They owe you less</small></button>
+          <button class="quick" data-action="${SPLIT_ENTRY_TYPE}"><span class="qicon">👥</span><strong>Split a purchase</strong><small>One payment, multiple people</small></button>
           <button class="quick" data-action="borrowed_from_person"><span class="qicon">🤝</span><strong>I borrowed money</strong><small>You owe them more</small></button>
           <button class="quick" data-action="paid_to_person"><span class="qicon">✅</span><strong>I paid them back</strong><small>You owe them less</small></button>
           <button class="quick" data-action="person"><span class="qicon">👤</span><strong>Add a person</strong><small>Create a new statement</small></button>
@@ -195,7 +196,7 @@ function statementTable(entries){
 function renderAccounts(main) {
   const balances=accountBalances(state.entries,state.accounts);
   main.innerHTML=`<div class="panel-head"><div><p class="muted">Opening balance + all linked ledger movements.</p></div><div class="page-actions"><button class="btn" id="transferBtn">⇄ Transfer</button><button class="btn primary" id="addAccount">＋ Add account</button></div></div>
-  ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='Cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
+  ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
   main.querySelector('#addAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#emptyAddAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#transferBtn')?.addEventListener('click',()=>openTransferModal());
@@ -265,7 +266,7 @@ function openAccountModal(existing=null){
   const isEdit=!!existing;
   openModal(isEdit?'Edit account':'Add account',`<form id="accountForm" class="form-grid">
     <div class="field span-2"><label>Account name</label><input class="input" name="name" required maxlength="80" value="${escapeHtml(existing?.name||'')}" placeholder="e.g. Bank Audi USD / Cash USD"></div>
-    <div class="field"><label>Type</label><select class="select" name="type">${['Bank','Cash','Card','Wallet','Other'].map(x=>`<option ${existing?.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label>Type</label><select class="select" name="type">${[['bank','Bank'],['cash','Cash'],['card','Card'],['wallet','Wallet'],['other','Other']].map(([v,l])=>`<option value="${v}" ${existing?.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
     <div class="field"><label>Currency</label><select class="select" name="currency" ${isEdit?'disabled':''}>${currencyOptions(existing?.currency||state.settings.defaultCurrency)}</select></div>
     <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="0.01" value="${existing?.openingBalance??0}"><span class="muted tiny">Use the actual balance at the point you start tracking this account.</span></div>
   </form>`,()=>document.querySelector('#accountForm').requestSubmit());
@@ -400,7 +401,7 @@ function openModal(title,body,onSave=null,showFooter=true){
 function closeModal(){document.querySelector('.modal-backdrop')?.remove()}
 
 function deleteEntry(id){const e=state.entries.find(x=>x.id===id);if(!e)return;if(confirm('Delete this transaction? Balances will recalculate immediately.')){state.entries=state.entries.filter(x=>x.id!==id);persist('Transaction deleted.');closeModal();}}
-function deletePerson(id){const linked=state.entries.some(e=>e.personId===id);if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){state.people=state.people.filter(p=>p.id!==id);persist('Person deleted.');closeModal();location.hash='#people';}}
+function deletePerson(id){const linked=state.entries.some(e=>entryTouchesPerson(e,id));if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){state.people=state.people.filter(p=>p.id!==id);persist('Person deleted.');closeModal();location.hash='#people';}}
 function deleteAccount(id){const linked=state.entries.some(e=>e.accountId===id||e.fromAccountId===id||e.toAccountId===id);if(linked){showToast('Delete or move this account’s transactions first.');return}if(confirm('Delete this account?')){state.accounts=state.accounts.filter(a=>a.id!==id);persist('Account deleted.');closeModal();}}
 
 function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}" ${selected===c?'selected':''}>${c}</option>`).join('')}
@@ -423,6 +424,7 @@ async function boot(){
 }
 
 document.addEventListener('keydown',event=>{
+  if(!state)return;
   if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey)return;
   const target=event.target;
   if(target?.matches?.('input,textarea,select,[contenteditable="true"]'))return;

@@ -52,6 +52,15 @@ test('persists people accounts and transactions in the database',async()=>{
 });
 
 
+test('supports person debt activity without any bank or cash account',async()=>{
+  const t=new Date().toISOString();
+  state.entries.push({id:'entry_debt_only',type:'borrowed_from_person',personId:'person_alice',accountId:null,amount:40,currency:'USD',date:'2026-09-28',merchant:'',description:'Alice covered dinner',createdAt:t,updatedAt:t});
+  const put=await request('/api/state',{method:'PUT',cookie,csrf,body:state});
+  assert.equal(put.res.status,200);state=put.data;
+  const entry=state.entries.find(e=>e.id==='entry_debt_only');
+  assert.equal(entry.accountId,null);assert.equal(entry.currency,'USD');assert.equal(entry.amount,40);
+});
+
 test('persists validated split allocations',async()=>{
   const t=new Date().toISOString();
   state.people.push({id:'person_bob',name:'Bob',note:'Friend',createdAt:t});

@@ -14,6 +14,7 @@ let toastTimer;
 let saving = false;
 
 const app = document.querySelector('#app');
+const DEBT_ONLY_MODE = true;
 const THEME_KEY='mot-theme';
 const themeMedia=window.matchMedia?.('(prefers-color-scheme: dark)');
 
@@ -85,10 +86,10 @@ function titleFor(page) {
 
 function subFor(page) {
   return ({
-    dashboard:'See exactly what is owed and where your money sits.',
+    dashboard:'See exactly who owes you and who you owe.',
     people:'Track each person separately with a clean running statement.',
     accounts:'Bank accounts, cash, cards and transfers between them.',
-    transactions:'Every movement that affects a person or one of your accounts.',
+    transactions:'Every debt, repayment, and balance change between you and a person.',
     bank:'Import statements, auto-classify rows, and review them before posting.',
     insights:'Categorize personal cash flow, set monthly budgets, and see spending trends.',
     scheduled:'Recurring transactions, due dates and reminders you review before posting.',
@@ -99,23 +100,26 @@ function subFor(page) {
 }
 
 function render() {
+  const hiddenInDebtMode=['accounts','bank','insights','scheduled'];
+  if(DEBT_ONLY_MODE && hiddenInDebtMode.includes(route.page)){location.hash='#dashboard';return;}
   const navPage = route.page === 'person' ? 'people' : route.page;
+  const visiblePages=DEBT_ONLY_MODE?['dashboard','people','transactions','reports','settings']:['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'];
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Money owed tracker</small></div></div>
-        <nav class="nav">${['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
-        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Secure server storage · reports enabled<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
+        <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Who owes who</small></div></div>
+        <nav class="nav">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Debt tracking mode · banks can be added later<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2>${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn primary" id="quickEntry">＋ Quick add</button></div>
+          <div class="top-actions">${DEBT_ONLY_MODE?'':`<button class="btn" id="quickTransfer">⇄ Transfer</button>`}<button class="btn primary" id="quickEntry">＋ Add</button></div>
         </header>
         <main class="main" id="main"></main>
       </section>
-      <button class="mobile-fab" id="mobileQuickEntry" aria-label="Quick add transaction">＋</button>
-      <nav class="mobile-nav">${['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <button class="mobile-fab" id="mobileQuickEntry" aria-label="Add debt transaction">＋</button>
+      <nav class="mobile-nav" style="grid-template-columns:repeat(${visiblePages.length},1fr)">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
@@ -147,44 +151,35 @@ function currencyTotalsMarkup(totals, key, fallback='0') {
 function renderDashboard(main) {
   const pBalances = personBalances(state.entries, state.people);
   const totals = totalsFromBalances(pBalances);
-  const aBalances = accountBalances(state.entries, state.accounts);
-  const liquid = {};
-  for (const acc of state.accounts) liquid[acc.currency] = (liquid[acc.currency] || 0) + (aBalances[acc.id] || 0);
-  const recent = [...state.entries].sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt)).slice(0,8);
+  const recent = [...state.entries].filter(e=>PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt)).slice(0,8);
 
   main.innerHTML = `
-    <div class="grid stats">
-      <div class="card stat good"><div class="stat-top"><div class="stat-label">PEOPLE OWE ME</div><div class="stat-icon">↗</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'owedToMe','0')}</div><div class="stat-note">Positive personal balances</div></div>
-      <div class="card stat bad"><div class="stat-top"><div class="stat-label">I OWE PEOPLE</div><div class="stat-icon">↘</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe','0')}</div><div class="stat-note">Amounts you need to repay</div></div>
-      <div class="card stat net"><div class="stat-top"><div class="stat-label">NET PERSONAL POSITION</div><div class="stat-icon">≈</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net','0')}</div><div class="stat-note">Owed to you minus what you owe</div></div>
-      <div class="card stat"><div class="stat-top"><div class="stat-label">ACCOUNT BALANCES</div><div class="stat-icon">▣</div></div><div class="stat-value">${Object.keys(liquid).length ? Object.entries(liquid).map(([c,v])=>`<div>${money(v,c)}</div>`).join('') : '0'}</div><div class="stat-note">Banks, cash and wallets combined by currency</div></div>
+    <div class="grid stats debt-stats">
+      <div class="card stat good"><div class="stat-top"><div class="stat-label">PEOPLE OWE ME</div><div class="stat-icon">↗</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'owedToMe','0')}</div><div class="stat-note">Money you should receive</div></div>
+      <div class="card stat bad"><div class="stat-top"><div class="stat-label">I OWE PEOPLE</div><div class="stat-icon">↘</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe','0')}</div><div class="stat-note">Money you need to pay</div></div>
+      <div class="card stat net"><div class="stat-top"><div class="stat-label">NET POSITION</div><div class="stat-icon">≈</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net','0')}</div><div class="stat-note">Owed to you minus what you owe</div></div>
     </div>
     <div class="grid section-grid">
       <section class="card panel">
-        <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest money movements</p></div><button class="btn small" data-go="transactions">View all</button></div>
-        ${recent.length ? transactionTable(recent, {compact:true}) : `<div class="empty"><strong>No transactions yet</strong>Start with “Add transaction” when you buy something for someone, receive money, borrow, or repay.</div>`}
+        <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest debts and repayments</p></div><button class="btn small" data-go="transactions">View all</button></div>
+        ${recent.length ? transactionTable(recent, {compact:true}) : `<div class="empty"><strong>No debt activity yet</strong>Add a person, then record what they owe you or what you owe them.</div>`}
       </section>
       <section class="card panel">
-        <div class="panel-head"><div><h3>Quick actions</h3><p>Common actions in one tap</p></div></div>
+        <div class="panel-head"><div><h3>Quick actions</h3><p>No bank account needed</p></div></div>
         <div class="quick-grid">
-          <button class="quick" data-action="paid_for_person"><span class="qicon">🛒</span><strong>I paid for someone</strong><small>They owe you more</small></button>
-          <button class="quick" data-action="received_from_person"><span class="qicon">💵</span><strong>I got paid back</strong><small>They owe you less</small></button>
-          <button class="quick" data-action="${SPLIT_ENTRY_TYPE}"><span class="qicon">👥</span><strong>Split a purchase</strong><small>One payment, multiple people</small></button>
-          <button class="quick" data-action="borrowed_from_person"><span class="qicon">🤝</span><strong>I borrowed money</strong><small>You owe them more</small></button>
-          <button class="quick" data-action="paid_to_person"><span class="qicon">✅</span><strong>I paid them back</strong><small>You owe them less</small></button>
-          <button class="quick" data-action="person"><span class="qicon">👤</span><strong>Add a person</strong><small>Create a new statement</small></button>
-          <button class="quick" data-action="account"><span class="qicon">🏦</span><strong>Add an account</strong><small>Bank, cash or wallet</small></button>
+          <button class="quick" data-action="paid_for_person"><span class="qicon">↗</span><strong>They owe me</strong><small>I paid for them / lent them money</small></button>
+          <button class="quick" data-action="received_from_person"><span class="qicon">💵</span><strong>They paid me</strong><small>Reduce what they owe me</small></button>
+          <button class="quick" data-action="borrowed_from_person"><span class="qicon">↘</span><strong>I owe them</strong><small>They paid for me / lent me money</small></button>
+          <button class="quick" data-action="paid_to_person"><span class="qicon">✅</span><strong>I paid them</strong><small>Reduce what I owe them</small></button>
+          <button class="quick" data-action="${SPLIT_ENTRY_TYPE}"><span class="qicon">👥</span><strong>Split between people</strong><small>One amount owed by multiple people</small></button>
+          <button class="quick" data-action="person"><span class="qicon">👤</span><strong>Add a person</strong><small>Create a statement</small></button>
         </div>
       </section>
-      <section class="card panel"><div id="recurringDashboardWidget"><div class="muted">Loading scheduled reminders…</div></div></section>
-      <section class="card panel"><div id="budgetDashboardWidget"><div class="muted">Loading monthly budgets…</div></div></section>
     </div>`;
-  mountRecurringDashboardWidget(main.querySelector('#recurringDashboardWidget'),state,{showToast,replaceState(next){state=next;render();}});
-  mountBudgetDashboardWidget(main.querySelector('#budgetDashboardWidget'),state);
   main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
-    if (a==='person') openPersonModal(); else if(a==='account') openAccountModal(); else openTransactionModal(null,{type:a});
+    if (a==='person') openPersonModal(); else openTransactionModal(null,{type:a});
   }));
 }
 
@@ -249,15 +244,14 @@ function openAccountDetail(accountId){
 }
 
 function renderTransactions(main) {
-  const type=route.params.get('type')||''; const person=route.params.get('person')||''; const account=route.params.get('account')||''; const category=route.params.get('category')||'';
-  let entries=[...state.entries].sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
-  if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>entryTouchesPerson(e,person)); if(account) entries=entries.filter(e=>e.accountId===account||e.fromAccountId===account||e.toAccountId===account);
-  if(category) entries=entries.filter(e=>category==='uncategorized'?(['account_expense','account_income'].includes(e.type)&&!e.categoryId):e.categoryId===category);
-  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All types</option>${entryTypeOptions(type)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class="select" id="filterAccount"><option value="">All accounts</option>${state.accounts.map(a=>`<option value="${a.id}" ${account===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}</select><select class="select" id="filterCategory"><option value="">All categories</option><option value="uncategorized" ${category==='uncategorized'?'selected':''}>Uncategorized</option>${(state.categories||[]).map(c=>`<option value="${c.id}" ${category===c.id?'selected':''}>${escapeHtml((c.icon?c.icon+' ':'')+c.name)}${c.archived?' (archived)':''}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add transaction</button></div>
-  <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching transactions</strong>Try another filter or add a new transaction.</div>'}</section>`;
-  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value,a=main.querySelector('#filterAccount').value,g=main.querySelector('#filterCategory').value;if(t)q.set('type',t);if(p)q.set('person',p);if(a)q.set('account',a);if(g)q.set('category',g);location.hash=`#transactions${q.toString()?'?'+q:''}`};
-  ['#filterType','#filterPerson','#filterAccount','#filterCategory'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
-  main.querySelector('#addTxn')?.addEventListener('click',()=>openTransactionModal());
+  const type=route.params.get('type')||''; const person=route.params.get('person')||'';
+  let entries=[...state.entries].filter(e=>DEBT_ONLY_MODE?PERSON_ENTRY_TYPES.includes(e.type):true).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
+  if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>entryTouchesPerson(e,person));
+  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All debt activity</option>${entryTypeOptions(type,false)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add</button></div>
+  <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching debt activity</strong>Add what someone owes you, what you owe them, or a repayment.</div>'}</section>`;
+  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value;if(t)q.set('type',t);if(p)q.set('person',p);location.hash=`#transactions${q.toString()?'?'+q:''}`};
+  ['#filterType','#filterPerson'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
+  main.querySelector('#addTxn')?.addEventListener('click',()=>openQuickMenu());
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));
 }
@@ -335,17 +329,15 @@ function rememberUsed(personId,accountId,type) {
 function openQuickMenu(){
   const recent=lastUsed();
   const actions=[
-    ['paid_for_person','🛒','Paid for someone','They owe you more'],
-    ['received_from_person','💵','Got paid back','They owe you less'],
-    [SPLIT_ENTRY_TYPE,'👥','Split a purchase','One payment, multiple people'],
-    ['borrowed_from_person','🤝','Borrowed money','You owe them more'],
-    ['paid_to_person','✅','Paid someone back','You owe them less'],
-    ['account_expense','🧾','Personal expense','Track spending and budgets'],
-    ['account_income','＋','Account income','Track personal income']
+    ['paid_for_person','↗','They owe me','I paid for them or lent them money'],
+    ['received_from_person','💵','They paid me','Reduce what they owe me'],
+    ['borrowed_from_person','↘','I owe them','They paid for me or lent me money'],
+    ['paid_to_person','✅','I paid them','Reduce what I owe them'],
+    [SPLIT_ENTRY_TYPE,'👥','Split between people','One amount owed by multiple people'],
+    ['person_adjustment','±','Adjust balance','Set or correct a person balance']
   ];
-  openModal('Quick add',`<div class="quick-menu">${actions.map(([type,icon,title,note])=>`<button class="quick" data-fast-type="${type}"><span class="qicon">${icon}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}<button class="quick" data-fast-transfer><span class="qicon">⇄</span><strong>Transfer money</strong><small>Between your accounts</small></button></div><div class="shortcut-hint">Keyboard: <kbd>N</kbd> quick add · <kbd>T</kbd> transfer</div>`,null,false);
-  document.querySelectorAll('[data-fast-type]').forEach(button=>button.addEventListener('click',()=>{const type=button.dataset.fastType;closeModal();openTransactionModal(null,{type,personId:recent.personId,accountId:recent.accountId});}));
-  document.querySelector('[data-fast-transfer]')?.addEventListener('click',()=>{closeModal();openTransferModal();});
+  openModal('Add debt activity',`<div class="quick-menu">${actions.map(([type,icon,title,note])=>`<button class="quick" data-fast-type="${type}"><span class="qicon">${icon}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}</div><div class="shortcut-hint">Keyboard: <kbd>N</kbd> add debt activity</div>`,null,false);
+  document.querySelectorAll('[data-fast-type]').forEach(button=>button.addEventListener('click',()=>{const type=button.dataset.fastType;closeModal();openTransactionModal(null,{type,personId:recent.personId});}));
 }
 
 function splitRowMarkup(split,index){
@@ -386,7 +378,7 @@ function openTransactionModal(existing=null,prefill={}){
     <div class="field" id="txnCategoryField"><label>Category</label><select class="select" name="categoryId" id="txnCategory"></select></div>
     <div class="field span-2"><label>Notes / details</label><textarea class="textarea compact-textarea" name="description" maxlength="500" placeholder="e.g. Headphones, order #123, delivery details…">${escapeHtml(existing?.description||'')}</textarea></div>
     <div class="field span-2" id="splitSection" hidden>
-      <div class="split-head"><div><label>Split between people</label><div class="muted tiny">The account is charged once; each person gets only their allocated amount.</div></div><div class="page-actions"><button class="btn small" type="button" id="equalSplit">Equal split</button><button class="btn small" type="button" id="addSplitRow">＋ Person</button></div></div>
+      <div class="split-head"><div><label>Split between people</label><div class="muted tiny">${DEBT_ONLY_MODE?'Divide the total across people. No bank account is needed.':'The account is charged once; each person gets only their allocated amount.'}</div></div><div class="page-actions"><button class="btn small" type="button" id="equalSplit">Equal split</button><button class="btn small" type="button" id="addSplitRow">＋ Person</button></div></div>
       <div class="split-list" id="splitRows">${seedSplits.map(splitRowMarkup).join('')}</div>
       <div class="split-total" id="splitTotal"></div>
     </div>
@@ -405,7 +397,7 @@ function openTransactionModal(existing=null,prefill={}){
   amountEl.addEventListener('input',updateSplitTotal);
   bindSplitRows();
 
-  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
+  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=(DEBT_ONLY_MODE&&!accountOnly)?'none':(adjust?'none':'grid');form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
   typeEl.addEventListener('change',()=>{fillCategories();sync();});accEl.addEventListener('change',sync);fillCategories();sync();
   const filesEl=form.querySelector('#txnFiles');filesEl.addEventListener('change',()=>{const files=[...(filesEl.files||[])];form.querySelector('#fileSelection').textContent=files.length?files.map(file=>`${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`).join(' · '):'JPG, PNG, WebP, GIF, PDF or text · max 8 MB each';});
   if(existing) refreshAttachmentPanel(existing.id);
@@ -415,12 +407,12 @@ function openTransactionModal(existing=null,prefill={}){
     const fd=new FormData(form),t=fd.get('type'),split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income',person=fd.get('personId'),amount=Number(fd.get('amount')),files=[...(filesEl.files||[])];
     if(!(amount>0)){showToast('Enter an amount greater than zero.');return}
     if(!split&&!accountOnly&&!person){showToast('Choose a person.');return}
-    if(t!=='person_adjustment'&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}
+    if((t==='account_expense'||t==='account_income')&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}
     if(files.some(file=>file.size>8*1024*1024)){showToast('Each attachment must be 8 MB or smaller.');return}
     const splits=split?readSplits():[];
     if(split){const error=validateSplit(splits,amount);if(error){showToast(error);return}}
     const acc=state.accounts.find(a=>a.id===fd.get('accountId'));
-    const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:(fd.get('accountId')||null),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
     if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
     if(existing)Object.assign(existing,item);else state.entries.push(item);
     rememberUsed((split||accountOnly)?'':person,item.accountId,t);
@@ -462,8 +454,14 @@ function deleteAccount(id){const linked=state.entries.some(e=>e.accountId===id||
 
 function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}" ${selected===c?'selected':''}>${c}</option>`).join('')}
 function entryTypeOptions(selected,includeTransfer=true){
-  const types=[['paid_for_person','Paid for someone'],[SPLIT_ENTRY_TYPE,'Split purchase'],['received_from_person','Received repayment'],['borrowed_from_person','Borrowed from person'],['paid_to_person','Paid person back'],['account_expense','Account expense'],['account_income','Account income'],['person_adjustment','Balance adjustment']];
-  if(includeTransfer)types.push(['account_transfer','Account transfer']);
+  const debtTypes=[['paid_for_person','They owe me'],['received_from_person','They paid me'],['borrowed_from_person','I owe them'],['paid_to_person','I paid them'],[SPLIT_ENTRY_TYPE,'Split between people'],['person_adjustment','Balance adjustment']];
+  const advanced=[['account_expense','Account expense'],['account_income','Account income']];
+  let types=DEBT_ONLY_MODE?[...debtTypes]:[...debtTypes,...advanced];
+  if(!DEBT_ONLY_MODE&&includeTransfer)types.push(['account_transfer','Account transfer']);
+  if(selected&&!types.some(([v])=>v===selected)){
+    const fallback=[...advanced,['account_transfer','Account transfer']].find(([v])=>v===selected);
+    if(fallback)types.push(fallback);
+  }
   return types.map(([v,l])=>`<option value="${v}" ${selected===v?'selected':''}>${l}</option>`).join('');
 }
 
@@ -492,7 +490,7 @@ document.addEventListener('keydown',event=>{
   if(target?.matches?.('input,textarea,select,[contenteditable="true"]'))return;
   if(document.querySelector('.modal-backdrop'))return;
   if(event.key.toLowerCase()==='n'){event.preventDefault();openQuickMenu();}
-  if(event.key.toLowerCase()==='t'){event.preventDefault();openTransferModal();}
+  if(!DEBT_ONLY_MODE&&event.key.toLowerCase()==='t'){event.preventDefault();openTransferModal();}
 });
 
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}

@@ -290,7 +290,7 @@ function loadState(userId) {
 }
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
-  const clean=validateState(input,user);
+  let clean; try{clean=validateState(input,user);}catch(error){throw Object.assign(error,{status:400});}
   db.exec('BEGIN IMMEDIATE');
   try{
     const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,user.user_id,expected);

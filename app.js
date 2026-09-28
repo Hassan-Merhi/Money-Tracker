@@ -14,6 +14,28 @@ let toastTimer;
 let saving = false;
 
 const app = document.querySelector('#app');
+const THEME_KEY='mot-theme';
+const themeMedia=window.matchMedia?.('(prefers-color-scheme: dark)');
+
+function themePreference(){
+  try{
+    const value=localStorage.getItem(THEME_KEY);
+    return ['system','light','dark'].includes(value)?value:'system';
+  }catch{return 'system';}
+}
+function applyTheme(preference=themePreference()){
+  const effective=preference==='system'?(themeMedia?.matches?'dark':'light'):preference;
+  document.documentElement.dataset.theme=effective;
+  document.documentElement.style.colorScheme=effective;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',effective==='dark'?'#0b1120':'#111827');
+}
+function saveThemePreference(preference){
+  const value=['system','light','dark'].includes(preference)?preference:'system';
+  try{localStorage.setItem(THEME_KEY,value);}catch{}
+  applyTheme(value);
+}
+applyTheme();
+themeMedia?.addEventListener?.('change',()=>{if(themePreference()==='system')applyTheme('system');});
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -252,14 +274,15 @@ function transactionTable(entries,{compact=false}={}){
 
 function renderSettings(main) {
   main.innerHTML=`<div class="settings-grid">
-    <section class="card settings-card"><h3>General</h3><div class="form-grid"><div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div></div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
+    <section class="card settings-card"><h3>General</h3><div class="form-grid"><div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div><div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div></div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
     ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. Add any extra sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Sessions use an HttpOnly cookie; protected changes require a CSRF token and data is isolated per account.</p><button class="btn" id="settingsLogout">Sign out on this device</button></section>
     <section class="card settings-card"><h3>Backup & exports</h3><p class="muted">JSON backup remains available for recovery. Use Reports & Exports for formatted Excel workbooks and PDF reports.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export backup</button><button class="btn" id="importBackup">↑ Import backup</button><button class="btn" id="openReports">Open reports</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
     <section class="card settings-card"><h3>Balance rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
     <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts, transactions, attachments, recurring schedules, Bank Feed rows/rules, categories, and budgets from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all app data</button></section>
   </div>`;
-  main.querySelector('#saveSettings')?.addEventListener('click',()=>{state.settings.defaultCurrency=main.querySelector('#settingCurrency').value;persist('Settings saved.');});
+  main.querySelector('#saveSettings')?.addEventListener('click',()=>{state.settings.defaultCurrency=main.querySelector('#settingCurrency').value;saveThemePreference(main.querySelector('#settingTheme').value);persist('Settings saved.');});
+  main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
   main.querySelector('#exportBackup')?.addEventListener('click',()=>downloadText(`money-tracker-backup-${today()}.json`,JSON.stringify({...state,version:undefined},null,2)));
   main.querySelector('#importBackup')?.addEventListener('click',()=>main.querySelector('#backupFile').click());

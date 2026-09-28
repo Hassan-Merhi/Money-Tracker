@@ -1,5 +1,5 @@
-import { currentUser, login, register, logout, loadState, saveState, resetState, uid } from './lib/store.js';
-import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES } from './lib/ledger.js';
+import { currentUser, login, register, logout, loadState, saveState, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
+import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
 
@@ -20,12 +20,13 @@ function parseRoute() {
 window.addEventListener('hashchange', () => { route = parseRoute(); if (state) render(); });
 
 async function persist(message) {
-  if (saving) { showToast('Saving the previous change…'); return; }
+  if (saving) { showToast('Saving the previous change…'); return false; }
   saving = true;
   try {
     state = await saveState(state);
     if (message) showToast(message);
     render();
+    return true;
   } catch (error) {
     if (error.status === 409) {
       state = await loadState();
@@ -34,6 +35,7 @@ async function persist(message) {
     } else if (error.status === 401) {
       user = null; state = null; renderAuth('Your session expired. Sign in again.');
     } else { showToast(error.message || 'Could not save.'); }
+    return false;
   } finally { saving = false; }
 }
 
@@ -79,15 +81,17 @@ function render() {
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2>${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn primary" id="quickEntry">＋ Add transaction</button></div>
+          <div class="top-actions"><button class="btn" id="quickTransfer">⇄ Transfer</button><button class="btn primary" id="quickEntry">＋ Quick add</button></div>
         </header>
         <main class="main" id="main"></main>
       </section>
+      <button class="mobile-fab" id="mobileQuickEntry" aria-label="Quick add transaction">＋</button>
       <nav class="mobile-nav">${['dashboard','people','accounts','transactions','reports','settings'].map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
-  document.querySelector('#quickEntry')?.addEventListener('click', () => openTransactionModal());
+  document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
+  document.querySelector('#mobileQuickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());
   document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; renderAuth(); });
 
@@ -133,6 +137,7 @@ function renderDashboard(main) {
         <div class="quick-grid">
           <button class="quick" data-action="paid_for_person"><span class="qicon">🛒</span><strong>I paid for someone</strong><small>They owe you more</small></button>
           <button class="quick" data-action="received_from_person"><span class="qicon">💵</span><strong>I got paid back</strong><small>They owe you less</small></button>
+          <button class="quick" data-action="${SPLIT_ENTRY_TYPE}"><span class="qicon">👥</span><strong>Split a purchase</strong><small>One payment, multiple people</small></button>
           <button class="quick" data-action="borrowed_from_person"><span class="qicon">🤝</span><strong>I borrowed money</strong><small>You owe them more</small></button>
           <button class="quick" data-action="paid_to_person"><span class="qicon">✅</span><strong>I paid them back</strong><small>You owe them less</small></button>
           <button class="quick" data-action="person"><span class="qicon">👤</span><strong>Add a person</strong><small>Create a new statement</small></button>
@@ -172,7 +177,7 @@ function renderPerson(main, personId) {
   const person=state.people.find(p=>p.id===personId);
   if(!person){ main.innerHTML='<div class="empty">Person not found.</div>'; return; }
   const balances=personBalances(state.entries,state.people)[person.id]||{};
-  const personEntries=state.entries.filter(e=>e.personId===person.id && PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
+  const personEntries=runningStatement(state.entries,person.id).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
   main.innerHTML=`
     <div class="detail-header"><div class="detail-title"><div class="avatar">${escapeHtml(person.name.slice(0,2).toUpperCase())}</div><div><h2>${escapeHtml(person.name)}</h2><p>${escapeHtml(person.note||'Personal statement')}</p></div></div><div class="page-actions"><button class="btn" id="personPdf">↓ PDF statement</button><button class="btn" id="editPerson">✎ Edit</button><button class="btn primary" id="personTxn">＋ Add transaction</button></div></div>
     <div class="statement-summary">${Object.keys(balances).length?Object.entries(balances).map(([c,v])=>`<span class="pill ${v>0?'green':v<0?'red':''}">${v>0?'Owes you':v<0?'You owe':'Settled'} · ${money(Math.abs(v),c)}</span>`).join(''):'<span class="pill">Settled</span>'}</div>
@@ -185,16 +190,13 @@ function renderPerson(main, personId) {
 }
 
 function statementTable(entries){
-  const grouped={};
-  for(const e of entries){ const c=e.currency||'USD'; grouped[c]=runningStatement(state.entries,e.personId,c); }
-  const runningById={}; Object.values(grouped).flat().forEach(r=>runningById[r.id]=r.running);
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="right">Change</th><th class="right">Running balance</th><th></th></tr></thead><tbody>${entries.map(e=>{const d=personDelta(e);const c=e.currency||'USD';return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}</td><td class="right ${d>=0?'amount-pos':'amount-neg'}">${d>=0?'+':''}${money(d,c)}</td><td class="right strong">${money(runningById[e.id]||0,c)}</td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`}).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Notes</th><th class="right">Change</th><th class="right">Running balance</th><th></th></tr></thead><tbody>${entries.map(e=>{const d=Number.isFinite(e.delta)?e.delta:personDelta(e,e.personId);const c=e.currency||'USD';return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount}</div>`:''}</td><td class="right ${d>=0?'amount-pos':'amount-neg'}">${d>=0?'+':''}${money(d,c)}</td><td class="right strong">${money(e.running||0,c)}</td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderAccounts(main) {
   const balances=accountBalances(state.entries,state.accounts);
   main.innerHTML=`<div class="panel-head"><div><p class="muted">Opening balance + all linked ledger movements.</p></div><div class="page-actions"><button class="btn" id="transferBtn">⇄ Transfer</button><button class="btn primary" id="addAccount">＋ Add account</button></div></div>
-  ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='Cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
+  ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
   main.querySelector('#addAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#emptyAddAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#transferBtn')?.addEventListener('click',()=>openTransferModal());
@@ -213,7 +215,7 @@ function openAccountDetail(accountId){
 function renderTransactions(main) {
   const type=route.params.get('type')||''; const person=route.params.get('person')||''; const account=route.params.get('account')||'';
   let entries=[...state.entries].sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
-  if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>e.personId===person); if(account) entries=entries.filter(e=>e.accountId===account||e.fromAccountId===account||e.toAccountId===account);
+  if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>entryTouchesPerson(e,person)); if(account) entries=entries.filter(e=>e.accountId===account||e.fromAccountId===account||e.toAccountId===account);
   main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All types</option>${entryTypeOptions(type)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class="select" id="filterAccount"><option value="">All accounts</option>${state.accounts.map(a=>`<option value="${a.id}" ${account===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add transaction</button></div>
   <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching transactions</strong>Try another filter or add a new transaction.</div>'}</section>`;
   const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value,a=main.querySelector('#filterAccount').value;if(t)q.set('type',t);if(p)q.set('person',p);if(a)q.set('account',a);location.hash=`#transactions${q.toString()?'?'+q:''}`};
@@ -224,12 +226,12 @@ function renderTransactions(main) {
 }
 
 function transactionTable(entries,{compact=false}={}){
-  const pb=personBalances(state.entries,state.people); const ab=accountBalances(state.entries,state.accounts);
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Description</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
+  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
-    const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:escapeHtml(p?.name||'—');
+    const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
+    const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
-    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
+    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderSettings(main) {
@@ -264,34 +266,120 @@ function openAccountModal(existing=null){
   const isEdit=!!existing;
   openModal(isEdit?'Edit account':'Add account',`<form id="accountForm" class="form-grid">
     <div class="field span-2"><label>Account name</label><input class="input" name="name" required maxlength="80" value="${escapeHtml(existing?.name||'')}" placeholder="e.g. Bank Audi USD / Cash USD"></div>
-    <div class="field"><label>Type</label><select class="select" name="type">${['Bank','Cash','Card','Wallet','Other'].map(x=>`<option ${existing?.type===x?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label>Type</label><select class="select" name="type">${[['bank','Bank'],['cash','Cash'],['card','Card'],['wallet','Wallet'],['other','Other']].map(([v,l])=>`<option value="${v}" ${existing?.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
     <div class="field"><label>Currency</label><select class="select" name="currency" ${isEdit?'disabled':''}>${currencyOptions(existing?.currency||state.settings.defaultCurrency)}</select></div>
     <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="0.01" value="${existing?.openingBalance??0}"><span class="muted tiny">Use the actual balance at the point you start tracking this account.</span></div>
   </form>`,()=>document.querySelector('#accountForm').requestSubmit());
   document.querySelector('#accountForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const name=fd.get('name').trim();if(!name)return;if(existing){existing.name=name;existing.type=fd.get('type');existing.openingBalance=Number(fd.get('openingBalance')||0);persist('Account updated.');}else{state.accounts.push({id:uid('account'),name,type:fd.get('type'),currency:fd.get('currency'),openingBalance:Number(fd.get('openingBalance')||0),createdAt:new Date().toISOString()});persist('Account added.');}closeModal();});
 }
 
+function lastUsed() {
+  try { return JSON.parse(localStorage.getItem('mot-last-entry') || '{}'); } catch { return {}; }
+}
+function rememberUsed(personId,accountId,type) {
+  try { localStorage.setItem('mot-last-entry',JSON.stringify({personId,accountId,type})); } catch {}
+}
+
+function openQuickMenu(){
+  const recent=lastUsed();
+  const actions=[
+    ['paid_for_person','🛒','Paid for someone','They owe you more'],
+    ['received_from_person','💵','Got paid back','They owe you less'],
+    [SPLIT_ENTRY_TYPE,'👥','Split a purchase','One payment, multiple people'],
+    ['borrowed_from_person','🤝','Borrowed money','You owe them more'],
+    ['paid_to_person','✅','Paid someone back','You owe them less']
+  ];
+  openModal('Quick add',`<div class="quick-menu">${actions.map(([type,icon,title,note])=>`<button class="quick" data-fast-type="${type}"><span class="qicon">${icon}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}<button class="quick" data-fast-transfer><span class="qicon">⇄</span><strong>Transfer money</strong><small>Between your accounts</small></button></div><div class="shortcut-hint">Keyboard: <kbd>N</kbd> quick add · <kbd>T</kbd> transfer</div>`,null,false);
+  document.querySelectorAll('[data-fast-type]').forEach(button=>button.addEventListener('click',()=>{const type=button.dataset.fastType;closeModal();openTransactionModal(null,{type,personId:recent.personId,accountId:recent.accountId});}));
+  document.querySelector('[data-fast-transfer]')?.addEventListener('click',()=>{closeModal();openTransferModal();});
+}
+
+function splitRowMarkup(split,index){
+  return `<div class="split-row" data-split-row>
+    <select class="select" data-split-person aria-label="Split person"><option value="">Choose person</option>${state.people.map(p=>`<option value="${p.id}" ${split.personId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+    <input class="input" data-split-amount type="number" min="0.01" step="0.01" value="${split.amount??''}" placeholder="Amount" aria-label="Split amount">
+    <input class="input split-note" data-split-note maxlength="180" value="${escapeHtml(split.note||'')}" placeholder="Note (optional)" aria-label="Split note">
+    <button class="icon-btn" type="button" data-remove-split="${index}" aria-label="Remove split">×</button>
+  </div>`;
+}
+
+async function refreshAttachmentPanel(entryId){
+  const panel=document.querySelector('#attachmentPanel'); if(!panel||!entryId)return;
+  panel.innerHTML='<div class="muted tiny">Loading attachments…</div>';
+  try{
+    const data=await listAttachments(entryId), attachments=data.attachments||[];
+    panel.innerHTML=attachments.length?attachments.map(a=>`<div class="attachment-item"><a href="${attachmentUrl(a.id)}" target="_blank" rel="noopener">📎 ${escapeHtml(a.name)}</a><span class="muted tiny">${Math.max(1,Math.round(a.sizeBytes/1024))} KB</span><button class="btn small danger" type="button" data-delete-attachment="${a.id}">Remove</button></div>`).join(''):'<div class="muted tiny">No receipts or files attached yet.</div>';
+    panel.querySelectorAll('[data-delete-attachment]').forEach(button=>button.addEventListener('click',async()=>{if(!confirm('Remove this attachment?'))return;try{await deleteAttachment(button.dataset.deleteAttachment);const entry=state.entries.find(e=>e.id===entryId);if(entry)entry.attachmentCount=Math.max(0,Number(entry.attachmentCount||0)-1);await refreshAttachmentPanel(entryId);showToast('Attachment removed.');}catch(error){showToast(error.message||'Could not remove attachment.');}}));
+  }catch(error){panel.innerHTML=`<div class="warning">${escapeHtml(error.message||'Could not load attachments.')}</div>`;}
+}
+
 function openTransactionModal(existing=null,prefill={}){
   if(existing?.type==='account_transfer'){openTransferModal(existing);return;}
-  const type=existing?.type||prefill.type||'paid_for_person'; const personId=existing?.personId||prefill.personId||state.people[0]?.id||''; const accountId=existing?.accountId||state.accounts[0]?.id||'';
+  const recent=lastUsed();
+  const type=existing?.type||prefill.type||recent.type||'paid_for_person';
+  const personId=existing?.personId||prefill.personId||recent.personId||state.people[0]?.id||'';
+  const accountId=existing?.accountId||prefill.accountId||recent.accountId||state.accounts[0]?.id||'';
   const inferredCurrency=existing?.currency||state.accounts.find(a=>a.id===accountId)?.currency||state.settings.defaultCurrency;
+  const seedSplits=existing?.splits?.length?existing.splits:state.people.slice(0,2).map(p=>({personId:p.id,amount:'',note:''}));
   openModal(existing?'Edit transaction':'Add transaction',`<form id="txnForm" class="form-grid">
     <div class="field span-2"><label>Transaction type</label><select class="select" name="type" id="txnType">${entryTypeOptions(type,false)}</select></div>
-    <div class="field"><label>Person</label><select class="select" name="personId" id="txnPerson" required><option value="">Choose person</option>${state.people.map(p=>`<option value="${p.id}" ${p.id===personId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div>
+    <div class="field" id="txnPersonField"><label>Person</label><select class="select" name="personId" id="txnPerson"><option value="">Choose person</option>${state.people.map(p=>`<option value="${p.id}" ${p.id===personId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div>
     <div class="field" id="txnAccountField"><label>Account / cash</label><select class="select" name="accountId" id="txnAccount"><option value="">Choose account</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
-    <div class="field"><label>Amount</label><input class="input" name="amount" type="number" min="0.000001" step="0.01" required value="${existing?.amount??''}" placeholder="0.00"></div>
+    <div class="field"><label>Total amount</label><input class="input" id="txnAmount" name="amount" type="number" min="0.000001" step="0.01" required value="${existing?.amount??''}" placeholder="0.00" inputmode="decimal"></div>
     <div class="field" id="currencyField"><label>Currency</label><select class="select" name="currency" id="txnCurrency">${currencyOptions(inferredCurrency)}</select></div>
     <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||today()}"></div>
-    <div class="field"><label>Merchant / source</label><input class="input" name="merchant" maxlength="100" value="${escapeHtml(existing?.merchant||'')}" placeholder="e.g. Amazon"></div>
-    <div class="field span-2"><label>Description</label><input class="input" name="description" maxlength="180" value="${escapeHtml(existing?.description||'')}" placeholder="e.g. Headphones for cousin"></div>
+    <div class="field"><label>Merchant / source</label><input class="input" name="merchant" maxlength="100" value="${escapeHtml(existing?.merchant||'')}" placeholder="e.g. Amazon" autocomplete="off"></div>
+    <div class="field span-2"><label>Notes / details</label><textarea class="textarea compact-textarea" name="description" maxlength="500" placeholder="e.g. Headphones, order #123, delivery details…">${escapeHtml(existing?.description||'')}</textarea></div>
+    <div class="field span-2" id="splitSection" hidden>
+      <div class="split-head"><div><label>Split between people</label><div class="muted tiny">The account is charged once; each person gets only their allocated amount.</div></div><div class="page-actions"><button class="btn small" type="button" id="equalSplit">Equal split</button><button class="btn small" type="button" id="addSplitRow">＋ Person</button></div></div>
+      <div class="split-list" id="splitRows">${seedSplits.map(splitRowMarkup).join('')}</div>
+      <div class="split-total" id="splitTotal"></div>
+    </div>
     <div class="field span-2" id="adjustDirection" style="display:none"><label>Adjustment means</label><select class="select" name="direction"><option value="to_me" ${(existing?.signedAmount??1)>=0?'selected':''}>They owe me more</option><option value="i_owe" ${(existing?.signedAmount??1)<0?'selected':''}>I owe them more</option></select></div>
+    <div class="field span-2"><label>Receipt / attachment</label><input class="input file-input" id="txnFiles" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain"><div id="fileSelection" class="muted tiny">JPG, PNG, WebP, GIF, PDF or text · max 8 MB each</div></div>
+    ${existing?`<div class="field span-2"><label>Attached files</label><div id="attachmentPanel" class="attachment-panel"></div></div>`:''}
   </form>`,()=>document.querySelector('#txnForm').requestSubmit());
 
-  const form=document.querySelector('#txnForm'),typeEl=form.querySelector('#txnType'),accEl=form.querySelector('#txnAccount'),curEl=form.querySelector('#txnCurrency');
-  const sync=()=>{const t=typeEl.value;const adjust=t==='person_adjustment';form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;};
+  const form=document.querySelector('#txnForm'),typeEl=form.querySelector('#txnType'),personEl=form.querySelector('#txnPerson'),accEl=form.querySelector('#txnAccount'),curEl=form.querySelector('#txnCurrency'),amountEl=form.querySelector('#txnAmount'),splitSection=form.querySelector('#splitSection'),splitRows=form.querySelector('#splitRows');
+  const readSplits=()=>[...splitRows.querySelectorAll('[data-split-row]')].map(row=>({personId:row.querySelector('[data-split-person]').value,amount:Number(row.querySelector('[data-split-amount]').value||0),note:row.querySelector('[data-split-note]').value.trim()}));
+  const updateSplitTotal=()=>{const rows=readSplits(),sum=rows.reduce((n,row)=>n+Number(row.amount||0),0),total=Number(amountEl.value||0),diff=total-sum;form.querySelector('#splitTotal').innerHTML=`Allocated <strong>${sum.toFixed(2)}</strong> of <strong>${total.toFixed(2)}</strong> · <span class="${Math.abs(diff)<=0.005?'amount-pos':'amount-neg'}">${Math.abs(diff)<=0.005?'Balanced':`${diff>0?'Remaining':'Over'} ${Math.abs(diff).toFixed(2)}`}</span>`;};
+  const bindSplitRows=()=>{splitRows.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',updateSplitTotal));splitRows.querySelectorAll('[data-remove-split]').forEach(button=>button.addEventListener('click',()=>{const draft=readSplits();draft.splice(Number(button.dataset.removeSplit),1);splitRows.innerHTML=draft.map(splitRowMarkup).join('');bindSplitRows();updateSplitTotal();}));};
+  form.querySelector('#addSplitRow').addEventListener('click',()=>{const draft=readSplits();draft.push({personId:'',amount:'',note:''});splitRows.innerHTML=draft.map(splitRowMarkup).join('');bindSplitRows();updateSplitTotal();});
+  form.querySelector('#equalSplit').addEventListener('click',()=>{const rows=[...splitRows.querySelectorAll('[data-split-row]')],total=Number(amountEl.value||0);if(!rows.length||!(total>0)){showToast('Enter the total amount first.');return;}const cents=Math.round(total*100),base=Math.floor(cents/rows.length),remainder=cents-base*rows.length;rows.forEach((row,i)=>row.querySelector('[data-split-amount]').value=((base+(i<remainder?1:0))/100).toFixed(2));updateSplitTotal();});
+  amountEl.addEventListener('input',updateSplitTotal);
+  bindSplitRows();
+
+  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE;form.querySelector('#txnPersonField').style.display=split?'none':'grid';personEl.required=!split;form.querySelector('#txnAccountField').style.display=adjust?'none':'grid';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
   typeEl.addEventListener('change',sync);accEl.addEventListener('change',sync);sync();
-  form.addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(form);const t=fd.get('type');const person=fd.get('personId');const amount=Number(fd.get('amount'));if(!person||!(amount>0)){showToast('Choose a person and enter an amount.');return}if(t!=='person_adjustment'&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}const acc=state.accounts.find(a=>a.id===fd.get('accountId'));const item={id:existing?.id||uid('entry'),type:t,personId:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;if(existing){Object.assign(existing,item);}else state.entries.push(item);persist(existing?'Transaction updated.':'Transaction added.');closeModal();});
+  const filesEl=form.querySelector('#txnFiles');filesEl.addEventListener('change',()=>{const files=[...(filesEl.files||[])];form.querySelector('#fileSelection').textContent=files.length?files.map(file=>`${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`).join(' · '):'JPG, PNG, WebP, GIF, PDF or text · max 8 MB each';});
+  if(existing) refreshAttachmentPanel(existing.id);
+
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const fd=new FormData(form),t=fd.get('type'),split=t===SPLIT_ENTRY_TYPE,person=fd.get('personId'),amount=Number(fd.get('amount')),files=[...(filesEl.files||[])];
+    if(!(amount>0)){showToast('Enter an amount greater than zero.');return}
+    if(!split&&!person){showToast('Choose a person.');return}
+    if(t!=='person_adjustment'&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}
+    if(files.some(file=>file.size>8*1024*1024)){showToast('Each attachment must be 8 MB or smaller.');return}
+    const splits=split?readSplits():[];
+    if(split){const error=validateSplit(splits,amount);if(error){showToast(error);return}}
+    const acc=state.accounts.find(a=>a.id===fd.get('accountId'));
+    const item={id:existing?.id||uid('entry'),type:t,personId:split?null:person,accountId:t==='person_adjustment'?null:fd.get('accountId'),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
+    if(existing)Object.assign(existing,item);else state.entries.push(item);
+    rememberUsed(split?'':person,item.accountId,t);
+    const saved=await persist('');
+    if(!saved)return;
+    try{
+      for(const file of files) await uploadAttachment(item.id,file);
+      if(files.length) state=await loadState();
+      closeModal();
+      render();
+      showToast(existing?`Transaction updated${files.length?' with attachments':''}.`:`Transaction added${files.length?' with attachments':''}.`);
+    }catch(error){closeModal();showToast(`Transaction saved, but an attachment failed: ${error.message||'upload error'}`);}
+  });
 }
+
 
 function openTransferModal(existing=null){
   const fromId=existing?.fromAccountId||state.accounts[0]?.id||''; const toId=existing?.toAccountId||state.accounts.find(a=>a.id!==fromId)?.id||'';
@@ -313,12 +401,12 @@ function openModal(title,body,onSave=null,showFooter=true){
 function closeModal(){document.querySelector('.modal-backdrop')?.remove()}
 
 function deleteEntry(id){const e=state.entries.find(x=>x.id===id);if(!e)return;if(confirm('Delete this transaction? Balances will recalculate immediately.')){state.entries=state.entries.filter(x=>x.id!==id);persist('Transaction deleted.');closeModal();}}
-function deletePerson(id){const linked=state.entries.some(e=>e.personId===id);if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){state.people=state.people.filter(p=>p.id!==id);persist('Person deleted.');closeModal();location.hash='#people';}}
+function deletePerson(id){const linked=state.entries.some(e=>entryTouchesPerson(e,id));if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){state.people=state.people.filter(p=>p.id!==id);persist('Person deleted.');closeModal();location.hash='#people';}}
 function deleteAccount(id){const linked=state.entries.some(e=>e.accountId===id||e.fromAccountId===id||e.toAccountId===id);if(linked){showToast('Delete or move this account’s transactions first.');return}if(confirm('Delete this account?')){state.accounts=state.accounts.filter(a=>a.id!==id);persist('Account deleted.');closeModal();}}
 
 function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}" ${selected===c?'selected':''}>${c}</option>`).join('')}
 function entryTypeOptions(selected,includeTransfer=true){
-  const types=[['paid_for_person','Paid for someone'],['received_from_person','Received repayment'],['borrowed_from_person','Borrowed from person'],['paid_to_person','Paid person back'],['person_adjustment','Balance adjustment']];
+  const types=[['paid_for_person','Paid for someone'],[SPLIT_ENTRY_TYPE,'Split purchase'],['received_from_person','Received repayment'],['borrowed_from_person','Borrowed from person'],['paid_to_person','Paid person back'],['person_adjustment','Balance adjustment']];
   if(includeTransfer)types.push(['account_transfer','Account transfer']);
   return types.map(([v,l])=>`<option value="${v}" ${selected===v?'selected':''}>${l}</option>`).join('');
 }
@@ -334,6 +422,16 @@ async function boot(){
   app.innerHTML='<div class="boot">Loading your ledger…</div>';
   try{user=await currentUser();if(!user){renderAuth();return;}state=await loadState();render();}catch(error){renderAuth(error.message||'Could not load your ledger.');}
 }
+
+document.addEventListener('keydown',event=>{
+  if(!state)return;
+  if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey)return;
+  const target=event.target;
+  if(target?.matches?.('input,textarea,select,[contenteditable="true"]'))return;
+  if(document.querySelector('.modal-backdrop'))return;
+  if(event.key.toLowerCase()==='n'){event.preventDefault();openQuickMenu();}
+  if(event.key.toLowerCase()==='t'){event.preventDefault();openTransferModal();}
+});
 
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}
 boot();

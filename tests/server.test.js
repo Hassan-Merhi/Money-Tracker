@@ -16,8 +16,14 @@ async function request(path,{method='GET',body,cookie,csrf}={}){
   const res=await fetch(base+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await res.json(); return {res,data,cookie:res.headers.get('set-cookie')?.split(';')[0]};
 }
+async function requestRaw(path,{method='GET',cookie,csrf}={}){
+  const headers={}; if(cookie)headers.cookie=cookie;if(csrf)headers['x-csrf-token']=csrf;
+  const res=await fetch(base+path,{method,headers});
+  const data=Buffer.from(await res.arrayBuffer());
+  return {res,data};
+}
 
-let cookie,csrf,state;
+let cookie,csrf,state,attachmentId;
 
 test('registers securely and starts with an empty scoped ledger',async()=>{
   const email=`owner-${Date.now()}@example.com`;
@@ -41,6 +47,34 @@ test('persists people accounts and transactions in the database',async()=>{
   const read=await request('/api/state',{cookie}); assert.equal(read.data.people[0].name,'Alice'); assert.equal(read.data.accounts[0].openingBalance,1000); assert.equal(read.data.entries[0].amount,125);
 });
 
+
+test('persists validated split allocations',async()=>{
+  const t=new Date().toISOString();
+  state.people.push({id:'person_bob',name:'Bob',note:'Friend',createdAt:t});
+  const invalid={...state,entries:[...state.entries,{id:'entry_bad_split',type:'split_paid_for_people',accountId:'account_bank',amount:100,currency:'USD',date:'2026-09-28',merchant:'Shop',description:'Bad split',splits:[{personId:'person_alice',amount:40},{personId:'person_bob',amount:50}],createdAt:t,updatedAt:t}]};
+  const bad=await request('/api/state',{method:'PUT',cookie,csrf,body:invalid});
+  assert.equal(bad.res.status,400);
+
+  state.entries.push({id:'entry_split',type:'split_paid_for_people',accountId:'account_bank',amount:100,currency:'USD',date:'2026-09-28',merchant:'Shop',description:'Shared order',splits:[{personId:'person_alice',amount:40,note:'Item A'},{personId:'person_bob',amount:60,note:'Item B'}],createdAt:t,updatedAt:t});
+  const put=await request('/api/state',{method:'PUT',cookie,csrf,body:state});
+  assert.equal(put.res.status,200); state=put.data;
+  const split=state.entries.find(entry=>entry.id==='entry_split');
+  assert.deepEqual(split.splits,[{personId:'person_alice',amount:40,note:'Item A'},{personId:'person_bob',amount:60,note:'Item B'}]);
+});
+
+test('stores authenticated receipt attachments outside ledger state',async()=>{
+  const noCsrf=await request('/api/attachments',{method:'POST',cookie,body:{entryId:'entry_split',name:'receipt.txt',mimeType:'text/plain',data:Buffer.from('receipt').toString('base64')}});
+  assert.equal(noCsrf.res.status,403);
+  const upload=await request('/api/attachments',{method:'POST',cookie,csrf,body:{entryId:'entry_split',name:'receipt.txt',mimeType:'text/plain',data:Buffer.from('receipt').toString('base64')}});
+  assert.equal(upload.res.status,201); attachmentId=upload.data.attachment.id;
+  const list=await request('/api/attachments?entry=entry_split',{cookie});
+  assert.equal(list.res.status,200); assert.equal(list.data.attachments.length,1); assert.equal(list.data.attachments[0].name,'receipt.txt');
+  const raw=await requestRaw(`/api/attachments/${attachmentId}`,{cookie});
+  assert.equal(raw.res.status,200); assert.equal(raw.data.toString(),'receipt');
+  const refreshed=await request('/api/state',{cookie});
+  assert.equal(refreshed.data.entries.find(entry=>entry.id==='entry_split').attachmentCount,1);
+});
+
 test('blocks stale-tab overwrites with optimistic revision checks',async()=>{
   const stale={...state,version:state.version-1};
   const r=await request('/api/state',{method:'PUT',cookie,csrf,body:stale}); assert.equal(r.res.status,409);
@@ -49,6 +83,7 @@ test('blocks stale-tab overwrites with optimistic revision checks',async()=>{
 test('isolates a second user from the first user ledger',async()=>{
   const r=await request('/api/auth/register',{method:'POST',body:{email:`other-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'}});
   assert.equal(r.res.status,201); const other=await request('/api/state',{cookie:r.cookie}); assert.equal(other.res.status,200); assert.deepEqual(other.data.people,[]); assert.deepEqual(other.data.entries,[]);
+  const hidden=await request(`/api/attachments/${attachmentId}`,{cookie:r.cookie}); assert.equal(hidden.res.status,404);
 });
 
 test('logout invalidates the server-side session',async()=>{

@@ -37,3 +37,18 @@ test('workbook contains expected sheets and transaction columns',()=>{
   assert.ok(sheets.at(-1).rows[0].includes('Merchant'));
   assert.equal(exportRows(state).length,3);
 });
+
+
+test('person-filtered reports use only that persons split allocation',()=>{
+  const splitState={...state,entries:[...state.entries,{id:'e4',type:'split_paid_for_people',accountId:'a1',amount:30,currency:'USD',date:'2026-09-20',merchant:'Store',description:'Shared order',splits:[{personId:'p1',amount:10,note:'Cable'},{personId:'p2',amount:20,note:'Case'}],attachmentCount:2,createdAt:t,updatedAt:t}]};
+  const s=reportingSnapshot(splitState,{personId:'p1'});
+  assert.equal(s.transactionCount,3);
+  assert.equal(s.activity.USD.charged,130);
+  assert.equal(s.activity.USD.recovered,20);
+  assert.equal(s.activity.USD.netPersonChange,110);
+  assert.equal(s.merchants.find(row=>row.merchant==='Store').amount,10);
+  const row=exportRows(splitState).find(item=>item.Type==='split_paid_for_people');
+  assert.match(row.Person,/Alice/);
+  assert.match(row['Split Details'],/Bob: 20/);
+  assert.equal(row.Attachments,2);
+});

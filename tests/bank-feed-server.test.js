@@ -118,6 +118,17 @@ test('deleting an account cleans unposted feed rows and rules that reference it'
   assert.equal(feed.rules.some(item=>item.targetAccountId==='account_unused'),false);
 });
 
+test('ledger reset also clears bank feed rows and rules',async()=>{
+  const before=(await request('/api/bank-feed')).data;
+  assert.ok(before.items.length>0);
+  assert.ok(before.rules.length>0);
+  const reset=await request('/api/state/reset',{method:'POST',body:{}});
+  assert.equal(reset.res.status,200);state=reset.data;
+  const after=(await request('/api/bank-feed')).data;
+  assert.deepEqual(after.items,[]);
+  assert.deepEqual(after.rules,[]);
+});
+
 test('bank feed is isolated per user',async()=>{
   const r=await request('/api/auth/register',{method:'POST',body:{email:`other-bank-${Date.now()}@example.com`,password:'another secure password',displayName:'Other'},cookie:'',csrf:''});
   const otherCookie=r.cookie,otherCsrf=r.data.csrfToken;

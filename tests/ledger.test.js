@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { personDelta, accountDelta, personBalances, accountBalances, runningStatement, validateTransfer } from '../lib/ledger.js';
+
+test('paying for someone increases what they owe me and reduces my account', () => {
+  const e = { type:'paid_for_person', amount:120, accountId:'bank', personId:'p1', currency:'USD' };
+  assert.equal(personDelta(e), 120);
+  assert.equal(accountDelta(e, 'bank'), -120);
+});
+
+test('receiving repayment reduces what they owe me and increases account', () => {
+  const e = { type:'received_from_person', amount:40, accountId:'cash', personId:'p1', currency:'USD' };
+  assert.equal(personDelta(e), -40);
+  assert.equal(accountDelta(e, 'cash'), 40);
+});
+
+test('borrowing from person makes my balance negative and increases account', () => {
+  const e = { type:'borrowed_from_person', amount:300, accountId:'bank', personId:'p1', currency:'USD' };
+  assert.equal(personDelta(e), -300);
+  assert.equal(accountDelta(e, 'bank'), 300);
+});
+
+test('paying a person back moves negative balance toward zero', () => {
+  const e = { type:'paid_to_person', amount:125, accountId:'bank', personId:'p1', currency:'USD' };
+  assert.equal(personDelta(e), 125);
+  assert.equal(accountDelta(e, 'bank'), -125);
+});
+
+test('transfer supports different source and destination amounts', () => {
+  const e = { type:'account_transfer', fromAccountId:'usd', toAccountId:'lbp', fromAmount:10, toAmount:900000 };
+  assert.equal(accountDelta(e, 'usd'), -10);
+  assert.equal(accountDelta(e, 'lbp'), 900000);
+});
+
+test('aggregate balances are correct', () => {
+  const people = [{id:'p1'}];
+  const accounts = [{id:'bank', openingBalance:1000}];
+  const entries = [
+    {type:'paid_for_person', amount:100, accountId:'bank', personId:'p1', currency:'USD'},
+    {type:'received_from_person', amount:25, accountId:'bank', personId:'p1', currency:'USD'}
+  ];
+  assert.equal(personBalances(entries, people).p1.USD, 75);
+  assert.equal(accountBalances(entries, accounts).bank, 925);
+});
+
+test('running statement orders chronologically', () => {
+  const entries = [
+    {id:'b', type:'received_from_person', amount:20, personId:'p1', currency:'USD', date:'2026-01-02', createdAt:'2026-01-02T00:00:00Z'},
+    {id:'a', type:'paid_for_person', amount:50, personId:'p1', currency:'USD', date:'2026-01-01', createdAt:'2026-01-01T00:00:00Z'}
+  ];
+  const rows = runningStatement(entries, 'p1', 'USD');
+  assert.deepEqual(rows.map(r => r.running), [50,30]);
+});
+
+test('transfer validation blocks same account', () => {
+  const a = {id:'x'};
+  assert.ok(validateTransfer(a,a,1,1));
+});

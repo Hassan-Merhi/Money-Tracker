@@ -4,6 +4,9 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { personBalances, accountBalances, runningStatement } from './lib/ledger.js';
+import { ledgerWorkbook, importTemplateWorkbook, parseWorkbook } from './lib/xlsx.js';
+import { summaryPdf, personStatementPdf } from './lib/pdf.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -152,10 +155,18 @@ function json(res, status, value, extra={}) {
   const body = JSON.stringify(value); res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(body);
 }
 function fail(res,status,message){ json(res,status,{error:message}); }
-async function bodyJson(req) {
+function binary(res,status,buffer,type,filename){
+  securityHeaders(res);
+  res.setHeader('Content-Type',type);
+  res.setHeader('Content-Disposition',`attachment; filename="${String(filename).replace(/[^a-zA-Z0-9._-]/g,'-')}"`);
+  res.setHeader('Cache-Control','no-store');
+  res.writeHead(status);
+  res.end(buffer);
+}
+async function bodyJson(req, limit=BODY_LIMIT) {
   return await new Promise((resolve,reject)=>{
     const chunks=[]; let size=0;
-    req.on('data',c=>{ size+=c.length; if(size>BODY_LIMIT){reject(Object.assign(new Error('too large'),{status:413})); req.destroy(); return;} chunks.push(c); });
+    req.on('data',c=>{ size+=c.length; if(size>limit){reject(Object.assign(new Error('too large'),{status:413})); req.destroy(); return;} chunks.push(c); });
     req.on('end',()=>{ try{ resolve(chunks.length?JSON.parse(Buffer.concat(chunks).toString('utf8')):{}); }catch{ reject(Object.assign(new Error('invalid json'),{status:400})); } });
     req.on('error',reject);
   });
@@ -299,6 +310,36 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
       const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; const saved=saveState(a,blank); return json(res,200,saved);
+    }
+    if(url.pathname==='/api/export/ledger.xlsx'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      const state=loadState(a.user_id), pb=personBalances(state.entries,state.people);
+      return binary(res,200,ledgerWorkbook(state,{peopleBalances:pb}),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','money-ledger.xlsx');
+    }
+    if(url.pathname==='/api/export/import-template.xlsx'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      return binary(res,200,importTemplateWorkbook(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','money-ledger-import-template.xlsx');
+    }
+    if(url.pathname==='/api/export/summary.pdf'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      const state=loadState(a.user_id), pb=personBalances(state.entries,state.people), ab=accountBalances(state.entries,state.accounts);
+      return binary(res,200,summaryPdf(state,{personBalances:pb,accountBalances:ab}),'application/pdf','money-ledger-summary.pdf');
+    }
+    if(url.pathname==='/api/export/person.pdf'&&req.method==='GET'){
+      const a=requireAuth(req,res); if(!a)return;
+      const state=loadState(a.user_id), personId=url.searchParams.get('personId'), requested=url.searchParams.get('currency')||'';
+      const person=state.people.find(p=>p.id===personId); if(!person)return fail(res,404,'Person not found.');
+      const pb=personBalances(state.entries,state.people), selected=requested||Object.keys(pb[person.id]||{})[0]||state.settings.defaultCurrency;
+      const rows=runningStatement(state.entries,person.id,selected);
+      return binary(res,200,personStatementPdf(state,person,{currency:selected,rows}),'application/pdf','person-statement.pdf');
+    }
+    if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      const b=await bodyJson(req,12_000_000), filename=safeStr(b.filename,180), encoded=String(b.dataBase64||'');
+      if(!encoded||encoded.length>11_000_000)return fail(res,400,'Spreadsheet is too large.');
+      const data=Buffer.from(encoded,'base64'); if(!data.length||data.length>8_000_000)return fail(res,400,'Spreadsheet is too large.');
+      const parsed=parseWorkbook(data,{limitRows:5000});
+      return json(res,200,{filename,sheets:parsed.sheets});
     }
     if(url.pathname.startsWith('/api/')) return fail(res,404,'API route not found.');
     return staticFile(req,res,url);

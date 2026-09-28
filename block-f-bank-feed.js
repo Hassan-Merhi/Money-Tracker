@@ -3,6 +3,7 @@ import {
   deleteBankFeedItem, createBankRule, deleteBankRule, previewSpreadsheet, loadState
 } from './lib/store.js';
 import { parseBankCsv, suggestBankMapping, normalizeBankRows, bankDirectionLabel } from './lib/bank-feed.js';
+import { categoryOptionsForType } from './lib/insights.js';
 import { escapeHtml, money } from './lib/utils.js';
 
 let feed={items:[],rules:[]};
@@ -26,6 +27,13 @@ function actionOptions(selected=''){
 }
 function accountName(state,id){return state.accounts.find(a=>a.id===id)?.name||'Missing account';}
 function personName(state,id){return state.people.find(p=>p.id===id)?.name||'Missing person';}
+function categoryName(state,id){const c=state.categories?.find(row=>row.id===id);return c?((c.icon?c.icon+' ':'')+c.name):'Uncategorized';}
+function categoryOptions(state,action,selected=''){
+  const type=action==='income'?'account_income':'account_expense';
+  const categories=categoryOptionsForType(state.categories||[],type);
+  const archived=(state.categories||[]).find(c=>c.id===selected&&c.archived);
+  return '<option value="">Uncategorized</option>'+categories.map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${escapeHtml((c.icon?c.icon+' ':'')+c.name)}</option>`).join('')+(archived?`<option value="${archived.id}" selected>${escapeHtml((archived.icon?archived.icon+' ':'')+archived.name)} (archived)</option>`:'');
+}
 function bytesToBase64(buffer){
   const bytes=new Uint8Array(buffer);let binary='';const chunk=0x8000;
   for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(bytes.length,i+chunk)));
@@ -113,6 +121,7 @@ function feedRowMarkup(item,state){
       <div class="field"><label>What is this?</label><select class="select bank-action">${actionOptions(suggested)}</select></div>
       <div class="field bank-person-wrap"><label>Person</label><select class="select bank-person"><option value="">Choose person</option>${state.people.map(p=>`<option value="${p.id}" ${p.id===item.suggestedPersonId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div>
       <div class="field bank-target-wrap"><label>Other account</label><select class="select bank-target"><option value="">Choose account</option>${state.accounts.filter(a=>a.id!==item.accountId).map(a=>`<option value="${a.id}" ${a.id===item.suggestedTargetAccountId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
+      <div class="field bank-category-wrap"><label>Category</label><select class="select bank-category">${categoryOptions(state,suggested,item.suggestedCategoryId||'')}</select></div>
       <div class="field bank-note-wrap"><label>Ledger note</label><input class="input bank-note" maxlength="500" value="${escapeHtml(item.description)}"></div>
       <label class="bank-rule-check"><input type="checkbox" class="bank-save-rule"> Remember a rule for <input class="input bank-rule-text" maxlength="120" value="${escapeHtml(ruleText)}" aria-label="Rule match text"></label>
       <div class="page-actions"><button class="btn primary bank-post">Post to ledger</button><button class="btn bank-ignore">Ignore</button><button class="btn danger bank-delete">Delete</button></div>
@@ -128,9 +137,10 @@ function rulesMarkup(state){
       <select class="select" name="classification">${actionOptions('expense')}</select>
       <select class="select" name="personId"><option value="">No person</option>${state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}</select>
       <select class="select" name="targetAccountId"><option value="">No transfer account</option>${state.accounts.map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')}</select>
+      <select class="select" name="categoryId" id="bankRuleCategory"><option value="">No category</option></select>
       <button class="btn" type="submit">Add rule</button>
     </form>
-    <div class="bank-rule-list">${feed.rules.length?feed.rules.map(rule=>`<div class="bank-rule-item"><div><strong>Contains “${escapeHtml(rule.matchText)}”</strong><small>${escapeHtml(ACTIONS.find(a=>a[0]===rule.classification)?.[1]||rule.classification)}${rule.personId?` · ${escapeHtml(personName(state,rule.personId))}`:''}${rule.targetAccountId?` · ${escapeHtml(accountName(state,rule.targetAccountId))}`:''}</small></div><button class="btn small danger" data-delete-bank-rule="${rule.id}">Delete</button></div>`).join(''):'<div class="empty compact-empty">No rules yet. You can also create one while posting a feed item.</div>'}</div>
+    <div class="bank-rule-list">${feed.rules.length?feed.rules.map(rule=>`<div class="bank-rule-item"><div><strong>Contains “${escapeHtml(rule.matchText)}”</strong><small>${escapeHtml(ACTIONS.find(a=>a[0]===rule.classification)?.[1]||rule.classification)}${rule.personId?` · ${escapeHtml(personName(state,rule.personId))}`:''}${rule.targetAccountId?` · ${escapeHtml(accountName(state,rule.targetAccountId))}`:''}${rule.categoryId?` · ${escapeHtml(categoryName(state,rule.categoryId))}`:''}</small></div><button class="btn small danger" data-delete-bank-rule="${rule.id}">Delete</button></div>`).join(''):'<div class="empty compact-empty">No rules yet. You can also create one while posting a feed item.</div>'}</div>
   </section>`;
 }
 
@@ -163,9 +173,12 @@ function syncRow(card){
   const action=card.querySelector('.bank-action')?.value||'expense';
   card.querySelector('.bank-person-wrap')?.classList.toggle('hidden',!PERSON_ACTIONS.has(action));
   card.querySelector('.bank-target-wrap')?.classList.toggle('hidden',action!=='transfer');
+  card.querySelector('.bank-category-wrap')?.classList.toggle('hidden',!['expense','income'].includes(action));
+  const category=card.querySelector('.bank-category');if(category&&['expense','income'].includes(action)){const selected=category.value;category.innerHTML=categoryOptions(window.__moneyTrackerStateForBank||{categories:[]},action,selected);}
 }
 
 function bind(main,state,ctx){
+  window.__moneyTrackerStateForBank=state;
   main.querySelector('#bankAccount')?.addEventListener('change',e=>{selectedAccountId=e.target.value;});
   main.querySelector('#bankFile')?.addEventListener('change',async e=>{await readStatementFile(e.target.files?.[0],ctx);paint(main,state,ctx);});
   main.querySelector('#bankSheet')?.addEventListener('change',e=>{setDraftSheet(Number(e.target.value));paint(main,state,ctx);});
@@ -188,7 +201,7 @@ function bind(main,state,ctx){
   main.querySelectorAll('[data-bank-item]').forEach(card=>{card.querySelector('.bank-action')?.addEventListener('change',()=>syncRow(card));syncRow(card);});
   main.querySelectorAll('.bank-post').forEach(btn=>btn.addEventListener('click',async()=>{
     const card=btn.closest('[data-bank-item]'),id=card.dataset.bankItem,action=card.querySelector('.bank-action').value;
-    const payload={expectedRevision:state.version,classification:action,personId:card.querySelector('.bank-person')?.value||null,targetAccountId:card.querySelector('.bank-target')?.value||null,note:card.querySelector('.bank-note')?.value||'',saveRule:!!card.querySelector('.bank-save-rule')?.checked,ruleMatchText:card.querySelector('.bank-rule-text')?.value||''};
+    const payload={expectedRevision:state.version,classification:action,personId:card.querySelector('.bank-person')?.value||null,targetAccountId:card.querySelector('.bank-target')?.value||null,categoryId:card.querySelector('.bank-category')?.value||null,note:card.querySelector('.bank-note')?.value||'',saveRule:!!card.querySelector('.bank-save-rule')?.checked,ruleMatchText:card.querySelector('.bank-rule-text')?.value||''};
     btn.disabled=true;
     try{
       const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;
@@ -205,9 +218,12 @@ function bind(main,state,ctx){
   main.querySelectorAll('.bank-ignore').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await ignoreBankFeedItem(id);feed.items=feed.items.map(i=>i.id===id?r.item:i);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not ignore this row.');}}));
   main.querySelectorAll('.bank-reopen').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await reopenBankFeedItem(id);feed.items=feed.items.map(i=>i.id===id?r.item:i);statusFilter='pending';paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not reopen this row.');}}));
   main.querySelectorAll('.bank-delete').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Delete this unposted bank-feed row?'))return;try{await deleteBankFeedItem(id);feed.items=feed.items.filter(i=>i.id!==id);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete this row.');}}));
+  const ruleForm=main.querySelector('#bankRuleForm');
+  const syncRuleCategory=()=>{if(!ruleForm)return;const action=ruleForm.elements.classification.value,el=ruleForm.elements.categoryId,selected=el.value;el.innerHTML=['expense','income'].includes(action)?categoryOptions(state,action,selected):'<option value="">No category</option>';el.disabled=!['expense','income'].includes(action);};
+  ruleForm?.elements.classification.addEventListener('change',syncRuleCategory);syncRuleCategory();
   main.querySelector('#bankRuleForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const fd=new FormData(e.currentTarget);
-    try{const r=await createBankRule({matchText:fd.get('matchText'),classification:fd.get('classification'),personId:fd.get('personId')||null,targetAccountId:fd.get('targetAccountId')||null});feed.rules.unshift(r.rule);paint(main,state,ctx);ctx.showToast('Bank rule added.');}catch(error){ctx.showToast(error.message||'Could not add that rule.');}
+    try{const r=await createBankRule({matchText:fd.get('matchText'),classification:fd.get('classification'),personId:fd.get('personId')||null,targetAccountId:fd.get('targetAccountId')||null,categoryId:fd.get('categoryId')||null});feed.rules.unshift(r.rule);paint(main,state,ctx);ctx.showToast('Bank rule added.');}catch(error){ctx.showToast(error.message||'Could not add that rule.');}
   });
   main.querySelectorAll('[data-delete-bank-rule]').forEach(btn=>btn.addEventListener('click',async()=>{try{await deleteBankRule(btn.dataset.deleteBankRule);feed.rules=feed.rules.filter(r=>r.id!==btn.dataset.deleteBankRule);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete that rule.');}}));
 }

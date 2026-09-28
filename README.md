@@ -1,6 +1,8 @@
-# Money Tracker — Secure Ledger, Bank Feed, Budgets & Spending Insights
+# Money Tracker — Debt Tracker
 
-Money Tracker is a server-backed personal ledger for tracking money people owe you, money you owe people, bank/cash balances, transfers, shared purchases, receipts, notes, statements, and exports.
+Money Tracker currently runs in **debt-first mode**: track money people owe you and money you owe people without creating bank, cash, card, or wallet accounts. Record debts, repayments, opening balances, notes, attachments, imports, statements, and exports with only a person, amount, currency, and date.
+
+The account, bank-feed, budget, and recurring engines remain in the codebase for a later advanced-money mode, but they are hidden from the normal navigation for now.
 
 ## Block A — Secure core
 
@@ -19,13 +21,13 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 
 - Responsive desktop navigation and mobile bottom navigation
 - Mobile floating quick-add button
-- Keyboard shortcuts: **N** for quick add and **T** for transfer
+- Keyboard shortcut: **N** for quick add
 - Quick-entry menu for common money actions
-- Remembers the most recently used person/account locally for faster entry
+- Remembers the most recently used person locally for faster entry
 - Rich transaction notes and merchant/source fields
-- **Split purchases:** one account payment can be allocated across multiple people
+- **Split debts:** one total can be allocated across multiple people without a bank account
 - Equal-split helper plus per-person split amounts and notes
-- Split purchases debit the paying account only once while each person's statement receives only their allocation
+- Each person's statement receives only their split allocation; an account is optional
 - **Receipt/file attachments:** JPG, PNG, WebP, GIF, PDF, and text up to 8 MB each
 - Attachments use authenticated server endpoints and are stored separately from the ledger JSON state
 - Attachment counts appear in transaction history/statements; files can be opened or removed from transaction editing
@@ -42,7 +44,7 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 - People and opening-balance imports
 - Account and opening-balance imports
 - Transaction history, transfers, adjustments, and Block B split-purchase imports
-- Missing people/accounts can be created from valid transaction rows
+- Missing people can be created from valid debt transaction rows; accounts remain optional for person transactions
 - Matching by person name and account name + currency
 - Obvious duplicate transaction skipping
 - Re-import compatibility with Block D transaction exports, including `Split Details`, Block F account expense/income entries, and Block G category names

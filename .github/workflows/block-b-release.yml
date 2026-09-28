@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: block-b-daily-use
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -23,12 +25,17 @@ jobs:
           REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
-          gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate --jq '.[].body' \
-            | sed -n 's/^BLOCK_B_PART_[0-9][0-9]*=//p' \
-            | tr -d '\n' > /tmp/block-b.b64
+          gh api "repos/$REPO/issues/$ISSUE" --jq '.body // ""' \
+            | sed -n 's/^BLOCK_B_ZIP_BASE64=//p' > /tmp/block-b.b64
+          if [ ! -s /tmp/block-b.b64 ]; then
+            gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate --jq '.[].body' \
+              | sed -n 's/^BLOCK_B_PART_[0-9][0-9]*=//p' \
+              | tr -d '\n' > /tmp/block-b.b64
+          fi
+          test -s /tmp/block-b.b64
           python - <<'PY'
           import base64, io, pathlib, zipfile
-          payload = pathlib.Path("/tmp/block-b.b64").read_text()
+          payload = pathlib.Path("/tmp/block-b.b64").read_text().strip()
           raw = base64.b64decode(payload, validate=True)
           allowed_files = {
               "README.md", "app.js", "manifest.webmanifest", "package.json",
@@ -61,4 +68,4 @@ jobs:
           git add README.md app.js lib manifest.webmanifest package.json server.mjs service-worker.js styles.css tests
           git diff --cached --check
           git commit -m "Complete Block B daily-use app"
-          git push origin HEAD:main
+          git push origin HEAD:block-b-daily-use

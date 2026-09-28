@@ -1,8 +1,8 @@
 name: Block B Release Helper
 
 on:
-  issues:
-    types: [opened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
@@ -10,24 +10,25 @@ permissions:
 
 jobs:
   release:
-    if: github.event.issue.title == '[Block B release bundle]' && github.actor == github.repository_owner
+    if: github.event.issue.title == '[Block B release bundle]' && github.event.comment.body == 'RUN_BLOCK_B' && github.actor == github.repository_owner
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Unpack owner release bundle
+      - name: Reassemble owner release bundle
         env:
-          ISSUE_BODY: ${{ github.event.issue.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
+          gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate --jq '.[].body' \
+            | sed -n 's/^BLOCK_B_PART_[0-9][0-9]*=//p' \
+            | tr -d '\n' > /tmp/block-b.b64
           python - <<'PY'
-          import base64, io, os, pathlib, zipfile
-          marker = "BLOCK_B_ZIP_BASE64="
-          body = os.environ["ISSUE_BODY"]
-          if marker not in body:
-              raise SystemExit("release marker missing")
-          payload = body.split(marker, 1)[1].strip()
+          import base64, io, pathlib, zipfile
+          payload = pathlib.Path("/tmp/block-b.b64").read_text()
           raw = base64.b64decode(payload, validate=True)
           allowed_files = {
               "README.md", "app.js", "manifest.webmanifest", "package.json",

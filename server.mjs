@@ -9,6 +9,7 @@ import { nextRecurringDate } from './lib/recurring.js';
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
+import { exportFullBackup, restoreFullBackup } from './lib/full-backup.js';
 import { normalizeMoney, toMinor } from './lib/money.js';
 import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
@@ -42,6 +43,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   csrf_token TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key_hash TEXT PRIMARY KEY,
+  window_start_ms INTEGER NOT NULL,
+  count INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS people (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -144,6 +151,19 @@ const q = {
   insertSession: db.prepare('INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
   cleanupSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+  deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id=? AND token_hash<>?'),
+  deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id=?'),
+  userSecret: db.prepare('SELECT id,email,password_hash,is_owner AS isOwner FROM users WHERE id=?'),
+  updatePassword: db.prepare('UPDATE users SET password_hash=? WHERE id=?'),
+  deleteUser: db.prepare('DELETE FROM users WHERE id=?'),
+  otherUserCount: db.prepare('SELECT COUNT(*) AS count FROM users WHERE id<>?'),
+  rateLimitUpsert: db.prepare(`INSERT INTO rate_limits(key_hash,window_start_ms,count,updated_at) VALUES(?,?,1,?)
+    ON CONFLICT(key_hash) DO UPDATE SET
+      count=CASE WHEN excluded.window_start_ms-rate_limits.window_start_ms>=? THEN 1 ELSE rate_limits.count+1 END,
+      window_start_ms=CASE WHEN excluded.window_start_ms-rate_limits.window_start_ms>=? THEN excluded.window_start_ms ELSE rate_limits.window_start_ms END,
+      updated_at=excluded.updated_at`),
+  rateLimitRead: db.prepare('SELECT window_start_ms AS windowStartMs,count FROM rate_limits WHERE key_hash=?'),
+  cleanupRateLimits: db.prepare('DELETE FROM rate_limits WHERE updated_at < ?'),
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
   personById: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? AND id=?'),
   personCount: db.prepare('SELECT COUNT(*) AS count FROM people WHERE user_id=?'),
@@ -193,6 +213,7 @@ const q = {
 const bankFeed = createBankFeedService(db);
 markExactMoneySchema(db);
 console.log('EXACT_MONEY_READY '+JSON.stringify({version:exactMoneySchemaVersion(db),storage:'integer-minor-units'}));
+console.log('LANE_A_READY '+JSON.stringify({waves:[2,3,4,5],ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true}));
 
 if (process.env.WAVE0_BACKUP_ON_START === '1') {
   const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});
@@ -284,12 +305,15 @@ function requireAuth(req,res,{csrf=false}={}) {
   return a;
 }
 
-const attempts = new Map();
-function rateLimited(req) {
-  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
-  const t=Date.now(); const row=attempts.get(ip)||{start:t,count:0};
-  if(t-row.start>10*60_000){row.start=t;row.count=0;} row.count++; attempts.set(ip,row);
-  return row.count>30;
+function requestIp(req){
+  return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
+}
+function rateLimited(req,scope='auth',{limit=30,windowMs=10*60_000}={}) {
+  const now=Date.now(),key=sha256(scope+'|'+requestIp(req)),stamp=nowIso();
+  q.rateLimitUpsert.run(key,now,stamp,windowMs,windowMs);
+  const row=q.rateLimitRead.get(key);
+  if(Number(row?.count||0)===1)q.cleanupRateLimits.run(new Date(Date.now()-24*60*60_000).toISOString());
+  return Number(row?.count||0)>limit;
 }
 
 function validateState(input, user) {
@@ -661,12 +685,12 @@ function staticFile(req,res,url){
 export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1});}
+    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
     if(url.pathname==='/api/auth/register'&&req.method==='POST'){
-      if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
+      if(rateLimited(req,'register',{limit:10,windowMs:10*60_000}))return fail(res,429,'Too many attempts. Try again later.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||'');
       if(!/^\S+@\S+\.\S+$/.test(email))return fail(res,400,'Enter a valid email.');
       if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
@@ -681,7 +705,7 @@ export const server=http.createServer(async(req,res)=>{
       const session=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:session.csrf}, {'Set-Cookie':cookie(session.token)});
     }
     if(url.pathname==='/api/auth/login'&&req.method==='POST'){
-      if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
+      if(rateLimited(req,'login',{limit:20,windowMs:10*60_000}))return fail(res,429,'Too many attempts. Try again later.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||''), u=q.userByEmail.get(email);
       if(!u||!verifyPassword(password,u.password_hash))return fail(res,401,'Email or password is incorrect.');
       const s=createSession(u.id); return json(res,200,{user:{id:u.id,email:u.email,displayName:u.display_name,defaultCurrency:u.default_currency,isOwner:Boolean(u.is_owner)},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
@@ -691,6 +715,36 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return; q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
+    }
+    if(url.pathname==='/api/auth/password'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      if(rateLimited(req,'password-change',{limit:10,windowMs:15*60_000}))return fail(res,429,'Too many password attempts. Try again later.');
+      const body=await bodyJson(req),currentPassword=String(body.currentPassword||''),newPassword=String(body.newPassword||''),u=q.userSecret.get(a.user_id);
+      if(!u||!verifyPassword(currentPassword,u.password_hash))return fail(res,403,'Current password is incorrect.');
+      if(newPassword.length<10||newPassword.length>200)return fail(res,400,'New password must be at least 10 characters.');
+      if(currentPassword===newPassword)return fail(res,400,'Choose a different new password.');
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        q.updatePassword.run(hashPassword(newPassword),a.user_id);
+        q.deleteOtherSessions.run(a.user_id,a.token_hash);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      return json(res,200,{ok:true,otherSessionsRevoked:true});
+    }
+    if(url.pathname==='/api/auth/sessions/revoke-others'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const result=q.deleteOtherSessions.run(a.user_id,a.token_hash);
+      return json(res,200,{ok:true,revoked:Number(result.changes||0)});
+    }
+    if(url.pathname==='/api/account'&&req.method==='DELETE'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      if(rateLimited(req,'account-delete',{limit:5,windowMs:30*60_000}))return fail(res,429,'Too many account deletion attempts. Try again later.');
+      const body=await bodyJson(req),password=String(body.password||''),confirmation=String(body.confirmation||''),u=q.userSecret.get(a.user_id);
+      if(confirmation!=='DELETE')return fail(res,400,'Type DELETE to confirm account deletion.');
+      if(!u||!verifyPassword(password,u.password_hash))return fail(res,403,'Password is incorrect.');
+      if(u.isOwner&&Number(q.otherUserCount.get(a.user_id)?.count||0)>0)return fail(res,400,'Delete the additional user accounts before deleting the owner account.');
+      q.deleteUser.run(a.user_id);
+      return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
     if(url.pathname==='/api/users'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return;
@@ -707,6 +761,27 @@ export const server=http.createServer(async(req,res)=>{
       const id=`user_${randomUUID()}`, createdAt=nowIso(), display='Money Tracker';
       q.createUser.run(id,email,display,hashPassword(password),a.default_currency,0,createdAt);
       return json(res,201,{user:{id,email,isOwner:false,createdAt}});
+    }
+    if(url.pathname.startsWith('/api/users/')){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      if(!a.is_owner)return fail(res,403,'Only the owner can manage user accounts.');
+      const parts=url.pathname.slice('/api/users/'.length).split('/').filter(Boolean),id=decodeURIComponent(parts[0]||''),action=parts[1]||'';
+      if(!/^user_[A-Za-z0-9_-]+$/.test(id))return fail(res,400,'Invalid user account.');
+      const target=q.userSecret.get(id);if(!target)return fail(res,404,'User account not found.');
+      if(target.isOwner)return fail(res,400,'The owner account cannot be changed through secondary-user controls.');
+      if(action==='password'&&req.method==='POST'){
+        const body=await bodyJson(req),password=String(body.password||'');
+        if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
+        db.exec('BEGIN IMMEDIATE');
+        try{q.updatePassword.run(hashPassword(password),id);q.deleteUserSessions.run(id);db.exec('COMMIT');}
+        catch(error){db.exec('ROLLBACK');throw error;}
+        return json(res,200,{ok:true,sessionsRevoked:true});
+      }
+      if(!action&&req.method==='DELETE'){
+        q.deleteUser.run(id);
+        return json(res,200,{ok:true});
+      }
+      return fail(res,405,'User account action not supported.');
     }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
@@ -984,6 +1059,17 @@ export const server=http.createServer(async(req,res)=>{
       if(action==='reopen'&&req.method==='POST')return json(res,200,{item:bankFeed.reopen(a.user_id,id)});
       if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));
       return fail(res,405,'Bank feed action not supported.');
+    }
+    if(url.pathname==='/api/backup/full'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;
+      return json(res,200,exportFullBackup(db,a.user_id));
+    }
+    if(url.pathname==='/api/backup/full/restore'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req,140_000_000);
+      restoreFullBackup(db,a.user_id,body);
+      bankFeed.reconcileReferences(a.user_id);
+      return json(res,200,{ok:true,state:loadState(a.user_id)});
     }
     if(url.pathname==='/api/backup/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

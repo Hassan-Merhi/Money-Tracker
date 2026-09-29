@@ -24,11 +24,12 @@ async function requestRaw(path,{method='GET',cookie,csrf}={}){
 }
 
 let cookie,csrf,state,attachmentId,secondUserEmail;
+let ownerPassword='correct horse battery staple';
 
 test('allows public signup only for the first owner account',async()=>{
   const before=await request('/api/auth/status'); assert.equal(before.res.status,200); assert.equal(before.data.registrationOpen,true);
   const email=`owner-${Date.now()}@example.com`;
-  const r=await request('/api/auth/register',{method:'POST',body:{email,password:'correct horse battery staple'}});
+  const r=await request('/api/auth/register',{method:'POST',body:{email,password:ownerPassword}});
   assert.equal(r.res.status,201); assert.ok(r.cookie?.startsWith('mot_session=')); assert.ok(r.data.csrfToken); assert.equal(r.data.user.isOwner,true);
   cookie=r.cookie; csrf=r.data.csrfToken;
   const me=await request('/api/auth/me',{cookie}); assert.equal(me.res.status,200); assert.equal(me.data.user.email,email); assert.equal(me.data.user.isOwner,true);
@@ -257,22 +258,153 @@ test('settings API is revision-safe and does not rewrite ledger tables',async()=
   assert.equal(state.settings.defaultCurrency,'USD');
 });
 
-test('owner can create additional accounts from Settings API and data stays isolated',async()=>{
+
+test('complete backup exports and transactionally restores every user-owned subsystem',async()=>{
+  const expenseCategory=state.categories.find(c=>!c.archived&&(c.kind==='expense'||c.kind==='both'));
+  assert.ok(expenseCategory);
+
+  const budget=await request('/api/budgets',{method:'POST',cookie,csrf,body:{categoryId:expenseCategory.id,currency:'USD',monthlyLimit:321.09}});
+  assert.equal(budget.res.status,200);
+
+  const recurring=await request('/api/recurring',{method:'POST',cookie,csrf,body:{
+    title:'Backup recurring',frequency:'monthly',interval:1,anchorDate:'2026-09-29',nextDueDate:'2026-10-29',endDate:null,remindDaysBefore:2,isActive:true,
+    template:{type:'paid_for_person',personId:'person_alice',accountId:'account_bank',amount:5,currency:'USD',merchant:'Backup',description:'Recurring backup',splits:[]}
+  }});
+  assert.equal(recurring.res.status,201);
+
+  const rule=await request('/api/bank-rules',{method:'POST',cookie,csrf,body:{matchText:'backup merchant',classification:'paid_for_person',personId:'person_alice'}});
+  assert.equal(rule.res.status,201);
+
+  const feed=await request('/api/bank-feed/import',{method:'POST',cookie,csrf,body:{accountId:'account_bank',sourceName:'Backup statement',rows:[{date:'2026-09-29',description:'Backup merchant charge',merchant:'Backup merchant',signedAmount:-9.87,currency:'USD',externalId:'backup-feed-1'}]}});
+  assert.equal(feed.res.status,200);assert.equal(feed.data.imported,1);
+
+  const exported=await request('/api/backup/full',{cookie});
+  assert.equal(exported.res.status,200);
+  const backup=exported.data;
+  assert.equal(backup.backupVersion,2);
+  assert.equal(backup.app,'money-owed-tracker');
+  assert.match(backup.sha256,/^[a-f0-9]{64}$/);
+  assert.ok(backup.data.people.length>=2);
+  assert.ok(backup.data.accounts.some(row=>row.id==='account_bank'));
+  assert.ok(backup.data.entries.some(row=>row.id==='entry_split'));
+  assert.ok(backup.data.attachments.some(row=>row.id===attachmentId));
+  assert.ok(backup.data.recurring_rules.length>=1);
+  assert.ok(backup.data.categories.length>=1);
+  assert.ok(backup.data.budgets.length>=1);
+  assert.ok(backup.data.bank_rules.length>=1);
+  assert.ok(backup.data.bank_feed_items.length>=1);
+  const attachmentBackup=backup.data.attachments.find(row=>row.id===attachmentId);
+  assert.equal(attachmentBackup.data.__type,'base64');
+  assert.equal(Buffer.from(attachmentBackup.data.data,'base64').toString(),'receipt');
+
+  const beforeVersion=state.version;
+  const reset=await request('/api/state/reset',{method:'POST',cookie,csrf,body:{}});
+  assert.equal(reset.res.status,200);state=reset.data;
+  assert.equal(state.people.length,0);assert.equal(state.entries.length,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM recurring_rules').get().count,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items').get().count,0);
+
+  const restored=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:backup});
+  assert.equal(restored.res.status,200);state=restored.data.state;
+  assert.ok(state.version>beforeVersion);
+  assert.ok(state.people.some(p=>p.id==='person_alice'));
+  assert.ok(state.entries.some(e=>e.id==='entry_split'));
+  assert.equal(state.entries.find(e=>e.id==='entry_split').attachmentCount,1);
+  assert.ok(db.prepare('SELECT COUNT(*) AS count FROM recurring_rules').get().count>=1);
+  assert.ok(db.prepare('SELECT COUNT(*) AS count FROM budgets').get().count>=1);
+  assert.ok(db.prepare('SELECT COUNT(*) AS count FROM bank_rules').get().count>=1);
+  assert.ok(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items').get().count>=1);
+  const raw=await requestRaw(`/api/attachments/${attachmentId}`,{cookie});
+  assert.equal(raw.res.status,200);assert.equal(raw.data.toString(),'receipt');
+});
+
+
+test('complete backup rejects corruption without partially replacing current data',async()=>{
+  const exported=await request('/api/backup/full',{cookie});assert.equal(exported.res.status,200);
+  const backup=structuredClone(exported.data);
+  const before=await request('/api/state',{cookie});assert.equal(before.res.status,200);
+  const beforePeople=before.data.people.map(p=>p.id).sort();
+  const beforeEntries=before.data.entries.map(e=>e.id).sort();
+
+  backup.data.people[0].name='Tampered without checksum update';
+  const failed=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:backup});
+  assert.equal(failed.res.status,400);assert.match(failed.data.error,/integrity check failed/i);
+
+  const after=await request('/api/state',{cookie});assert.equal(after.res.status,200);
+  assert.deepEqual(after.data.people.map(p=>p.id).sort(),beforePeople);
+  assert.deepEqual(after.data.entries.map(e=>e.id).sort(),beforeEntries);
+});
+
+test('password change preserves current session and revokes every other session',async()=>{
+  const ownerEmail=db.prepare("SELECT email FROM users WHERE is_owner=1").get().email;
+  const secondSession=await request('/api/auth/login',{method:'POST',body:{email:ownerEmail,password:ownerPassword}});
+  assert.equal(secondSession.res.status,200);
+
+  const nextPassword='owner password changed 2026';
+  const changed=await request('/api/auth/password',{method:'POST',cookie,csrf,body:{currentPassword:ownerPassword,newPassword:nextPassword}});
+  assert.equal(changed.res.status,200);assert.equal(changed.data.otherSessionsRevoked,true);
+  ownerPassword=nextPassword;
+
+  const currentStillWorks=await request('/api/state',{cookie});assert.equal(currentStillWorks.res.status,200);
+  const otherRevoked=await request('/api/state',{cookie:secondSession.cookie});assert.equal(otherRevoked.res.status,401);
+  const oldLogin=await request('/api/auth/login',{method:'POST',body:{email:ownerEmail,password:'correct horse battery staple'}});assert.equal(oldLogin.res.status,401);
+  const newLogin=await request('/api/auth/login',{method:'POST',body:{email:ownerEmail,password:ownerPassword}});assert.equal(newLogin.res.status,200);
+  const revoke=await request('/api/auth/sessions/revoke-others',{method:'POST',cookie,csrf,body:{}});
+  assert.equal(revoke.res.status,200);assert.ok(revoke.data.revoked>=1);
+  const newLoginRevoked=await request('/api/state',{cookie:newLogin.cookie});assert.equal(newLoginRevoked.res.status,401);
+});
+
+test('owner can reset and delete secondary accounts while data stays isolated',async()=>{
   secondUserEmail=`other-${Date.now()}@example.com`;
-  const created=await request('/api/users',{method:'POST',cookie,csrf,body:{email:secondUserEmail,password:'another secure password'}});
+  const originalPassword='another secure password',replacementPassword='replacement secure password';
+  const created=await request('/api/users',{method:'POST',cookie,csrf,body:{email:secondUserEmail,password:originalPassword}});
   assert.equal(created.res.status,201); assert.equal(created.data.user.isOwner,false);
+  const userId=created.data.user.id;
   const users=await request('/api/users',{cookie}); assert.equal(users.res.status,200); assert.equal(users.data.users.length,2);
-  const loginOther=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:'another secure password'}});
+  const loginOther=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:originalPassword}});
   assert.equal(loginOther.res.status,200); assert.equal(loginOther.data.user.isOwner,false);
   const other=await request('/api/state',{cookie:loginOther.cookie}); assert.equal(other.res.status,200); assert.deepEqual(other.data.people,[]); assert.deepEqual(other.data.entries,[]);
   const hidden=await request(`/api/attachments/${attachmentId}`,{cookie:loginOther.cookie}); assert.equal(hidden.res.status,404);
   const forbidden=await request('/api/users',{method:'POST',cookie:loginOther.cookie,csrf:loginOther.data.csrfToken,body:{email:`third-${Date.now()}@example.com`,password:'another secure password'}});
   assert.equal(forbidden.res.status,403);
+
+  const resetPassword=await request(`/api/users/${userId}/password`,{method:'POST',cookie,csrf,body:{password:replacementPassword}});
+  assert.equal(resetPassword.res.status,200);assert.equal(resetPassword.data.sessionsRevoked,true);
+  const oldSession=await request('/api/state',{cookie:loginOther.cookie});assert.equal(oldSession.res.status,401);
+  const oldPasswordLogin=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:originalPassword}});assert.equal(oldPasswordLogin.res.status,401);
+  const replacementLogin=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:replacementPassword}});assert.equal(replacementLogin.res.status,200);
+
+  const deleted=await request(`/api/users/${userId}`,{method:'DELETE',cookie,csrf,body:{}});
+  assert.equal(deleted.res.status,200);
+  const deletedSession=await request('/api/state',{cookie:replacementLogin.cookie});assert.equal(deletedSession.res.status,401);
+  const after=await request('/api/users',{cookie});assert.equal(after.data.users.length,1);
+});
+
+test('non-owner can permanently delete their own account with password confirmation',async()=>{
+  const email=`self-delete-${Date.now()}@example.com`,password='self delete secure password';
+  const created=await request('/api/users',{method:'POST',cookie,csrf,body:{email,password}});assert.equal(created.res.status,201);
+  const session=await request('/api/auth/login',{method:'POST',body:{email,password}});assert.equal(session.res.status,200);
+  const bad=await request('/api/account',{method:'DELETE',cookie:session.cookie,csrf:session.data.csrfToken,body:{password,confirmation:'NO'}});
+  assert.equal(bad.res.status,400);
+  const deleted=await request('/api/account',{method:'DELETE',cookie:session.cookie,csrf:session.data.csrfToken,body:{password,confirmation:'DELETE'}});
+  assert.equal(deleted.res.status,200);
+  const gone=await request('/api/state',{cookie:session.cookie});assert.equal(gone.res.status,401);
 });
 
 test('logout invalidates the server-side session',async()=>{
   const r=await request('/api/auth/logout',{method:'POST',cookie,csrf,body:{}}); assert.equal(r.res.status,200);
   const after=await request('/api/state',{cookie}); assert.equal(after.res.status,401);
+});
+
+test('authentication rate limits persist in SQLite and enforce the configured threshold',async()=>{
+  const before=Number(db.prepare('SELECT COUNT(*) AS count FROM rate_limits').get().count||0);
+  await request('/api/auth/login',{method:'POST',body:{email:'missing@example.com',password:'not the right password'}});
+  const rows=db.prepare('SELECT key_hash AS keyHash,count FROM rate_limits').all();
+  assert.ok(rows.length>=before+1||rows.some(row=>row.count>=1));
+  db.prepare('UPDATE rate_limits SET count=20').run();
+  const limited=await request('/api/auth/login',{method:'POST',body:{email:'missing@example.com',password:'not the right password'}});
+  assert.equal(limited.res.status,429);
 });
 
 test.after(async()=>{await new Promise(resolve=>server.close(resolve));db.close();rmSync(dir,{recursive:true,force:true});});

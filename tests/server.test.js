@@ -106,6 +106,157 @@ test('blocks stale-tab overwrites with optimistic revision checks',async()=>{
   const r=await request('/api/state',{method:'PUT',cookie,csrf,body:stale}); assert.equal(r.res.status,409);
 });
 
+
+test('atomic ledger API requires CSRF and rejects stale revisions',async()=>{
+  const noCsrf=await request('/api/people',{method:'POST',cookie,body:{expectedRevision:state.version,id:'person_no_csrf',name:'No CSRF'}});
+  assert.equal(noCsrf.res.status,403);
+  const staleVersion=state.version-1;
+  const stale=await request('/api/people',{method:'POST',cookie,csrf,body:{expectedRevision:staleVersion,id:'person_stale_api',name:'Stale'}});
+  assert.equal(stale.res.status,409);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM people WHERE id='person_stale_api'").get().count,0);
+});
+
+test('people API creates and edits one person without rewriting unrelated ledger rows',async()=>{
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lane_a_mutation_probe(kind TEXT NOT NULL);
+    DELETE FROM lane_a_mutation_probe;
+    DROP TRIGGER IF EXISTS lane_a_probe_entry_delete;
+    DROP TRIGGER IF EXISTS lane_a_probe_account_delete;
+    DROP TRIGGER IF EXISTS lane_a_probe_person_delete;
+    CREATE TRIGGER lane_a_probe_entry_delete AFTER DELETE ON entries BEGIN INSERT INTO lane_a_mutation_probe(kind) VALUES('entry_delete'); END;
+    CREATE TRIGGER lane_a_probe_account_delete AFTER DELETE ON accounts BEGIN INSERT INTO lane_a_mutation_probe(kind) VALUES('account_delete'); END;
+    CREATE TRIGGER lane_a_probe_person_delete AFTER DELETE ON people BEGIN INSERT INTO lane_a_mutation_probe(kind) VALUES('person_delete'); END;
+  `);
+  const beforeVersion=state.version;
+  const created=await request('/api/people',{method:'POST',cookie,csrf,body:{expectedRevision:state.version,id:'person_charlie',name:'Charlie',note:'API person'}});
+  assert.equal(created.res.status,201);assert.equal(created.data.version,beforeVersion+1);state=created.data;
+  assert.equal(state.people.find(p=>p.id==='person_charlie').note,'API person');
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all(),[]);
+
+  const updated=await request('/api/people/person_charlie',{method:'PUT',cookie,csrf,body:{expectedRevision:state.version,name:'Charles',note:'Updated atomically'}});
+  assert.equal(updated.res.status,200);state=updated.data;
+  assert.equal(state.people.find(p=>p.id==='person_charlie').name,'Charles');
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all(),[]);
+});
+
+test('people API creates opening balance atomically and enforces dependency-safe deletion',async()=>{
+  const beforeVersion=state.version;
+  const created=await request('/api/people',{method:'POST',cookie,csrf,body:{
+    expectedRevision:state.version,id:'person_dana',name:'Dana',note:'Opening debt',openingBalance:12.34,currency:'USD',direction:'i_owe',openingEntryId:'entry_dana_open',openingDate:'2026-09-29'
+  }});
+  assert.equal(created.res.status,201);assert.equal(created.data.version,beforeVersion+1);state=created.data;
+  const opening=state.entries.find(e=>e.id==='entry_dana_open');
+  assert.equal(opening.type,'person_adjustment');assert.equal(opening.amount,12.34);assert.equal(opening.signedAmount,-12.34);
+  const stored=db.prepare("SELECT amount_minor AS amountMinor,signed_amount_minor AS signedMinor FROM entries WHERE id='entry_dana_open'").get();
+  assert.equal(stored.amountMinor,1234);assert.equal(stored.signedMinor,-1234);
+
+  const blocked=await request('/api/people/person_dana',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(blocked.res.status,400);assert.match(blocked.data.error,/transactions first/);
+
+  const delEntry=await request('/api/entries/entry_dana_open',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(delEntry.res.status,200);state=delEntry.data;
+  const delPerson=await request('/api/people/person_dana',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(delPerson.res.status,200);state=delPerson.data;
+  assert.equal(state.people.some(p=>p.id==='person_dana'),false);
+});
+
+test('accounts API creates updates and deletes a single account with exact money storage',async()=>{
+  const created=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:state.version,id:'account_cash_api',name:'API Cash',type:'cash',currency:'USD',openingBalance:50.25}});
+  assert.equal(created.res.status,201);state=created.data;
+  assert.equal(db.prepare("SELECT opening_balance_minor AS v FROM accounts WHERE id='account_cash_api'").get().v,5025);
+
+  const updated=await request('/api/accounts/account_cash_api',{method:'PUT',cookie,csrf,body:{expectedRevision:state.version,name:'API Cashbox',type:'cash',openingBalance:75.5}});
+  assert.equal(updated.res.status,200);state=updated.data;
+  assert.equal(state.accounts.find(a=>a.id==='account_cash_api').openingBalance,75.5);
+  assert.equal(db.prepare("SELECT opening_balance_minor AS v FROM accounts WHERE id='account_cash_api'").get().v,7550);
+
+  const badCurrency=await request('/api/accounts/account_cash_api',{method:'PUT',cookie,csrf,body:{expectedRevision:state.version,name:'API Cashbox',type:'cash',currency:'EUR',openingBalance:75.5}});
+  assert.equal(badCurrency.res.status,400);assert.match(badCurrency.data.error,/currency cannot be changed/);
+
+  const removed=await request('/api/accounts/account_cash_api',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(removed.res.status,200);state=removed.data;
+  assert.equal(state.accounts.some(a=>a.id==='account_cash_api'),false);
+});
+
+test('entries API creates updates and deletes only the target transaction and cleans attachments',async()=>{
+  db.prepare('DELETE FROM lane_a_mutation_probe').run();
+  const created=await request('/api/entries',{method:'POST',cookie,csrf,body:{
+    expectedRevision:state.version,id:'entry_api_atomic',type:'paid_for_person',personId:'person_charlie',accountId:null,amount:10.29,currency:'USD',date:'2026-09-29',merchant:'API',description:'Atomic create',splits:[]
+  }});
+  assert.equal(created.res.status,201);state=created.data;
+  assert.equal(db.prepare("SELECT amount_minor AS v FROM entries WHERE id='entry_api_atomic'").get().v,1029);
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all(),[]);
+
+  const updated=await request('/api/entries/entry_api_atomic',{method:'PUT',cookie,csrf,body:{
+    expectedRevision:state.version,type:'paid_for_person',personId:'person_charlie',accountId:null,amount:11.31,currency:'USD',date:'2026-09-29',merchant:'API',description:'Atomic update',splits:[]
+  }});
+  assert.equal(updated.res.status,200);state=updated.data;
+  assert.equal(state.entries.find(e=>e.id==='entry_api_atomic').amount,11.31);
+  assert.equal(db.prepare("SELECT amount_minor AS v FROM entries WHERE id='entry_api_atomic'").get().v,1131);
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all(),[]);
+
+  const upload=await request('/api/attachments',{method:'POST',cookie,csrf,body:{entryId:'entry_api_atomic',name:'atomic.txt',mimeType:'text/plain',data:Buffer.from('atomic').toString('base64')}});
+  assert.equal(upload.res.status,201);
+  const removed=await request('/api/entries/entry_api_atomic',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(removed.res.status,200);state=removed.data;
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM attachments WHERE entry_id='entry_api_atomic'").get().count,0);
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all().map(row=>row.kind),['entry_delete']);
+
+  const personRemoved=await request('/api/people/person_charlie',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(personRemoved.res.status,200);state=personRemoved.data;
+});
+
+
+test('dependency-safe deletes catch split allocations and linked account entries',async()=>{
+  const splitBlocked=await request('/api/people/person_bob',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(splitBlocked.res.status,400);assert.match(splitBlocked.data.error,/transactions first/);
+  const accountBlocked=await request('/api/accounts/account_bank',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(accountBlocked.res.status,400);assert.match(accountBlocked.data.error,/transactions first/);
+});
+
+test('atomic entries API handles transfers and protects linked accounts',async()=>{
+  let r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:state.version,id:'account_transfer_a',name:'Transfer A',type:'cash',currency:'USD',openingBalance:100}});
+  assert.equal(r.res.status,201);state=r.data;
+  r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:state.version,id:'account_transfer_b',name:'Transfer B',type:'cash',currency:'USD',openingBalance:0}});
+  assert.equal(r.res.status,201);state=r.data;
+
+  const created=await request('/api/entries',{method:'POST',cookie,csrf,body:{
+    expectedRevision:state.version,id:'entry_transfer_api',type:'account_transfer',fromAccountId:'account_transfer_a',toAccountId:'account_transfer_b',
+    amount:10,fromAmount:10,toAmount:10,date:'2026-09-29',merchant:'',description:'Atomic transfer'
+  }});
+  assert.equal(created.res.status,201);state=created.data;
+  const stored=db.prepare("SELECT from_amount_minor AS fromMinor,to_amount_minor AS toMinor FROM entries WHERE id='entry_transfer_api'").get();
+  assert.equal(stored.fromMinor,1000);assert.equal(stored.toMinor,1000);
+
+  const blocked=await request('/api/accounts/account_transfer_a',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(blocked.res.status,400);assert.match(blocked.data.error,/transactions first/);
+
+  const updated=await request('/api/entries/entry_transfer_api',{method:'PUT',cookie,csrf,body:{
+    expectedRevision:state.version,type:'account_transfer',fromAccountId:'account_transfer_a',toAccountId:'account_transfer_b',
+    amount:12.34,fromAmount:12.34,toAmount:12.34,date:'2026-09-29',merchant:'',description:'Updated transfer'
+  }});
+  assert.equal(updated.res.status,200);state=updated.data;
+  const updatedStored=db.prepare("SELECT from_amount_minor AS fromMinor,to_amount_minor AS toMinor FROM entries WHERE id='entry_transfer_api'").get();
+  assert.equal(updatedStored.fromMinor,1234);assert.equal(updatedStored.toMinor,1234);
+
+  const deleted=await request('/api/entries/entry_transfer_api',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(deleted.res.status,200);state=deleted.data;
+  r=await request('/api/accounts/account_transfer_a',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});assert.equal(r.res.status,200);state=r.data;
+  r=await request('/api/accounts/account_transfer_b',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});assert.equal(r.res.status,200);state=r.data;
+});
+
+test('settings API is revision-safe and does not rewrite ledger tables',async()=>{
+  db.prepare('DELETE FROM lane_a_mutation_probe').run();
+  const beforeVersion=state.version;
+  const changed=await request('/api/settings',{method:'PUT',cookie,csrf,body:{expectedRevision:state.version,defaultCurrency:'EUR'}});
+  assert.equal(changed.res.status,200);assert.equal(changed.data.version,beforeVersion+1);assert.equal(changed.data.settings.defaultCurrency,'EUR');state=changed.data;
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all(),[]);
+
+  const restored=await request('/api/settings',{method:'PUT',cookie,csrf,body:{expectedRevision:state.version,defaultCurrency:'USD'}});
+  assert.equal(restored.res.status,200);state=restored.data;
+  assert.equal(state.settings.defaultCurrency,'USD');
+});
+
 test('owner can create additional accounts from Settings API and data stays isolated',async()=>{
   secondUserEmail=`other-${Date.now()}@example.com`;
   const created=await request('/api/users',{method:'POST',cookie,csrf,body:{email:secondUserEmail,password:'another secure password'}});

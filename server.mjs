@@ -145,7 +145,15 @@ const q = {
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
   cleanupSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
+  personById: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? AND id=?'),
+  personCount: db.prepare('SELECT COUNT(*) AS count FROM people WHERE user_id=?'),
+  updatePerson: db.prepare('UPDATE people SET name=?,note=? WHERE user_id=? AND id=?'),
+  deletePersonRow: db.prepare('DELETE FROM people WHERE user_id=? AND id=?'),
   accounts: db.prepare('SELECT id,name,type,currency,opening_balance_minor AS openingBalanceMinor,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
+  accountById: db.prepare('SELECT id,name,type,currency,opening_balance_minor AS openingBalanceMinor,created_at AS createdAt FROM accounts WHERE user_id=? AND id=?'),
+  accountCount: db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE user_id=?'),
+  updateAccount: db.prepare('UPDATE accounts SET name=?,type=?,opening_balance_minor=? WHERE user_id=? AND id=?'),
+  deleteAccountRow: db.prepare('DELETE FROM accounts WHERE user_id=? AND id=?'),
   entries: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
     amount_minor AS amountMinor,currency,from_amount_minor AS fromAmountMinor,to_amount_minor AS toAmountMinor,signed_amount_minor AS signedAmountMinor,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
     FROM entries WHERE user_id=? ORDER BY date, created_at`),
@@ -156,12 +164,16 @@ const q = {
   insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance_minor,created_at) VALUES(?,?,?,?,?,?,?)'),
   insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount_minor,currency,from_amount_minor,to_amount_minor,signed_amount_minor,date,merchant,description,category_id,split_json,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+  updateEntry: db.prepare(`UPDATE entries SET type=?,person_id=?,account_id=?,from_account_id=?,to_account_id=?,amount_minor=?,currency=?,from_amount_minor=?,to_amount_minor=?,signed_amount_minor=?,date=?,merchant=?,description=?,category_id=?,split_json=?,updated_at=? WHERE user_id=? AND id=?`),
+  deleteEntry: db.prepare('DELETE FROM entries WHERE user_id=? AND id=?'),
+  entryCount: db.prepare('SELECT COUNT(*) AS count FROM entries WHERE user_id=?'),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
   attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
   attachmentById: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,data,created_at AS createdAt FROM attachments WHERE user_id=? AND id=?'),
   insertAttachment: db.prepare('INSERT INTO attachments(user_id,id,entry_id,name,mime_type,size_bytes,data,created_at) VALUES(?,?,?,?,?,?,?,?)'),
   deleteAttachment: db.prepare('DELETE FROM attachments WHERE user_id=? AND id=?'),
+  deleteEntryAttachments: db.prepare('DELETE FROM attachments WHERE user_id=? AND entry_id=?'),
   deleteOrphanAttachments: db.prepare('DELETE FROM attachments WHERE user_id=? AND entry_id NOT IN (SELECT id FROM entries WHERE user_id=?)'),
   deleteAttachments: db.prepare('DELETE FROM attachments WHERE user_id=?'),
   recurringRules: db.prepare('SELECT id,title,frequency,interval_value AS interval,anchor_date AS anchorDate,next_due_date AS nextDueDate,end_date AS endDate,remind_days_before AS remindDaysBefore,is_active AS isActive,template_json AS templateJson,last_posted_at AS lastPostedAt,last_occurrence_date AS lastOccurrenceDate,created_at AS createdAt,updated_at AS updatedAt FROM recurring_rules WHERE user_id=? ORDER BY CASE WHEN next_due_date IS NULL THEN 1 ELSE 0 END,next_due_date,title COLLATE NOCASE'),
@@ -172,6 +184,7 @@ const q = {
   deleteRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=? AND id=?'),
   advanceRecurring: db.prepare('UPDATE recurring_rules SET next_due_date=?,is_active=?,last_posted_at=?,last_occurrence_date=?,updated_at=? WHERE user_id=? AND id=? AND next_due_date=?'),
   updateUserState: db.prepare('UPDATE users SET display_name=?, default_currency=?, revision=revision+1 WHERE id=? AND revision=?'),
+  updateUserSettingsValues: db.prepare('UPDATE users SET display_name=?,default_currency=? WHERE id=?'),
   bumpRevision: db.prepare('UPDATE users SET revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deleteAllRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=?'),
@@ -552,6 +565,91 @@ function saveState(user, input) {
   return loadState(user.user_id);
 }
 
+
+function ledgerError(message,status=400){return Object.assign(new Error(message),{status});}
+function expectedLedgerRevision(body){
+  const expected=Number(body?.expectedRevision);
+  if(!Number.isInteger(expected))throw ledgerError('Missing ledger revision.');
+  return expected;
+}
+function withLedgerMutation(userId,expected,mutate){
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const current=Number(q.userById.get(userId)?.revision);
+    if(current!==expected)throw ledgerError('This ledger changed in another tab. Refresh and try again.',409);
+    const result=mutate();
+    const bumped=q.bumpRevision.run(userId,expected);
+    if(Number(bumped.changes)!==1)throw ledgerError('This ledger changed in another tab. Refresh and try again.',409);
+    db.exec('COMMIT');
+    return result;
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+function cleanPersonInput(input,{existing=null}={}){
+  const id=existing?.id||(idOk(input?.id,'person')?input.id:'person_'+randomUUID());
+  if(!idOk(id,'person'))throw ledgerError('Invalid person record.');
+  const name=safeStr(input?.name,100),note=safeStr(input?.note,1000);
+  if(!name)throw ledgerError('Every person needs a name.');
+  return {id,name,note,createdAt:existing?.createdAt||nowIso()};
+}
+function cleanAccountInput(input,{existing=null,defaultCurrency='USD'}={}){
+  const id=existing?.id||(idOk(input?.id,'account')?input.id:'account_'+randomUUID());
+  if(!idOk(id,'account'))throw ledgerError('Invalid account record.');
+  const name=safeStr(input?.name,100),type=String(input?.type||'other');
+  const currency=String(existing?.currency||input?.currency||defaultCurrency).toUpperCase();
+  if(!name||!['bank','cash','card','wallet','other'].includes(type)||!validCurrency(currency))throw ledgerError('Invalid account record.');
+  if(existing&&input?.currency&&String(input.currency).toUpperCase()!==existing.currency)throw ledgerError('Account currency cannot be changed after creation.');
+  const openingBalance=exactMoney(input?.openingBalance??existing?.openingBalance??0,currency);
+  return {id,name,type,currency,openingBalance,createdAt:existing?.createdAt||nowIso()};
+}
+function ledgerValidationState(userId){
+  const u=q.userById.get(userId);if(!u)throw ledgerError('Account not found.',404);
+  return {
+    version:u.revision,
+    settings:{displayName:u.display_name,defaultCurrency:u.default_currency},
+    people:q.people.all(userId),
+    accounts:q.accounts.all(userId).map(accountFromStorage),
+    entries:[]
+  };
+}
+function cleanLedgerEntry(user,input,{existing=null}={}){
+  const id=existing?.id||(idOk(input?.id,'entry')?input.id:'entry_'+randomUUID());
+  if(!idOk(id,'entry'))throw ledgerError('Invalid transaction record.');
+  const stamp=nowIso();
+  const candidate={...input,id,createdAt:existing?.createdAt||input?.createdAt||stamp,updatedAt:stamp};
+  try{
+    const refs=ledgerValidationState(user.user_id);
+    return validateState({...refs,entries:[candidate]},user).entries[0];
+  }catch(error){throw ledgerError(error.message||'Invalid transaction.',400);}
+}
+function updateLedgerEntryRow(userId,entry){
+  const storage=entryToStorage(entry,accountCurrencyMap(userId));
+  const result=q.updateEntry.run(entry.type,entry.personId,entry.accountId,entry.fromAccountId,entry.toAccountId,storage.amountMinor,entry.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,entry.date,entry.merchant,entry.description,entry.categoryId||null,storage.splitJson,entry.updatedAt,userId,entry.id);
+  if(Number(result.changes)!==1)throw ledgerError('Transaction not found.',404);
+}
+function currentEntry(userId,id){return loadState(userId).entries.find(entry=>entry.id===id)||null;}
+function personUsedByEntry(userId,id){
+  return loadState(userId).entries.some(entry=>entry.personId===id||(entry.type==='split_paid_for_people'&&(entry.splits||[]).some(split=>split.personId===id)));
+}
+function accountUsedByEntry(userId,id){
+  return loadState(userId).entries.some(entry=>entry.accountId===id||entry.fromAccountId===id||entry.toAccountId===id);
+}
+function personUsedByRecurring(userId,id){
+  return loadRecurringRules(userId).some(rule=>rule.template?.personId===id||(rule.template?.type==='split_paid_for_people'&&(rule.template?.splits||[]).some(split=>split.personId===id)));
+}
+function accountUsedByRecurring(userId,id){
+  return loadRecurringRules(userId).some(rule=>[rule.template?.accountId,rule.template?.fromAccountId,rule.template?.toAccountId].includes(id));
+}
+function assertPersonDeletable(userId,id){
+  if(personUsedByEntry(userId,id))throw ledgerError('Delete this person’s transactions first.');
+  if(personUsedByRecurring(userId,id))throw ledgerError('A recurring schedule still uses this person. Update or delete that schedule first.');
+  if(db.prepare('SELECT 1 FROM bank_rules WHERE user_id=? AND person_id=? LIMIT 1').get(userId,id)||db.prepare('SELECT 1 FROM bank_feed_items WHERE user_id=? AND suggested_person_id=? LIMIT 1').get(userId,id))throw ledgerError('Bank Feed data still uses this person. Remove or reclassify it first.');
+}
+function assertAccountDeletable(userId,id){
+  if(accountUsedByEntry(userId,id))throw ledgerError('Delete or move this account’s transactions first.');
+  if(accountUsedByRecurring(userId,id))throw ledgerError('A recurring schedule still uses this account. Update or delete that schedule first.');
+  if(db.prepare('SELECT 1 FROM bank_feed_items WHERE user_id=? AND (account_id=? OR suggested_target_account_id=?) LIMIT 1').get(userId,id,id)||db.prepare('SELECT 1 FROM bank_rules WHERE user_id=? AND target_account_id=? LIMIT 1').get(userId,id))throw ledgerError('Bank Feed data still uses this account. Remove or reclassify it first.');
+}
+
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon'};
 function staticFile(req,res,url){
   let p=decodeURIComponent(url.pathname); if(p==='/'||!extname(p))p='/index.html';
@@ -563,7 +661,7 @@ function staticFile(req,res,url){
 export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units'});}
+    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -609,6 +707,132 @@ export const server=http.createServer(async(req,res)=>{
       const id=`user_${randomUUID()}`, createdAt=nowIso(), display='Money Tracker';
       q.createUser.run(id,email,display,hashPassword(password),a.default_currency,0,createdAt);
       return json(res,201,{user:{id,email,isOwner:false,createdAt}});
+    }
+    if(url.pathname==='/api/settings'&&req.method==='PUT'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+      const current=q.userById.get(a.user_id);
+      const displayName=safeStr(body.displayName??current.display_name,80)||'My Ledger';
+      const defaultCurrency=String(body.defaultCurrency??current.default_currency).toUpperCase();
+      if(!validCurrency(defaultCurrency))return fail(res,400,'Invalid default currency.');
+      withLedgerMutation(a.user_id,expected,()=>q.updateUserSettingsValues.run(displayName,defaultCurrency,a.user_id));
+      return json(res,200,loadState(a.user_id));
+    }
+    if(url.pathname==='/api/people'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+      if(Number(q.personCount.get(a.user_id)?.count||0)>=10000)return fail(res,400,'You can keep up to 10,000 people.');
+      const person=cleanPersonInput(body);
+      if(q.personById.get(a.user_id,person.id))return fail(res,409,'That person id already exists.');
+      withLedgerMutation(a.user_id,expected,()=>{
+        q.insertPerson.run(a.user_id,person.id,person.name,person.note,person.createdAt);
+        const openingRaw=body.openingBalance??body.opening??0,opening=finite(openingRaw);
+        if(opening===null||opening<0)throw ledgerError('Opening balance must be zero or greater.');
+        if(opening>0){
+          if(Number(q.entryCount.get(a.user_id)?.count||0)>=50000)throw ledgerError('You can keep up to 50,000 transactions.');
+          const currency=String(body.currency||a.default_currency||'USD').toUpperCase();
+          if(!validCurrency(currency))throw ledgerError('Choose a valid currency.');
+          const amount=exactMoney(opening,currency,{allowNegative:false,allowZero:false});
+          const signedAmount=(body.direction==='i_owe'?-1:1)*amount;
+          const date=validDate(body.openingDate)?body.openingDate:new Date().toISOString().slice(0,10);
+          const openingEntry=cleanLedgerEntry(a,{id:idOk(body.openingEntryId,'entry')?body.openingEntryId:undefined,type:'person_adjustment',personId:person.id,accountId:null,amount,currency,signedAmount,date,merchant:'',description:'Opening balance',splits:[]});
+          insertLedgerEntry(a.user_id,openingEntry);
+        }
+      });
+      return json(res,201,loadState(a.user_id));
+    }
+    if(url.pathname.startsWith('/api/people/')){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/people/'.length));
+      if(!idOk(id,'person'))return fail(res,400,'Invalid person.');
+      const existing=q.personById.get(a.user_id,id);if(!existing)return fail(res,404,'Person not found.');
+      if(req.method==='PUT'){
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body),person=cleanPersonInput({...body,id},{existing});
+        withLedgerMutation(a.user_id,expected,()=>{
+          const changed=q.updatePerson.run(person.name,person.note,a.user_id,id);
+          if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+        });
+        return json(res,200,loadState(a.user_id));
+      }
+      if(req.method==='DELETE'){
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+        withLedgerMutation(a.user_id,expected,()=>{
+          assertPersonDeletable(a.user_id,id);
+          const changed=q.deletePersonRow.run(a.user_id,id);
+          if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+        });
+        return json(res,200,loadState(a.user_id));
+      }
+      return fail(res,405,'Person action not supported.');
+    }
+    if(url.pathname==='/api/accounts'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+      if(Number(q.accountCount.get(a.user_id)?.count||0)>=1000)return fail(res,400,'You can keep up to 1,000 accounts.');
+      const account=cleanAccountInput(body,{defaultCurrency:a.default_currency});
+      if(q.accountById.get(a.user_id,account.id))return fail(res,409,'That account id already exists.');
+      withLedgerMutation(a.user_id,expected,()=>{
+        const storage=accountToStorage(account);
+        q.insertAccount.run(a.user_id,account.id,account.name,account.type,account.currency,storage.openingBalanceMinor,account.createdAt);
+      });
+      return json(res,201,loadState(a.user_id));
+    }
+    if(url.pathname.startsWith('/api/accounts/')){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/accounts/'.length));
+      if(!idOk(id,'account'))return fail(res,400,'Invalid account.');
+      const raw=q.accountById.get(a.user_id,id);if(!raw)return fail(res,404,'Account not found.');
+      const existing=accountFromStorage(raw);
+      if(req.method==='PUT'){
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body),account=cleanAccountInput({...body,id},{existing,defaultCurrency:a.default_currency});
+        withLedgerMutation(a.user_id,expected,()=>{
+          const storage=accountToStorage(account);
+          const changed=q.updateAccount.run(account.name,account.type,storage.openingBalanceMinor,a.user_id,id);
+          if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+        });
+        return json(res,200,loadState(a.user_id));
+      }
+      if(req.method==='DELETE'){
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+        withLedgerMutation(a.user_id,expected,()=>{
+          assertAccountDeletable(a.user_id,id);
+          const changed=q.deleteAccountRow.run(a.user_id,id);
+          if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+        });
+        return json(res,200,loadState(a.user_id));
+      }
+      return fail(res,405,'Account action not supported.');
+    }
+    if(url.pathname==='/api/entries'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+      if(Number(q.entryCount.get(a.user_id)?.count||0)>=50000)return fail(res,400,'You can keep up to 50,000 transactions.');
+      const entry=cleanLedgerEntry(a,body);
+      if(q.entryExists.get(a.user_id,entry.id))return fail(res,409,'That transaction id already exists.');
+      withLedgerMutation(a.user_id,expected,()=>insertLedgerEntry(a.user_id,entry));
+      return json(res,201,loadState(a.user_id));
+    }
+    if(url.pathname.startsWith('/api/entries/')){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/entries/'.length));
+      if(!idOk(id,'entry'))return fail(res,400,'Invalid transaction.');
+      const existing=currentEntry(a.user_id,id);if(!existing)return fail(res,404,'Transaction not found.');
+      if(req.method==='PUT'){
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body),entry=cleanLedgerEntry(a,{...body,id},{existing});
+        withLedgerMutation(a.user_id,expected,()=>updateLedgerEntryRow(a.user_id,entry));
+        return json(res,200,loadState(a.user_id));
+      }
+      if(req.method==='DELETE'){
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+        withLedgerMutation(a.user_id,expected,()=>{
+          q.deleteEntryAttachments.run(a.user_id,id);
+          const changed=q.deleteEntry.run(a.user_id,id);
+          if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
+          bankFeed.reopenOrphans(a.user_id);
+        });
+        return json(res,200,loadState(a.user_id));
+      }
+      return fail(res,405,'Transaction action not supported.');
     }
     if(url.pathname==='/api/attachments'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return;

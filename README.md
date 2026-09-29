@@ -69,6 +69,7 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 
 ## Block D — Reports & exports
 
+- Monthly reports keep **Receivables movement** (person deltas), **Personal cash flow** (account income minus expenses), and **Transfer flow** (both transfer legs by currency) separate in Reports, PDF, and the Excel Monthly sheet with its Measure column. Same-currency transfers cancel; cross-currency legs stay in their original currencies.
 - Date, person, and account report filters
 - Period activity summaries grouped by currency
 - Current outstanding and account-balance reports
@@ -170,6 +171,12 @@ npm start
 Then open `http://localhost:4173`.
 
 ## Tests
+
+```bash
+npm test                 # Full suite
+npm run test:lane-d      # Lane D release gate
+npm run accounting:check # Money, ledger, migration, reporting, Wave 0, PDF and XLSX regressions
+```
 
 The automated suite covers core ledger math, exact-money storage, account-only income/expenses, categories/budgets, recurring schedules/reminders, Bank Feed import/history/undo, full backup/restore, session lifecycle, security-event behavior, cross-site mutation rejection, runtime diagnostics, server snapshots, PWA install/offline/update contracts, reporting/PDF/XLSX round-trips, imports, attachments, user isolation, and production release regressions.
 

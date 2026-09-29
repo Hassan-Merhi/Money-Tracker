@@ -4,6 +4,7 @@ import { personBalances, accountBalances, totalsFromBalances, personDelta, accou
 import { CURRENCIES, money, today, dateInTimeZone, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
+import { filterTransactionList } from './lib/reporting.js';
 import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
 import { renderBankFeedPage } from './block-f-bank-feed.js';
 import { renderInsightsPage, mountBudgetDashboardWidget } from './block-g-insights.js';
@@ -220,11 +221,17 @@ function renderDashboard(main) {
       </div>
       <div class="dashboard-secondary">
         <section class="card panel quick-panel"><div class="panel-head"><div><h3>Make a move</h3><p>A quick update. A clearer balance.</p></div><span class="keyboard-hint" title="Press N to add activity">N</span></div><div class="quick-grid">${actions.map(([type,symbol,title,note])=>`<button class="quick" data-action="${type}"><span class="qicon">${icon(symbol)}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}</div><div class="quick-foot">${icon('check')} No bank account needed</div></section>
+        ${advancedMode()?`<section class="card panel" id="dashboardRecurring"></section><section class="card panel" id="dashboardBudgets"></section>`:''}
         ${advancedMode()?`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>The bigger picture</h3><p>Explore your spending, categories and monthly budgets.</p><a class="text-link" href="#insights">Open insights ${icon('arrow')}</a></section>`:`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>More clarity. When you’re ready.</h3><p>Bring accounts, budgets and schedules into view with Advanced mode. Your existing records stay just as they are.</p><button class="text-link" id="enableAdvanced">Enable Advanced mode ${icon('arrow')}</button></section>`}
       </div>
     </div>
     <div class="dashboard-caption">${icon('check')} Your balances, all in one place. <span>${advancedMode()?'Advanced':'Simple'} workspace</span></div>
   </div>`;
+  if(advancedMode()){
+    const ctx={showToast,replaceState(next){state=next;render();}};
+    mountRecurringDashboardWidget(main.querySelector('#dashboardRecurring'),state,ctx);
+    mountBudgetDashboardWidget(main.querySelector('#dashboardBudgets'),state);
+  }
   main.querySelector('#enableAdvanced')?.addEventListener('click',async()=>{const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';const saved=await runMutation(version=>updateSettings({defaultCurrency:state.settings.defaultCurrency,appMode:'advanced',timezone},version),'Advanced mode enabled.');if(saved)location.hash='#dashboard';});
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
@@ -516,13 +523,14 @@ function openAccountDetail(accountId){
 }
 
 function renderTransactions(main) {
-  const type=route.params.get('type')||''; const person=route.params.get('person')||'';
-  let entries=[...state.entries].filter(e=>advancedMode()?true:PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
-  if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>entryTouchesPerson(e,person));
-  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All debt activity</option>${entryTypeOptions(type,false)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add</button></div>
-  <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching debt activity</strong>Add what someone owes you, what you owe them, or a repayment.</div>'}</section>`;
-  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value;if(t)q.set('type',t);if(p)q.set('person',p);location.hash=`#transactions${q.toString()?'?'+q:''}`};
-  ['#filterType','#filterPerson'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
+  const type=route.params.get('type')||'',person=route.params.get('person')||'',category=route.params.get('category')||'';
+  const visible=state.entries.filter(e=>advancedMode()||PERSON_ENTRY_TYPES.includes(e.type));
+  const entries=filterTransactionList(visible,{type,personId:person,categoryId:category,people:state.people})
+    .sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
+  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All activity</option>${entryTypeOptions(type,true)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${escapeHtml(p.id)}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class="select" id="filterCategory" aria-label="Filter by category"><option value="">All categories</option><option value="uncategorized" ${category==='uncategorized'?'selected':''}>Uncategorized</option>${(state.categories||[]).map(c=>`<option value="${escapeHtml(c.id)}" ${category===c.id?'selected':''}>${escapeHtml(c.name)}${c.archived?' (archived)':''}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add</button></div>
+  <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching activity</strong>Change the filters or add a transaction.</div>'}</section>`;
+  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value,c=main.querySelector('#filterCategory').value;if(t)q.set('type',t);if(p)q.set('person',p);if(c)q.set('category',c);location.hash=`#transactions${q.toString()?'?'+q:''}`};
+  ['#filterType','#filterPerson','#filterCategory'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
   main.querySelector('#addTxn')?.addEventListener('click',()=>openQuickMenu());
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));

@@ -215,7 +215,7 @@ test('Reports and PDF publish three labelled measures with exact fixture values'
       assert.ok(panel.includes(`${currency} ${value}`));
       assert.ok(pdfSection.includes(`2026-09: ${currency} ${value.toLocaleString('en-US',{minimumFractionDigits:currencyExponent(currency),maximumFractionDigits:currencyExponent(currency)})}`));
     }
-    assert.equal((panel.match(/<tr><td>/g)||[]).length,Object.keys(values).length);
+    assert.equal((panel.match(/<tr><td\b/g)||[]).length,Object.keys(values).length);
   }
   assert.doesNotMatch(main.innerHTML,/Monthly movement/);
   assert.doesNotMatch(pdf,/Monthly movement/);

@@ -283,6 +283,7 @@ test('complete backup exports and transactionally restores every user-owned subs
   const backup=exported.data;
   assert.equal(backup.backupVersion,2);
   assert.equal(backup.app,'money-owed-tracker');
+  assert.match(backup.sha256,/^[a-f0-9]{64}$/);
   assert.ok(backup.data.people.length>=2);
   assert.ok(backup.data.accounts.some(row=>row.id==='account_bank'));
   assert.ok(backup.data.entries.some(row=>row.id==='entry_split'));
@@ -316,6 +317,23 @@ test('complete backup exports and transactionally restores every user-owned subs
   assert.ok(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items').get().count>=1);
   const raw=await requestRaw(`/api/attachments/${attachmentId}`,{cookie});
   assert.equal(raw.res.status,200);assert.equal(raw.data.toString(),'receipt');
+});
+
+
+test('complete backup rejects corruption without partially replacing current data',async()=>{
+  const exported=await request('/api/backup/full',{cookie});assert.equal(exported.res.status,200);
+  const backup=structuredClone(exported.data);
+  const before=await request('/api/state',{cookie});assert.equal(before.res.status,200);
+  const beforePeople=before.data.people.map(p=>p.id).sort();
+  const beforeEntries=before.data.entries.map(e=>e.id).sort();
+
+  backup.data.people[0].name='Tampered without checksum update';
+  const failed=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:backup});
+  assert.equal(failed.res.status,400);assert.match(failed.data.error,/integrity check failed/i);
+
+  const after=await request('/api/state',{cookie});assert.equal(after.res.status,200);
+  assert.deepEqual(after.data.people.map(p=>p.id).sort(),beforePeople);
+  assert.deepEqual(after.data.entries.map(e=>e.id).sort(),beforeEntries);
 });
 
 test('password change preserves current session and revokes every other session',async()=>{

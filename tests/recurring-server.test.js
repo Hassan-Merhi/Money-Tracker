@@ -82,7 +82,8 @@ test('posting an occurrence atomically adds one entry and advances month-end cor
   assert.equal(posted.data.rule.nextDueDate,'2026-02-28');
   state=posted.data.state;rule=posted.data.rule;
   const reminders=await request('/api/recurring/reminders',{cookie});
-  assert.equal(reminders.data.reminders.length,0);
+  assert.equal(reminders.data.reminders.some(rem=>rem.occurrenceDate==='2026-01-31'),false);
+  assert.equal(reminders.data.reminders.some(rem=>rem.occurrenceDate==='2026-02-28'),true);
 });
 
 test('replaying the same occurrence is rejected without a duplicate ledger entry',async()=>{

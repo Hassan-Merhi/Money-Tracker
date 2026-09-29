@@ -115,6 +115,9 @@ test('future attachment uploads enforce the complete-backup storage quota',async
   const r=await request('/api/attachments',{method:'POST',cookie,csrf,body:{entryId:'entry_quota',name:'next.txt',mimeType:'text/plain',data:Buffer.from('y').toString('base64')}});
   assert.equal(r.res.status,413);
   assert.match(r.data.error,/100 MB/i);
+  // This row deliberately lies about its byte size to exercise quota accounting.
+  // Remove the invalid synthetic row before the complete-backup round-trip gate.
+  db.prepare("DELETE FROM attachments WHERE user_id=? AND id='attachment_quota_seed'").run(userId);
 });
 
 test('complete backup restores data beyond all former Lane A/B history caps',async()=>{

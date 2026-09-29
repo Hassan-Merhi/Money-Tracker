@@ -1,6 +1,6 @@
-const CACHE='money-tracker-debt-v16';
+const CACHE='money-tracker-debt-v17';
 const CORE=[
-  '/','/index.html','/styles.css','/dashboard.css','/mobile.css?v=activity-v2','/activity.css?v=activity-v2','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=activity-v2',
+  '/','/index.html','/styles.css','/dashboard.css','/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=mobile-v3',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg',

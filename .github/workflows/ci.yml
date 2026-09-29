@@ -22,6 +22,8 @@ jobs:
         run: npm test
       - name: Run Lane D release gate
         run: npm run test:lane-d
+      - name: Run accounting reconciliation gate
+        run: npm run accounting:check
       - name: Check browser JavaScript syntax
         run: |
           node --check app.js
@@ -55,3 +57,4 @@ jobs:
           node --check lib/money-storage.js
           node --check scripts/create-db-snapshot.mjs
           node --check scripts/restore-db-snapshot.mjs
+          node --check scripts/accounting-check.mjs

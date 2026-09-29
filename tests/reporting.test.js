@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reportingSnapshot, workbookSheets, exportRows, filterTransactionList } from '../lib/reporting.js';
+import { reportingSnapshot, workbookSheets, exportRows, filterTransactionList, dateRangeForPreset } from '../lib/reporting.js';
 import { readFileSync } from 'node:fs';
 import { renderReports } from '../lib/reports-ui.js';
 import { buildPdfReport } from '../lib/pdf.js';
@@ -219,4 +219,19 @@ test('Reports and PDF publish three labelled measures with exact fixture values'
   }
   assert.doesNotMatch(main.innerHTML,/Monthly movement/);
   assert.doesNotMatch(pdf,/Monthly movement/);
+});
+
+
+test('activity date presets produce calendar-safe ranges',()=>{
+  assert.deepEqual(dateRangeForPreset('this_month','2026-09-29'),{from:'2026-09-01',to:'2026-09-30'});
+  assert.deepEqual(dateRangeForPreset('last_month','2026-09-29'),{from:'2026-08-01',to:'2026-08-31'});
+  assert.deepEqual(dateRangeForPreset('last_30_days','2026-09-29'),{from:'2026-08-31',to:'2026-09-29'});
+  assert.deepEqual(dateRangeForPreset('all','2026-09-29'),{from:'',to:''});
+  assert.deepEqual(dateRangeForPreset('custom','2026-09-29','2026-09-05','2026-09-18'),{from:'2026-09-05',to:'2026-09-18'});
+});
+
+test('transaction list date filter composes with activity filters',()=>{
+  const rows=filterTransactionList(state.entries,{from:'2026-09-10',to:'2026-09-14',personId:'p1'});
+  assert.deepEqual(rows.map(row=>row.id),['e2']);
+  assert.equal(filterTransactionList(state.entries,{from:'2026-09-11',to:'2026-09-14'}).length,0);
 });

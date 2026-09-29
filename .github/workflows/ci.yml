@@ -47,6 +47,7 @@ jobs:
           node --check block-f-bank-feed.js
           node --check lib/bank-feed.js
           node --check lib/bank-server.js
+          node --check lib/store.js
           node --check block-g-insights.js
           node --check lib/insights.js
           node --check lib/insights-server.js
@@ -58,3 +59,5 @@ jobs:
           node --check lib/money-parse.js
           node --check scripts/create-db-snapshot.mjs
           node --check scripts/restore-db-snapshot.mjs
+          node --check scripts/accounting-check.mjs
+          node --check scripts/accounting-bank-feed-check.mjs

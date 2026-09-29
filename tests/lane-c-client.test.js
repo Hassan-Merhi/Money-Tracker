@@ -51,11 +51,12 @@ test('theme bootstrap is external so script CSP does not block it',()=>{
 });
 
 
-test('quick paste importer stays available without exposing an import card in Settings',()=>{
+test('import tools stay implemented without being injected into Settings or Reports',()=>{
   const source=readFileSync(new URL('../block-c-import.js',import.meta.url),'utf8');
   assert.doesNotMatch(source,/data-import-card/);
   assert.match(source,/applyQuickPasteImport/);
   assert.match(source,/They owe me/);
   assert.match(source,/Took from them/);
-  assert.match(source,/dataset\.openQuickImport/);
+  assert.doesNotMatch(source,/querySelector\('#exportXlsx'\)/);
+  assert.doesNotMatch(source,/dataset\.openQuickImport/);
 });

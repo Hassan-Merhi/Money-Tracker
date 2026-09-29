@@ -70,7 +70,7 @@ test('people overview is bounded, alphabetized, escaped, and has an honest total
 test('dashboard assets are local, loaded last, and included in the upgraded offline shell', () => {
   const html = read('index.html'), sw = read('service-worker.js');
   assert.ok(html.indexOf('dashboard.css') > html.indexOf('block-g-insights.css'));
-  assert.match(sw, /money-tracker-debt-v13/);
+  assert.match(sw, /money-tracker-debt-v16/);
   for (const path of ['/dashboard.css', '/lib/dashboard-ui.js']) assert.ok(sw.includes(`'${path}'`));
   assert.match(icon('people'), /aria-hidden="true"/);
   assert.doesNotMatch(icon('<script>'), /<script>/);
@@ -80,9 +80,10 @@ test('dashboard assets are local, loaded last, and included in the upgraded offl
 test('dashboard mounts both widgets only in Advanced mode with a revision-safe state replacement',()=>{
   const app=read('app.js');
   const dashboard=app.slice(app.indexOf('function renderDashboard('),app.indexOf('function renderPeople('));
-  assert.match(dashboard,/advancedMode\(\)\?`<section class="card panel" id="dashboardRecurring"><\/section><section class="card panel" id="dashboardBudgets"><\/section>`/);
+  assert.match(dashboard,/advancedMode\(\)\?`<div class="dashboard-secondary">[\s\S]*?id="dashboardRecurring"[\s\S]*?id="dashboardBudgets"[\s\S]*?<\/div>`:''/);
   assert.match(dashboard,/if\(advancedMode\(\)\)\{[\s\S]*?const ctx=\{showToast,replaceState\(next\)\{state=next;render\(\);\}\};[\s\S]*?mountRecurringDashboardWidget\(main\.querySelector\('#dashboardRecurring'\),state,ctx\);[\s\S]*?mountBudgetDashboardWidget\(main\.querySelector\('#dashboardBudgets'\),state\);/);
-  assert.match(dashboard,/id="enableAdvanced"/); // Simple-mode teaser remains available.
+  assert.doesNotMatch(dashboard,/id="enableAdvanced"/);
+  assert.match(app,/id="settingMode"/); // Mode switching belongs in Settings only.
   const recurring=read('block-e-recurring.js');
   assert.match(recurring,/expectedRevision:state.version/);
   assert.match(recurring,/ctx.replaceState\(result.state\)/);
@@ -106,9 +107,9 @@ test('transactions page preserves category filters and defaults date filtering t
   assert.ok(transactions.includes("q.set('period'"));
   assert.ok(transactions.includes("q.set('from'"));
   assert.ok(transactions.includes("q.set('to'"));
-  const mobile=read('mobile.css');
-  assert.match(mobile,/activity-table-wrap\.mobile-ledger-table/);
-  assert.match(mobile,/activity-toolbar>#addTxn\{display:none\}/);
+  const activity=read('activity.css');
+  assert.match(activity,/\.activity-list-head\{display:none\}/);
+  assert.match(activity,/activity-toolbar>#addTxn\{display:none!important\}/);
   assert.match(read('block-g-insights.js'),/row.categoryId\|\|'uncategorized'/);
 });
 
@@ -122,7 +123,7 @@ test('recurring widget shows due/overdue items and posts with the mounted revisi
   const date=today(),yesterday=new Date(date+'T12:00:00');yesterday.setDate(yesterday.getDate()-1);
   const previous=`${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
   const rules=[['due',date],['overdue',previous]].map(([id,nextDueDate])=>({id,title:id,nextDueDate,isActive:true,remindDaysBefore:0,template:{type:'paid_for_person',personId:'p1',amount:10,currency:'USD'}}));
-  const mounted={version:7,people:[{id:'p1',name:'Alice'}],accounts:[]},next={...mounted,version:8};
+  const mounted={version:7,settings:{timezone:'UTC'},people:[{id:'p1',name:'Alice'}],accounts:[]},next={...mounted,version:8};
   const calls=[],replacements=[],toasts=[],buttons=rules.map(rule=>({dataset:{dashboardPost:rule.id},addEventListener(event,handler){this.click=handler;}}));
   const host={innerHTML:'',querySelector:()=>null,querySelectorAll:()=>buttons};
   let conflict=false;

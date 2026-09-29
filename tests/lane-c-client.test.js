@@ -40,3 +40,12 @@ test('store exposes Lane C security and operational APIs',()=>{
   assert.match(store,/\/api\/ops\/snapshot/);
   assert.match(store,/You are offline/);
 });
+
+
+test('theme bootstrap is external so script CSP does not block it',()=>{
+  const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+  assert.match(html,/theme-init\.js/);
+  assert.equal(/<script>/.test(html),false);
+  const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
+  assert.match(sw,/theme-init\.js/);
+});

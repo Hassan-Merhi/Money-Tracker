@@ -4,7 +4,7 @@ import { personBalances, accountBalances, totalsFromBalances, personDelta, accou
 import { CURRENCIES, money, today, dateInTimeZone, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
-import { filterTransactionList } from './lib/reporting.js';
+import { filterTransactionList, dateRangeForPreset } from './lib/reporting.js';
 import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
 import { renderBankFeedPage } from './block-f-bank-feed.js';
 import { renderInsightsPage, mountBudgetDashboardWidget } from './block-g-insights.js';
@@ -523,26 +523,41 @@ function openAccountDetail(accountId){
 
 function renderTransactions(main) {
   const type=route.params.get('type')||'',person=route.params.get('person')||'',category=route.params.get('category')||'';
+  const period=route.params.get('period')||'this_month',customFrom=route.params.get('from')||'',customTo=route.params.get('to')||'';
+  const anchor=dateInTimeZone(state.settings?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC');
+  const range=dateRangeForPreset(period,anchor,customFrom,customTo);
   const visible=state.entries.filter(e=>advancedMode()||PERSON_ENTRY_TYPES.includes(e.type));
-  const entries=filterTransactionList(visible,{type,personId:person,categoryId:category,people:state.people})
+  const entries=filterTransactionList(visible,{type,personId:person,categoryId:category,people:state.people,from:range.from,to:range.to})
     .sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
-  main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All activity</option>${entryTypeOptions(type,true)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${escapeHtml(p.id)}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class="select" id="filterCategory" aria-label="Filter by category"><option value="">All categories</option><option value="uncategorized" ${category==='uncategorized'?'selected':''}>Uncategorized</option>${(state.categories||[]).map(c=>`<option value="${escapeHtml(c.id)}" ${category===c.id?'selected':''}>${escapeHtml(c.name)}${c.archived?' (archived)':''}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add</button></div>
-  <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching activity</strong>Change the filters or add a transaction.</div>'}</section>`;
-  const update=()=>{const q=new URLSearchParams();const t=main.querySelector('#filterType').value,p=main.querySelector('#filterPerson').value,c=main.querySelector('#filterCategory').value;if(t)q.set('type',t);if(p)q.set('person',p);if(c)q.set('category',c);location.hash=`#transactions${q.toString()?'?'+q:''}`};
-  ['#filterType','#filterPerson','#filterCategory'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
+  const categoryFilter=advancedMode()?`<select class='select' id='filterCategory' aria-label='Filter by category'><option value=''>All categories</option><option value='uncategorized' ${category==='uncategorized'?'selected':''}>Uncategorized</option>${(state.categories||[]).map(c=>`<option value='${escapeHtml(c.id)}' ${category===c.id?'selected':''}>${escapeHtml(c.name)}${c.archived?' (archived)':''}</option>`).join('')}</select>`:'';
+  const customDateFilters=period==='custom'?`<div class='field activity-date-field'><label for='filterFrom'>From</label><input class='input' id='filterFrom' type='date' value='${escapeHtml(customFrom||range.from)}'></div><div class='field activity-date-field'><label for='filterTo'>To</label><input class='input' id='filterTo' type='date' value='${escapeHtml(customTo||range.to)}'></div>`:'';
+  main.innerHTML=`<div class='panel-head activity-toolbar'><div class='filters activity-filters'><select class='select' id='filterType' aria-label='Filter by activity type'><option value=''>${advancedMode()?'All activity':'All debt activity'}</option>${entryTypeOptions(type,true)}</select><select class='select' id='filterPerson' aria-label='Filter by person'><option value=''>All people</option>${state.people.map(p=>`<option value='${escapeHtml(p.id)}' ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class='select' id='filterPeriod' aria-label='Filter by date'><option value='this_month' ${period==='this_month'?'selected':''}>This month</option><option value='last_month' ${period==='last_month'?'selected':''}>Last month</option><option value='last_30_days' ${period==='last_30_days'?'selected':''}>Last 30 days</option><option value='all' ${period==='all'?'selected':''}>All time</option><option value='custom' ${period==='custom'?'selected':''}>Custom dates</option></select>${categoryFilter}${customDateFilters}</div><button class='btn primary' id='addTxn'>＋ Add</button></div>
+  <section class='card panel activity-list-panel'>${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching activity</strong>Change the filters or date range, or add a transaction.</div>'}</section>`;
+  const update=()=>{
+    const q=new URLSearchParams();
+    const t=main.querySelector('#filterType')?.value||'',p=main.querySelector('#filterPerson')?.value||'',c=main.querySelector('#filterCategory')?.value||'',d=main.querySelector('#filterPeriod')?.value||'this_month';
+    if(t)q.set('type',t);if(p)q.set('person',p);if(c)q.set('category',c);if(d!=='this_month')q.set('period',d);
+    if(d==='custom'){
+      const defaults=dateRangeForPreset('this_month',anchor);
+      const f=main.querySelector('#filterFrom')?.value||customFrom||defaults.from,to=main.querySelector('#filterTo')?.value||customTo||defaults.to;
+      if(f)q.set('from',f);if(to)q.set('to',to);
+    }
+    location.hash=`#transactions${q.toString()?'?'+q:''}`;
+  };
+  ['#filterType','#filterPerson','#filterCategory','#filterPeriod','#filterFrom','#filterTo'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
   main.querySelector('#addTxn')?.addEventListener('click',()=>openQuickMenu());
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));
 }
 
 function transactionTable(entries,{compact=false}={}){
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
+  return `<div class='table-wrap mobile-ledger-table activity-table-wrap'><table class='table activity-table'><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class='right'>Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
     const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income'||e.type==='account_adjustment')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:e.type==='account_adjustment'?`${Number(e.signedAmount)<0?'−':'+'}${money(e.amount,e.currency||acc?.currency||'USD')}`:money(e.amount,e.currency||acc?.currency||'USD');
     const category=state.categories?.find(x=>x.id===e.categoryId);
-    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions statement-actions-cell">${entryMenuMarkup(e.id)}</td>`}</tr>`}).join('')}</tbody></table></div>`;
+    return `<tr class='activity-row'><td data-label='Date' class='activity-date-cell'><time datetime='${escapeHtml(e.date)}'>${escapeHtml(e.date)}</time></td><td data-label='Type' class='activity-type-cell'><span class='pill'>${prettyType(e.type)}</span></td><td data-label='Person / transfer' class='activity-person-cell'>${personText}</td><td data-label='Notes' class='activity-notes-cell'><span class='activity-note-text'>${escapeHtml(e.description||e.merchant||'—')}</span>${category?`<div class='attachment-count'>${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class='attachment-count'>📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td data-label='Amount' class='right strong activity-amount-cell'><span class='activity-amount'>${amt}</span></td>${compact?'':`<td class='actions statement-actions-cell activity-actions-cell'>${entryMenuMarkup(e.id)}</td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderSettings(main) {

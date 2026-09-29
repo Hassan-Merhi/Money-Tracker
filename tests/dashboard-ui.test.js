@@ -89,14 +89,26 @@ test('dashboard mounts both widgets only in Advanced mode with a revision-safe s
   assert.match(recurring,/data-dashboard-post/);
 });
 
-test('transactions page reads the category route param and preserves all three filters',()=>{
+test('transactions page preserves category filters and defaults date filtering to this month',()=>{
   const app=read('app.js');
   const transactions=app.slice(app.indexOf('function renderTransactions('),app.indexOf('function transactionTable('));
   assert.match(transactions,/route.params.get\('category'\)/);
-  assert.match(transactions,/filterTransactionList\(visible,\{type,personId:person,categoryId:category,people:state.people\}\)/);
-  assert.match(transactions,/id="filterCategory"/);
+  assert.match(transactions,/route.params.get\('period'\)\|\|'this_month'/);
+  assert.match(transactions,/route.params.get\('from'\)/);
+  assert.match(transactions,/route.params.get\('to'\)/);
+  assert.match(transactions,/filterTransactionList\(visible,\{type,personId:person,categoryId:category,people:state.people,from:range.from,to:range.to\}\)/);
+  assert.match(transactions,/id=['"]filterPeriod['"]/);
+  assert.match(transactions,/This month/);
+  assert.match(transactions,/Custom dates/);
+  assert.match(transactions,/id=['"]filterCategory['"]/);
   assert.match(transactions,/c.archived\?' \(archived\)'/);
   for(const key of ['type','person','category'])assert.ok(transactions.includes(`q.set('${key}'`));
+  assert.ok(transactions.includes("q.set('period'"));
+  assert.ok(transactions.includes("q.set('from'"));
+  assert.ok(transactions.includes("q.set('to'"));
+  const mobile=read('mobile.css');
+  assert.match(mobile,/activity-table-wrap\.mobile-ledger-table/);
+  assert.match(mobile,/activity-toolbar>#addTxn\{display:none\}/);
   assert.match(read('block-g-insights.js'),/row.categoryId\|\|'uncategorized'/);
 });
 

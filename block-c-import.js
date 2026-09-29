@@ -20,8 +20,6 @@ function downloadTemplate(){downloadBytes('money-tracker-import-template.xlsx',t
 function inject(){
   if(injecting)return;injecting=true;
   try{
-    const settings=document.querySelector('.settings-grid');
-    if(settings&&!settings.querySelector('[data-import-card]')){const card=document.createElement('section');card.className='card settings-card';card.dataset.importCard='1';card.innerHTML='<h3>Import & migration</h3><p class="muted">Paste ordinary Excel rows straight into person statements, or use the full workbook importer for larger migrations.</p><div class="page-actions"><button class="btn primary" type="button" data-open-quick-import>Paste from Excel</button><button class="btn" type="button" data-open-import>Import workbook</button><button class="btn" type="button" data-template>Download template</button></div>';card.querySelector('[data-open-quick-import]').onclick=openQuickImporter;card.querySelector('[data-open-import]').onclick=openImporter;card.querySelector('[data-template]').onclick=downloadTemplate;settings.prepend(card);}
     const exportBtn=document.querySelector('#exportXlsx');
     const actions=exportBtn?.parentElement;
     if(actions&&!actions.querySelector('[data-open-import]')){const b=document.createElement('button');b.className='btn';b.type='button';b.dataset.openImport='1';b.textContent='↑ Import data';b.onclick=openImporter;actions.prepend(b);const quick=document.createElement('button');quick.className='btn';quick.type='button';quick.dataset.openQuickImport='1';quick.textContent='⌘ Paste Excel';quick.onclick=openQuickImporter;actions.prepend(quick);}

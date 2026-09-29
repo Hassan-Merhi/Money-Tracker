@@ -187,13 +187,25 @@ button,a,[role="button"]{touch-action:manipulation}
   }
   .mobile-ledger-table td[data-label="Notes"],
   .mobile-ledger-table td[data-label="Person / transfer"],
+  .mobile-ledger-table td[data-label="Details"],
   .mobile-ledger-table td.actions{
     grid-column:1/-1;
   }
   .mobile-ledger-table td[data-label="Amount"],
   .mobile-ledger-table td[data-label="Change"],
-  .mobile-ledger-table td[data-label="Running balance"]{
+  .mobile-ledger-table td[data-label="Impact"],
+  .mobile-ledger-table td[data-label="Running balance"],
+  .mobile-ledger-table td[data-label="Balance after"]{
     text-align:right!important;
+  }
+  .mobile-ledger-table tfoot td{
+    grid-column:1/-1;
+  }
+  .mobile-ledger-table tfoot .statement-tfoot-label{
+    display:none;
+  }
+  .mobile-ledger-table tfoot tr{
+    background:var(--panel);
   }
   .mobile-ledger-table td.actions{
     display:grid;

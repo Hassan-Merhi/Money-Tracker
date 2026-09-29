@@ -1,12 +1,12 @@
 import {
-  listBankFeed, importBankFeed, postBankFeedItem, ignoreBankFeedItem, reopenBankFeedItem,
+  listBankFeed, importBankFeed, postBankFeedItem, undoBankFeedItem, ignoreBankFeedItem, reopenBankFeedItem,
   deleteBankFeedItem, createBankRule, deleteBankRule, previewSpreadsheet, loadState
 } from './lib/store.js';
 import { parseBankCsv, suggestBankMapping, normalizeBankRows, bankDirectionLabel } from './lib/bank-feed.js';
 import { categoryOptionsForType } from './lib/insights.js';
 import { escapeHtml, money } from './lib/utils.js';
 
-let feed={items:[],rules:[]};
+let feed={items:[],rules:[],history:[],stats:{pending:0,posted:0,ignored:0}};
 let draft=null;
 let selectedAccountId='';
 let statusFilter='pending';
@@ -125,7 +125,7 @@ function feedRowMarkup(item,state){
       <div class="field bank-note-wrap"><label>Ledger note</label><input class="input bank-note" maxlength="500" value="${escapeHtml(item.description)}"></div>
       <label class="bank-rule-check"><input type="checkbox" class="bank-save-rule"> Remember a rule for <input class="input bank-rule-text" maxlength="120" value="${escapeHtml(ruleText)}" aria-label="Rule match text"></label>
       <div class="page-actions"><button class="btn primary bank-post">Post to ledger</button><button class="btn bank-ignore">Ignore</button><button class="btn danger bank-delete">Delete</button></div>
-    </div>`:item.status==='ignored'?`<div class="bank-row-actions"><button class="btn small bank-reopen">Reopen</button><button class="btn small danger bank-delete">Delete</button></div>`:`<div class="bank-row-actions"><span class="muted tiny">Ledger entry: ${escapeHtml(item.postedEntryId||'posted')}</span></div>`}
+    </div>`:item.status==='ignored'?`<div class="bank-row-actions"><button class="btn small bank-reopen">Reopen</button><button class="btn small danger bank-delete">Delete</button></div>`:`<div class="bank-row-actions"><span class="muted tiny">Ledger entry: ${escapeHtml(item.postedEntryId||'posted')}</span><button class="btn small danger bank-undo">Undo posting</button></div>`}
   </article>`;
 }
 
@@ -150,7 +150,7 @@ function paint(main,state,ctx){
     main.querySelector('#bankGoAccounts')?.addEventListener('click',()=>location.hash='#accounts');return;
   }
   if(!selectedAccountId||!state.accounts.some(a=>a.id===selectedAccountId))selectedAccountId=state.accounts[0].id;
-  const counts={pending:0,posted:0,ignored:0};feed.items.forEach(i=>counts[i.status]=(counts[i.status]||0)+1);
+  const counts=feed.stats||{pending:0,posted:0,ignored:0};
   const shown=feed.items.filter(i=>statusFilter==='all'||i.status===statusFilter);
   main.innerHTML=`
     <div class="grid stats bank-stats">
@@ -195,7 +195,7 @@ function bind(main,state,ctx){
     if(!normalized.items.length){ctx.showToast(normalized.errors[0]||'No valid rows to import.');return;}
     try{
       const result=await importBankFeed({accountId:account.id,sourceName:`${draft.filename}${draft.sheets.length>1?' · '+sheet.name:''}`,rows:normalized.items});
-      feed={items:result.items||[],rules:result.rules||[]};draft=null;statusFilter='pending';paint(main,state,ctx);
+      feed={items:result.items||[],rules:result.rules||[],history:result.history||[],stats:result.stats||{}};draft=null;statusFilter='pending';paint(main,state,ctx);
       const invalid=result.invalid+(normalized.errors?.length||0);
       ctx.showToast(`Imported ${result.imported} row${result.imported===1?'':'s'} · ${result.skipped} duplicate${result.skipped===1?'':'s'} skipped${invalid?' · '+invalid+' invalid':''}.`);
     }catch(error){ctx.showToast(error.message||'Could not import the statement.');}
@@ -207,7 +207,7 @@ function bind(main,state,ctx){
     const payload={expectedRevision:state.version,classification:action,personId:card.querySelector('.bank-person')?.value||null,targetAccountId:card.querySelector('.bank-target')?.value||null,categoryId:card.querySelector('.bank-category')?.value||null,note:card.querySelector('.bank-note')?.value||'',saveRule:!!card.querySelector('.bank-save-rule')?.checked,ruleMatchText:card.querySelector('.bank-rule-text')?.value||''};
     btn.disabled=true;
     try{
-      const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;
+      const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;feed.stats=result.stats||feed.stats;
       ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');ctx.replaceState(result.state);
     }catch(error){
       if(error.status===409){

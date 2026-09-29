@@ -5,18 +5,42 @@
   "start_url": "/#dashboard",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["window-controls-overlay","standalone","minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
   "background_color": "#f6f7fb",
   "theme_color": "#111827",
   "description": "Track money people owe you, money you owe, accounts, bank statements, budgets, recurring schedules and reports.",
-  "categories": ["finance","productivity"],
-  "orientation": "any",
+  "categories": [
+    "finance",
+    "productivity"
+  ],
+  "orientation": "portrait-primary",
   "icons": [
-    {"src":"/assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+    {
+      "src": "/assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ],
   "shortcuts": [
-    {"name":"Dashboard","short_name":"Dashboard","url":"/#dashboard"},
-    {"name":"Transactions","short_name":"Activity","url":"/#transactions"},
-    {"name":"Reports","short_name":"Reports","url":"/#reports"}
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/#dashboard"
+    },
+    {
+      "name": "Transactions",
+      "short_name": "Activity",
+      "url": "/#transactions"
+    },
+    {
+      "name": "Reports",
+      "short_name": "Reports",
+      "url": "/#reports"
+    }
   ]
 }

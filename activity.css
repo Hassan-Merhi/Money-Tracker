@@ -1,0 +1,37 @@
+/* Transactions page: responsive desktop + mobile layout */
+.activity-toolbar{align-items:flex-end}
+.activity-toolbar .activity-filters{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px;flex:1;min-width:0;margin:0}
+.activity-list-panel{overflow:hidden}
+.activity-table{table-layout:fixed;min-width:0}
+.activity-table th:nth-child(1){width:120px}
+.activity-table th:nth-child(2){width:170px}
+.activity-table th:nth-child(3){width:22%}
+.activity-table th:nth-child(5){width:140px}
+.activity-table th:nth-child(6){width:52px}
+.activity-table td{overflow-wrap:anywhere}
+.activity-amount{white-space:normal}
+@media(max-width:760px){
+ .activity-toolbar{display:block;margin-bottom:12px}
+ .activity-toolbar .activity-filters{grid-template-columns:1fr 1fr;width:100%}
+ .activity-toolbar #filterPeriod{grid-column:1/-1}
+ .activity-toolbar>#addTxn{display:none}
+ .activity-list-panel{padding:0;border:0;background:transparent;box-shadow:none}
+ .activity-table-wrap{border:0;margin:0}
+ .activity-table{display:block;width:100%;min-width:0}
+ .activity-table thead{display:none}
+ .activity-table tbody{display:grid;gap:10px}
+ .activity-table tr.activity-row{display:grid;grid-template-columns:minmax(0,1fr) 40px;gap:7px 12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
+ .activity-table tr.activity-row>td{display:block;width:auto;min-width:0;padding:0;border:0;text-align:left;white-space:normal}
+ .activity-table tr.activity-row>td:before{display:none}
+ .activity-type-cell{grid-column:1;grid-row:1}
+ .activity-actions-cell{grid-column:2;grid-row:1;justify-self:end}
+ .activity-date-cell{grid-column:1/-1;grid-row:2;color:var(--muted);font-size:12px}
+ .activity-person-cell{grid-column:1/-1;grid-row:3;font-size:16px;font-weight:800}
+ .activity-notes-cell{grid-column:1/-1;grid-row:4;line-height:1.45}
+ .activity-amount-cell{grid-column:1/-1;grid-row:5;display:flex!important;justify-content:space-between;gap:12px;padding-top:10px!important;margin-top:3px;border-top:1px solid var(--line)!important;font-size:17px}
+ .activity-amount-cell:before{content:"Amount"!important;display:block!important;color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+}
+@media(max-width:390px){
+ .activity-toolbar .activity-filters{grid-template-columns:1fr}
+ .activity-toolbar #filterPeriod{grid-column:auto}
+}

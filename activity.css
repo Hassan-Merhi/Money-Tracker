@@ -1,37 +1,41 @@
-/* Transactions page: responsive desktop + mobile layout */
+/* Transactions page */
 .activity-toolbar{align-items:flex-end}
-.activity-toolbar .activity-filters{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px;flex:1;min-width:0;margin:0}
-.activity-list-panel{overflow:hidden}
-.activity-table{table-layout:fixed!important;min-width:100%!important;width:100%!important}
-.activity-table th:nth-child(1){width:120px}
-.activity-table th:nth-child(2){width:170px}
-.activity-table th:nth-child(3){width:22%}
-.activity-table th:nth-child(5){width:140px}
-.activity-table th:nth-child(6){width:52px}
-.activity-table th,.activity-table td{overflow-wrap:normal;word-break:normal}.activity-table .activity-date-cell,.activity-table .activity-type-cell,.activity-table .activity-person-cell,.activity-table .activity-amount-cell{white-space:nowrap}.activity-table .activity-notes-cell{white-space:normal;overflow-wrap:anywhere}
-.activity-amount{white-space:nowrap}
+.activity-toolbar .activity-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;flex:1;min-width:0;margin:0}
+.activity-list-panel{overflow:visible}
+.activity-table-wrap{width:100%;overflow-x:auto}
+table.activity-table{width:100%!important;min-width:760px!important;table-layout:auto!important;border-collapse:collapse}
+table.activity-table th,table.activity-table td{padding:12px 14px;vertical-align:middle;word-break:normal!important;overflow-wrap:normal!important}
+table.activity-table th:nth-child(1){width:130px}
+table.activity-table th:nth-child(2){width:180px}
+table.activity-table th:nth-child(3){width:220px}
+table.activity-table th:nth-child(4){width:auto}
+table.activity-table th:nth-child(5){width:150px}
+table.activity-table th:nth-child(6){width:54px}
+table.activity-table .activity-date-cell,
+table.activity-table .activity-type-cell,
+table.activity-table .activity-person-cell,
+table.activity-table .activity-amount-cell{white-space:nowrap!important}
+table.activity-table .activity-notes-cell{white-space:normal!important}
+table.activity-table .activity-amount{white-space:nowrap!important}
 @media(max-width:760px){
  .activity-toolbar{display:block;margin-bottom:12px}
  .activity-toolbar .activity-filters{grid-template-columns:1fr 1fr;width:100%}
- .activity-toolbar #filterPeriod{grid-column:1/-1}
- .activity-toolbar>#addTxn{display:none}
- .activity-list-panel{padding:0;border:0;background:transparent;box-shadow:none}
- .activity-table-wrap{border:0;margin:0}
- .activity-table{display:block;width:100%!important;min-width:0!important}
- .activity-table thead{display:none}
- .activity-table tbody{display:grid;gap:10px}
- .activity-table tr.activity-row{display:grid;grid-template-columns:minmax(0,1fr) 40px;gap:7px 12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
- .activity-table tr.activity-row>td{display:block;width:auto;min-width:0;padding:0;border:0;text-align:left;white-space:normal!important}
- .activity-table tr.activity-row>td:before{display:none}
- .activity-type-cell{grid-column:1;grid-row:1}
- .activity-actions-cell{grid-column:2;grid-row:1;justify-self:end}
- .activity-date-cell{grid-column:1/-1;grid-row:2;color:var(--muted);font-size:12px}
- .activity-person-cell{grid-column:1/-1;grid-row:3;font-size:16px;font-weight:800}
- .activity-notes-cell{grid-column:1/-1;grid-row:4;line-height:1.45}
- .activity-amount-cell{grid-column:1/-1;grid-row:5;display:flex!important;justify-content:space-between;gap:12px;padding-top:10px!important;margin-top:3px;border-top:1px solid var(--line)!important;font-size:17px}
- .activity-amount-cell:before{content:"Amount"!important;display:block!important;color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+ .activity-toolbar .activity-filters #filterPeriod{grid-column:1/-1}
+ .activity-toolbar>#addTxn{display:none!important}
+ .activity-list-panel{padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}
+ .activity-table-wrap.mobile-ledger-table{overflow:visible!important;border:0!important;margin:0!important;width:100%!important}
+ table.activity-table{display:block!important;width:100%!important;min-width:0!important}
+ table.activity-table thead{display:none!important}
+ table.activity-table tbody{display:grid!important;gap:10px!important;width:100%!important}
+ table.activity-table tr.activity-row{display:grid!important;grid-template-columns:minmax(0,1fr) 40px!important;gap:7px 12px!important;width:100%!important;padding:14px 15px!important;border:1px solid var(--line)!important;border-radius:16px!important;background:var(--panel)!important}
+ table.activity-table tr.activity-row>td{display:block!important;width:auto!important;min-width:0!important;padding:0!important;border:0!important;text-align:left!important;white-space:normal!important;word-break:normal!important}
+ table.activity-table .activity-type-cell{grid-column:1;grid-row:1}
+ table.activity-table .activity-actions-cell{grid-column:2;grid-row:1;justify-self:end}
+ table.activity-table .activity-date-cell{grid-column:1/-1;grid-row:2;color:var(--muted);font-size:12px}
+ table.activity-table .activity-person-cell{grid-column:1/-1;grid-row:3;font-size:16px;font-weight:800}
+ table.activity-table .activity-notes-cell{grid-column:1/-1;grid-row:4;overflow-wrap:anywhere!important}
+ table.activity-table .activity-amount-cell{grid-column:1/-1;grid-row:5;display:flex!important;align-items:baseline;justify-content:space-between;gap:12px;padding-top:10px!important;margin-top:3px;border-top:1px solid var(--line)!important;font-size:17px}
+ table.activity-table .activity-amount-cell:before{content:"Amount"!important;display:block!important;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+ table.activity-table .activity-amount{white-space:nowrap!important}
 }
-@media(max-width:390px){
- .activity-toolbar .activity-filters{grid-template-columns:1fr}
- .activity-toolbar #filterPeriod{grid-column:auto}
-}
+@media(max-width:390px){.activity-toolbar .activity-filters{grid-template-columns:1fr!important}.activity-toolbar .activity-filters #filterPeriod{grid-column:auto!important}}

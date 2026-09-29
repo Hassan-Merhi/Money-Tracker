@@ -12,6 +12,8 @@ test('Lane D adds keyboard navigation focus and live-region accessibility',()=>{
   assert.match(app,/aria-labelledby="pageHeading"/);
   assert.match(app,/role="status"/);
   assert.match(app,/wireFieldLabels/);
+  assert.match(app,/document\.querySelector\('\.skip-link'\)\?\.addEventListener\('click'/);
+  assert.match(app,/event\.preventDefault\(\)/);
   assert.match(app,/event\.key==='Escape'/);
   assert.match(app,/event\.key!=='Tab'/);
   assert.match(app,/modalReturnFocus/);

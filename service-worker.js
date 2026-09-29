@@ -1,6 +1,6 @@
-const CACHE='money-tracker-debt-v14';
+const CACHE='money-tracker-debt-v15';
 const CORE=[
-  '/','/index.html','/styles.css','/dashboard.css','/lib/dashboard-ui.js','/theme-init.js','/app.js',
+  '/','/index.html','/styles.css','/dashboard.css','/mobile.css?v=activity-v2','/activity.css?v=activity-v2','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=activity-v2',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg',
@@ -47,7 +47,5 @@ self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
   if(event.request.mode==='navigate'){event.respondWith(networkFirst(event.request));return;}
-  const revalidatePromise=fetchAndCache(event.request);
-  event.waitUntil(revalidatePromise.then(()=>undefined));
-  event.respondWith(staleWhileRevalidate(event.request,revalidatePromise));
+  event.respondWith(networkFirst(event.request));
 });

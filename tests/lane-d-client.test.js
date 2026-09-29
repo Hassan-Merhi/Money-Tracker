@@ -45,7 +45,7 @@ test('Lane D centralizes bounded storage and recovery limits',()=>{
   const limits=read('lib/data-limits.js'),backup=read('lib/full-backup.js'),server=read('server.mjs'),bank=read('lib/bank-server.js');
   assert.match(limits,/bankFeedItems:50000/);
   assert.match(limits,/bankImportBatches:5000/);
-  assert.match(limits,/attachmentBytes:96\*1024\*1024/);
+  assert.match(limits,/attachmentBytes:100\*1024\*1024/);
   assert.match(backup,/DATA_LIMITS\.bankFeedItems/);
   assert.match(backup,/DATA_LIMITS\.attachmentBytes/);
   assert.match(server,/DATA_LIMITS\.fullBackupBodyBytes/);

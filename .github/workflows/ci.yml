@@ -2,7 +2,7 @@ name: Money Tracker CI
 
 on:
   push:
-    branches: [main, block-d-exports-reporting, block-c-imports-final]
+    branches: [main, lane-d-waves-11-12-15, block-d-exports-reporting, block-c-imports-final]
   pull_request:
     branches: [main]
 
@@ -20,6 +20,8 @@ jobs:
           node-version: '22.13.1'
       - name: Run test suite
         run: npm test
+      - name: Run Lane D release gate
+        run: npm run test:lane-d
       - name: Check browser JavaScript syntax
         run: |
           node --check app.js
@@ -48,6 +50,7 @@ jobs:
           node --check lib/insights-server.js
           node --check lib/db-snapshot.js
           node --check lib/full-backup.js
+          node --check lib/data-limits.js
           node --check lib/money.js
           node --check lib/money-storage.js
           node --check scripts/create-db-snapshot.mjs

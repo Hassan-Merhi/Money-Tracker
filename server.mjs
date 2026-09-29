@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from
 import { DatabaseSync } from 'node:sqlite';
 import { parseWorkbook } from './lib/xlsx-import.js';
 import { nextRecurringDate } from './lib/recurring.js';
+import { createRecurringReminderService, safeTimeZone } from './lib/recurring-worker.js';
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
@@ -33,6 +34,8 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL DEFAULT 'My Ledger',
   password_hash TEXT NOT NULL,
   default_currency TEXT NOT NULL DEFAULT 'USD',
+  app_mode TEXT NOT NULL DEFAULT 'simple',
+  timezone TEXT NOT NULL DEFAULT 'UTC',
   is_owner INTEGER NOT NULL DEFAULT 0,
   revision INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
@@ -130,6 +133,8 @@ CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is
 `);
 const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(row => row.name));
 if (!userColumns.has('is_owner')) db.exec("ALTER TABLE users ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0");
+if (!userColumns.has('app_mode')) db.exec("ALTER TABLE users ADD COLUMN app_mode TEXT NOT NULL DEFAULT 'simple'");
+if (!userColumns.has('timezone')) db.exec("ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'");
 const ownerCount = Number(db.prepare('SELECT COUNT(*) AS count FROM users WHERE is_owner=1').get()?.count || 0);
 if (!ownerCount) db.prepare("UPDATE users SET is_owner=1 WHERE id=(SELECT id FROM users ORDER BY created_at LIMIT 1)").run();
 
@@ -142,11 +147,11 @@ const insights = createInsightsService(db);
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
-  userById: db.prepare('SELECT id,email,display_name,default_currency,is_owner AS isOwner,revision,created_at FROM users WHERE id = ?'),
+  userById: db.prepare('SELECT id,email,display_name,default_currency,app_mode,timezone,is_owner AS isOwner,revision,created_at FROM users WHERE id = ?'),
   userCount: db.prepare('SELECT COUNT(*) AS count FROM users'),
   managedUsers: db.prepare('SELECT id,email,is_owner AS isOwner,created_at AS createdAt FROM users ORDER BY created_at'),
   createUser: db.prepare('INSERT INTO users(id,email,display_name,password_hash,default_currency,is_owner,revision,created_at) VALUES(?,?,?,?,?,?,1,?)'),
-  sessionByHash: db.prepare(`SELECT s.token_hash,s.csrf_token,s.expires_at,u.id AS user_id,u.email,u.display_name,u.default_currency,u.is_owner,u.revision
+  sessionByHash: db.prepare(`SELECT s.token_hash,s.csrf_token,s.expires_at,u.id AS user_id,u.email,u.display_name,u.default_currency,u.app_mode,u.timezone,u.is_owner,u.revision
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?`),
   insertSession: db.prepare('INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
@@ -189,6 +194,7 @@ const q = {
   entryCount: db.prepare('SELECT COUNT(*) AS count FROM entries WHERE user_id=?'),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
+  attachmentRefs: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? ORDER BY created_at'),
   attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
   attachmentById: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,data,created_at AS createdAt FROM attachments WHERE user_id=? AND id=?'),
   insertAttachment: db.prepare('INSERT INTO attachments(user_id,id,entry_id,name,mime_type,size_bytes,data,created_at) VALUES(?,?,?,?,?,?,?,?)'),
@@ -203,17 +209,19 @@ const q = {
   updateRecurring: db.prepare('UPDATE recurring_rules SET title=?,frequency=?,interval_value=?,anchor_date=?,next_due_date=?,end_date=?,remind_days_before=?,is_active=?,template_json=?,updated_at=? WHERE user_id=? AND id=?'),
   deleteRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=? AND id=?'),
   advanceRecurring: db.prepare('UPDATE recurring_rules SET next_due_date=?,is_active=?,last_posted_at=?,last_occurrence_date=?,updated_at=? WHERE user_id=? AND id=? AND next_due_date=?'),
-  updateUserState: db.prepare('UPDATE users SET display_name=?, default_currency=?, revision=revision+1 WHERE id=? AND revision=?'),
-  updateUserSettingsValues: db.prepare('UPDATE users SET display_name=?,default_currency=? WHERE id=?'),
+  updateUserState: db.prepare('UPDATE users SET display_name=?,default_currency=?,app_mode=?,timezone=?,revision=revision+1 WHERE id=? AND revision=?'),
+  updateUserSettingsValues: db.prepare('UPDATE users SET display_name=?,default_currency=?,app_mode=?,timezone=? WHERE id=?'),
   bumpRevision: db.prepare('UPDATE users SET revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deleteAllRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=?'),
 };
 
 const bankFeed = createBankFeedService(db);
+const recurringReminders = createRecurringReminderService(db);
 markExactMoneySchema(db);
 console.log('EXACT_MONEY_READY '+JSON.stringify({version:exactMoneySchemaVersion(db),storage:'integer-minor-units'}));
 console.log('LANE_A_READY '+JSON.stringify({waves:[2,3,4,5],ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true}));
+console.log('LANE_B_READY '+JSON.stringify({waves:[6,8,9,10],appModes:true,serverRecurringReminders:true,bankFeedHistory:true,reportingVersion:2}));
 
 if (process.env.WAVE0_BACKUP_ON_START === '1') {
   const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});
@@ -321,6 +329,8 @@ function validateState(input, user) {
   const settings=input.settings||{};
   const displayName=safeStr(settings.displayName || user.display_name || 'My Ledger',80) || 'My Ledger';
   const defaultCurrency=String(settings.defaultCurrency||user.default_currency||'USD').toUpperCase();
+  const appMode=['simple','advanced'].includes(String(settings.appMode||user.app_mode||'simple'))?String(settings.appMode||user.app_mode||'simple'):'simple';
+  const timezone=safeTimeZone(settings.timezone||user.timezone||'UTC');
   if(!validCurrency(defaultCurrency)) throw new Error('Invalid default currency.');
   const people=Array.isArray(input.people)?input.people:[];
   const accounts=Array.isArray(input.accounts)?input.accounts:[];
@@ -407,7 +417,7 @@ function validateState(input, user) {
     }
     return base;
   });
-  return {settings:{displayName,defaultCurrency},people:cleanPeople,accounts:cleanAccounts,entries:cleanEntries};
+  return {settings:{displayName,defaultCurrency,appMode,timezone},people:cleanPeople,accounts:cleanAccounts,entries:cleanEntries};
 }
 
 const RECURRING_TYPES = new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income']);
@@ -554,15 +564,16 @@ function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
   insights.ensureDefaults(userId);
   const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
+  const attachmentMap=new Map();for(const row of q.attachmentRefs.all(userId)){if(!attachmentMap.has(row.entryId))attachmentMap.set(row.entryId,[]);attachmentMap.get(row.entryId).push({id:row.id,name:row.name,mimeType:row.mimeType,sizeBytes:Number(row.sizeBytes||0),createdAt:row.createdAt});}
   const accounts=q.accounts.all(userId).map(accountFromStorage);
   const accountById=new Map(accounts.map(row=>[row.id,row]));
   const entries=q.entries.all(userId).map(row=>{
     const api=entryFromStorage(row,accountById);
     const {splitJson,amountMinor,fromAmountMinor,toAmountMinor,signedAmountMinor,...entry}=api;
-    return {...entry,attachmentCount:counts.get(row.id)||0};
+    return {...entry,attachmentCount:counts.get(row.id)||0,attachments:attachmentMap.get(row.id)||[]};
   });
   const meta=insights.list(userId);
-  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};
+  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency,appMode:u.app_mode||'simple',timezone:u.timezone||'UTC'},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};
 }
 
 function saveState(user, input) {
@@ -570,7 +581,7 @@ function saveState(user, input) {
   let clean; try{clean=validateState(input,user);assertRecurringReferences(user.user_id,clean);}catch(error){throw Object.assign(error,{status:400});}
   db.exec('BEGIN IMMEDIATE');
   try{
-    const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,user.user_id,expected);
+    const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,user.user_id,expected);
     if(Number(upd.changes)!==1) throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
     q.deleteEntries.run(user.user_id); q.deletePeople.run(user.user_id); q.deleteAccounts.run(user.user_id);
     for(const p of clean.people) q.insertPerson.run(user.user_id,p.id,p.name,p.note,p.createdAt);
@@ -682,10 +693,16 @@ function staticFile(req,res,url){
   securityHeaders(res); res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream'); res.setHeader('Cache-Control',extname(file)==='.html'?'no-cache':'public, max-age=300'); res.writeHead(200);res.end(readFileSync(file));
 }
 
+if(process.env.NODE_ENV!=='test'){
+  try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}
+  const recurringTimer=setInterval(()=>{try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}},60*60*1000);
+  recurringTimer.unref?.();
+}
+
 export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true});}
+    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,recurringWorker:recurringReminders.status()});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -789,8 +806,10 @@ export const server=http.createServer(async(req,res)=>{
       const current=q.userById.get(a.user_id);
       const displayName=safeStr(body.displayName??current.display_name,80)||'My Ledger';
       const defaultCurrency=String(body.defaultCurrency??current.default_currency).toUpperCase();
+      const appMode=['simple','advanced'].includes(String(body.appMode??current.app_mode))?String(body.appMode??current.app_mode):'simple';
+      const timezone=safeTimeZone(body.timezone??current.timezone??'UTC');
       if(!validCurrency(defaultCurrency))return fail(res,400,'Invalid default currency.');
-      withLedgerMutation(a.user_id,expected,()=>q.updateUserSettingsValues.run(displayName,defaultCurrency,a.user_id));
+      withLedgerMutation(a.user_id,expected,()=>q.updateUserSettingsValues.run(displayName,defaultCurrency,appMode,timezone,a.user_id));
       return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/people'&&req.method==='POST'){
@@ -940,6 +959,16 @@ export const server=http.createServer(async(req,res)=>{
       return json(res,200,{ok:true});
     }
 
+    if(url.pathname==='/api/recurring/reminders'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;
+      recurringReminders.process();
+      return json(res,200,{reminders:recurringReminders.list(a.user_id),worker:recurringReminders.status()});
+    }
+    if(url.pathname.startsWith('/api/recurring/reminders/')&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/recurring/reminders/'.length));
+      return json(res,200,{ok:recurringReminders.acknowledge(a.user_id,id)});
+    }
     if(url.pathname==='/api/recurring'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,{rules:loadRecurringRules(a.user_id)});
     }
@@ -965,7 +994,7 @@ export const server=http.createServer(async(req,res)=>{
         return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id)});
       }
       if(!action&&req.method==='DELETE'){
-        q.deleteRecurring.run(a.user_id,id); return json(res,200,{ok:true});
+        q.deleteRecurring.run(a.user_id,id); recurringReminders.deleteRule(a.user_id,id); return json(res,200,{ok:true});
       }
       if(action==='post'&&req.method==='POST'){
         const body=await bodyJson(req), expected=Number(body.expectedRevision), occurrenceDate=String(body.occurrenceDate||''), transactionDate=String(body.transactionDate||occurrenceDate);
@@ -981,6 +1010,7 @@ export const server=http.createServer(async(req,res)=>{
           if(Number(bumped.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
           const entry=recurringEntryFromTemplate(template,transactionDate); insertLedgerEntry(a.user_id,entry);
           advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:true});
+          recurringReminders.acknowledgeOccurrence(a.user_id,id,occurrenceDate);
           db.exec('COMMIT');
           return json(res,200,{state:loadState(a.user_id),rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id),entryId:entry.id});
         }catch(error){db.exec('ROLLBACK');throw error;}
@@ -993,6 +1023,7 @@ export const server=http.createServer(async(req,res)=>{
           const current=q.recurringRuleById.get(a.user_id,id);
           if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
           advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:false});
+          recurringReminders.acknowledgeOccurrence(a.user_id,id,occurrenceDate);
           db.exec('COMMIT');
           return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id)});
         }catch(error){db.exec('ROLLBACK');throw error;}
@@ -1055,8 +1086,12 @@ export const server=http.createServer(async(req,res)=>{
         const body=await bodyJson(req),result=bankFeed.post(a.user_id,id,body);
         return json(res,200,{...result,state:loadState(a.user_id)});
       }
-      if(action==='ignore'&&req.method==='POST')return json(res,200,{item:bankFeed.ignore(a.user_id,id)});
-      if(action==='reopen'&&req.method==='POST')return json(res,200,{item:bankFeed.reopen(a.user_id,id)});
+      if(action==='undo'&&req.method==='POST'){
+        const body=await bodyJson(req),result=bankFeed.undo(a.user_id,id,body);
+        return json(res,200,{...result,state:loadState(a.user_id)});
+      }
+      if(action==='ignore'&&req.method==='POST')return json(res,200,bankFeed.ignore(a.user_id,id));
+      if(action==='reopen'&&req.method==='POST')return json(res,200,bankFeed.reopen(a.user_id,id));
       if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));
       return fail(res,405,'Bank feed action not supported.');
     }
@@ -1079,7 +1114,7 @@ export const server=http.createServer(async(req,res)=>{
       try{
         insights.replace(a.user_id,Array.isArray(body.categories)?body.categories:[],Array.isArray(body.budgets)?body.budgets:[]);
         const clean=validateState({...body,version:a.revision},a);assertRecurringReferences(a.user_id,clean);
-        const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,a.user_id,a.revision);
+        const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,a.user_id,a.revision);
         if(Number(upd.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
         q.deleteEntries.run(a.user_id);q.deletePeople.run(a.user_id);q.deleteAccounts.run(a.user_id);
         for(const p of clean.people)q.insertPerson.run(a.user_id,p.id,p.name,p.note,p.createdAt);
@@ -1100,7 +1135,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      q.deleteAllRecurring.run(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id); return json(res,200,loadState(a.user_id));
+      q.deleteAllRecurring.run(a.user_id); recurringReminders.reset(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id); return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

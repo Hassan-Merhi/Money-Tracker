@@ -75,7 +75,7 @@ test('bulk spreadsheet import intentionally keeps compatibility state save',()=>
 
 test('service worker forces Lane A client refresh and caches exact-money dependency',()=>{
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
-  assert.match(sw,/money-tracker-debt-v7/);
+  assert.match(sw,/money-tracker-debt-v8/);
   assert.match(sw,/'\/lib\/money\.js'/);
 });
 
@@ -110,4 +110,24 @@ test('backup and account lifecycle browser APIs use protected endpoints',async()
   await store.deleteMyAccount('password','DELETE');
   assert.equal(last().path,'/api/account');
   assert.equal(last().options.method,'DELETE');
+});
+
+
+test('Lane B client has persisted modes and no hard-coded debt-only flag',()=>{
+  const app=readFileSync(new URL('../app.js',import.meta.url),'utf8');
+  assert.equal(app.includes('DEBT_ONLY_MODE'),false);
+  assert.match(app,/appMode==='advanced'/);
+  assert.match(app,/Enable Advanced mode/);
+});
+
+test('Lane B recurring and Bank Feed clients expose durable reminder and undo actions',async()=>{
+  await store.listRecurringReminders();
+  assert.equal(last().path,'/api/recurring/reminders');
+  await store.acknowledgeRecurringReminder('reminder_1');
+  assert.equal(last().path,'/api/recurring/reminders/reminder_1');
+  assert.equal(last().options.method,'POST');
+  await store.undoBankFeedItem('bank_1',{expectedRevision:8});
+  assert.equal(last().path,'/api/bank-feed/bank_1/undo');
+  assert.equal(last().options.method,'POST');
+  assert.equal(last().body.expectedRevision,8);
 });

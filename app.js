@@ -15,7 +15,7 @@ let toastTimer;
 let saving = false;
 
 const app = document.querySelector('#app');
-const DEBT_ONLY_MODE = true;
+const advancedMode=()=>state?.settings?.appMode==='advanced';
 const THEME_KEY='mot-theme';
 const themeMedia=window.matchMedia?.('(prefers-color-scheme: dark)');
 
@@ -101,21 +101,22 @@ function subFor(page) {
 }
 
 function render() {
-  const hiddenInDebtMode=['accounts','bank','insights','scheduled'];
-  if(DEBT_ONLY_MODE && hiddenInDebtMode.includes(route.page)){location.hash='#dashboard';return;}
+  const hiddenInSimpleMode=['accounts','bank','insights','scheduled'];
+  const advanced=advancedMode();
+  if(!advanced && hiddenInSimpleMode.includes(route.page)){location.hash='#dashboard';return;}
   const navPage = route.page === 'person' ? 'people' : route.page;
-  const visiblePages=DEBT_ONLY_MODE?['dashboard','people','transactions','reports','settings']:['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings'];
+  const visiblePages=advanced?['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings']:['dashboard','people','transactions','reports','settings'];
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
         <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Who owes who</small></div></div>
         <nav class="nav">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
-        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>Debt tracking mode · banks can be added later<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
+        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>${advanced?'Advanced money mode · accounts, bank feed & schedules':'Simple mode · focused debt tracking'}<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2>${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions">${DEBT_ONLY_MODE?'':`<button class="btn" id="quickTransfer">⇄ Transfer</button>`}<button class="btn primary" id="quickEntry">＋ Add</button></div>
+          <div class="top-actions">${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
         </header>
         <main class="main" id="main"></main>
       </section>
@@ -160,6 +161,7 @@ function renderDashboard(main) {
       <div class="card stat bad"><div class="stat-top"><div class="stat-label">I OWE PEOPLE</div><div class="stat-icon">↘</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe','0')}</div><div class="stat-note">Money you need to pay</div></div>
       <div class="card stat net"><div class="stat-top"><div class="stat-label">NET POSITION</div><div class="stat-icon">≈</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net','0')}</div><div class="stat-note">Owed to you minus what you owe</div></div>
     </div>
+    ${advancedMode()?'':`<div class="card panel" style="margin-bottom:16px"><div class="panel-head"><div><h3>Simple mode is active</h3><p>Your accounts, Bank Feed, budgets and recurring schedules stay saved but hidden. Advanced mode unlocks the full money system without changing or deleting your debt records.</p></div><button class="btn primary" id="enableAdvanced">Enable Advanced mode</button></div></div>`}
     <div class="grid section-grid">
       <section class="card panel">
         <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest debts and repayments</p></div><button class="btn small" data-go="transactions">View all</button></div>
@@ -177,6 +179,7 @@ function renderDashboard(main) {
         </div>
       </section>
     </div>`;
+  main.querySelector('#enableAdvanced')?.addEventListener('click',async()=>{const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';const saved=await runMutation(version=>updateSettings({defaultCurrency:state.settings.defaultCurrency,appMode:'advanced',timezone},version),'Advanced mode enabled.');if(saved)location.hash='#dashboard';});
   main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
@@ -246,7 +249,7 @@ function openAccountDetail(accountId){
 
 function renderTransactions(main) {
   const type=route.params.get('type')||''; const person=route.params.get('person')||'';
-  let entries=[...state.entries].filter(e=>DEBT_ONLY_MODE?PERSON_ENTRY_TYPES.includes(e.type):true).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
+  let entries=[...state.entries].filter(e=>advancedMode()?true:PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
   if(type) entries=entries.filter(e=>e.type===type); if(person) entries=entries.filter(e=>entryTouchesPerson(e,person));
   main.innerHTML=`<div class="panel-head"><div class="filters"><select class="select" id="filterType"><option value="">All debt activity</option>${entryTypeOptions(type,false)}</select><select class="select" id="filterPerson"><option value="">All people</option>${state.people.map(p=>`<option value="${p.id}" ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div><button class="btn primary" id="addTxn">＋ Add</button></div>
   <section class="card panel">${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching debt activity</strong>Add what someone owes you, what you owe them, or a repayment.</div>'}</section>`;
@@ -269,7 +272,12 @@ function transactionTable(entries,{compact=false}={}){
 
 function renderSettings(main) {
   main.innerHTML=`<div class="settings-grid">
-    <section class="card settings-card"><h3>General</h3><div class="form-grid"><div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div><div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div></div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
+    <section class="card settings-card"><h3>General</h3><div class="form-grid">
+      <div class="field"><label>Default currency</label><select id="settingCurrency" class="select">${currencyOptions(state.settings.defaultCurrency)}</select></div>
+      <div class="field"><label>App mode</label><select id="settingMode" class="select"><option value="simple" ${state.settings.appMode!=='advanced'?'selected':''}>Simple — debts only</option><option value="advanced" ${state.settings.appMode==='advanced'?'selected':''}>Advanced — full money system</option></select></div>
+      <div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div>
+      <div class="field"><label>Timezone</label><input class="input" id="settingTimezone" value="${escapeHtml(state.settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}" readonly><span class="muted tiny">Used by server-side recurring reminders.</span></div>
+    </div><div class="warning" style="margin-top:12px"><strong>Simple mode</strong> hides accounts, Bank Feed, budgets and schedules without deleting them. Switch back to Advanced at any time.</div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
     ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. You can reset or delete secondary sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Password changes revoke every other session automatically.</p>
       <form id="passwordForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Current password</label><input class="input" name="currentPassword" type="password" autocomplete="current-password" required></div><div class="field"><label>New password</label><input class="input" name="newPassword" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2 page-actions"><button class="btn primary" type="submit">Change password</button><button class="btn" type="button" id="revokeSessions">Sign out other devices</button><button class="btn" type="button" id="settingsLogout">Sign out this device</button></div></form>
@@ -278,7 +286,7 @@ function renderSettings(main) {
     <section class="card settings-card"><h3>Balance rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
     <section class="card settings-card"><h3>Danger zone</h3><p class="muted">Delete all app data keeps your login. Delete account removes this login and all of its data permanently.</p><div class="page-actions"><button class="btn danger" id="resetData">Delete all app data</button><button class="btn danger" id="deleteMyAccount">Delete my account</button></div></section>
   </div>`;
-  main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value;saveThemePreference(main.querySelector('#settingTheme').value);await runMutation(version=>updateSettings({defaultCurrency},version),'Settings saved.');});
+  main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value,appMode=main.querySelector('#settingMode').value,timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';saveThemePreference(main.querySelector('#settingTheme').value);const saved=await runMutation(version=>updateSettings({defaultCurrency,appMode,timezone},version),'Settings saved.');if(saved&&appMode==='advanced')showToast('Advanced mode enabled — accounts, Bank Feed, budgets and schedules are now available.');});
   main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
   main.querySelector('#revokeSessions')?.addEventListener('click',async()=>{try{const result=await revokeOtherSessions();showToast(`${result.revoked||0} other session${result.revoked===1?'':'s'} signed out.`);}catch(error){showToast(error.message||'Could not revoke sessions.');}});
@@ -415,7 +423,7 @@ function openTransactionModal(existing=null,prefill={}){
     <div class="field" id="txnCategoryField"><label>Category</label><select class="select" name="categoryId" id="txnCategory"></select></div>
     <div class="field span-2"><label>Notes / details</label><textarea class="textarea compact-textarea" name="description" maxlength="500" placeholder="e.g. Headphones, order #123, delivery details…">${escapeHtml(existing?.description||'')}</textarea></div>
     <div class="field span-2" id="splitSection" hidden>
-      <div class="split-head"><div><label>Split between people</label><div class="muted tiny">${DEBT_ONLY_MODE?'Divide the total across people. No bank account is needed.':'The account is charged once; each person gets only their allocated amount.'}</div></div><div class="page-actions"><button class="btn small" type="button" id="equalSplit">Equal split</button><button class="btn small" type="button" id="addSplitRow">＋ Person</button></div></div>
+      <div class="split-head"><div><label>Split between people</label><div class="muted tiny">${advancedMode()?'The account is charged once; each person gets only their allocated amount.':'Divide the total across people. No bank account is needed.'}</div></div><div class="page-actions"><button class="btn small" type="button" id="equalSplit">Equal split</button><button class="btn small" type="button" id="addSplitRow">＋ Person</button></div></div>
       <div class="split-list" id="splitRows">${seedSplits.map(splitRowMarkup).join('')}</div>
       <div class="split-total" id="splitTotal"></div>
     </div>
@@ -435,7 +443,7 @@ function openTransactionModal(existing=null,prefill={}){
   amountEl.addEventListener('input',updateSplitTotal);
   bindSplitRows();
 
-  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=(DEBT_ONLY_MODE&&!accountOnly)?'none':(adjust?'none':'grid');form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
+  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=(!advancedMode()&&!accountOnly)?'none':(adjust?'none':'grid');form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
   typeEl.addEventListener('change',()=>{fillCategories();sync();});accEl.addEventListener('change',sync);fillCategories();sync();
   const filesEl=form.querySelector('#txnFiles');filesEl.addEventListener('change',()=>{const files=[...(filesEl.files||[])];form.querySelector('#fileSelection').textContent=files.length?files.map(file=>`${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`).join(' · '):'JPG, PNG, WebP, GIF, PDF or text · max 8 MB each';});
   if(existing) refreshAttachmentPanel(existing.id);
@@ -500,8 +508,8 @@ function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}
 function entryTypeOptions(selected,includeTransfer=true){
   const debtTypes=[['paid_for_person','They owe me'],['received_from_person','They paid me'],['borrowed_from_person','I owe them'],['paid_to_person','I paid them'],[SPLIT_ENTRY_TYPE,'Split between people'],['person_adjustment','Balance adjustment']];
   const advanced=[['account_expense','Account expense'],['account_income','Account income']];
-  let types=DEBT_ONLY_MODE?[...debtTypes]:[...debtTypes,...advanced];
-  if(!DEBT_ONLY_MODE&&includeTransfer)types.push(['account_transfer','Account transfer']);
+  let types=advancedMode()?[...debtTypes,...advanced]:[...debtTypes];
+  if(advancedMode()&&includeTransfer)types.push(['account_transfer','Account transfer']);
   if(selected&&!types.some(([v])=>v===selected)){
     const fallback=[...advanced,['account_transfer','Account transfer']].find(([v])=>v===selected);
     if(fallback)types.push(fallback);
@@ -534,7 +542,7 @@ document.addEventListener('keydown',event=>{
   if(target?.matches?.('input,textarea,select,[contenteditable="true"]'))return;
   if(document.querySelector('.modal-backdrop'))return;
   if(event.key.toLowerCase()==='n'){event.preventDefault();openQuickMenu();}
-  if(!DEBT_ONLY_MODE&&event.key.toLowerCase()==='t'){event.preventDefault();openTransferModal();}
+  if(advancedMode()&&event.key.toLowerCase()==='t'){event.preventDefault();openTransferModal();}
 });
 
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}

@@ -263,14 +263,19 @@ test('complete backup exports and transactionally restores every user-owned subs
   const expenseCategory=state.categories.find(c=>!c.archived&&(c.kind==='expense'||c.kind==='both'));
   assert.ok(expenseCategory);
 
+  const mode=await request('/api/settings',{method:'PUT',cookie,csrf,body:{expectedRevision:state.version,defaultCurrency:'USD',appMode:'advanced',timezone:'Asia/Beirut'}});
+  assert.equal(mode.res.status,200);state=mode.data;
+
   const budget=await request('/api/budgets',{method:'POST',cookie,csrf,body:{categoryId:expenseCategory.id,currency:'USD',monthlyLimit:321.09}});
   assert.equal(budget.res.status,200);
 
   const recurring=await request('/api/recurring',{method:'POST',cookie,csrf,body:{
-    title:'Backup recurring',frequency:'monthly',interval:1,anchorDate:'2026-09-29',nextDueDate:'2026-10-29',endDate:null,remindDaysBefore:2,isActive:true,
+    title:'Backup recurring',frequency:'monthly',interval:1,anchorDate:'2026-09-29',nextDueDate:'2026-09-30',endDate:null,remindDaysBefore:2,isActive:true,
     template:{type:'paid_for_person',personId:'person_alice',accountId:'account_bank',amount:5,currency:'USD',merchant:'Backup',description:'Recurring backup',splits:[]}
   }});
   assert.equal(recurring.res.status,201);
+  const reminderInbox=await request('/api/recurring/reminders',{cookie});
+  assert.equal(reminderInbox.res.status,200);assert.ok(reminderInbox.data.reminders.length>=1);
 
   const rule=await request('/api/bank-rules',{method:'POST',cookie,csrf,body:{matchText:'backup merchant',classification:'paid_for_person',personId:'person_alice'}});
   assert.equal(rule.res.status,201);
@@ -283,15 +288,18 @@ test('complete backup exports and transactionally restores every user-owned subs
   const backup=exported.data;
   assert.equal(backup.backupVersion,2);
   assert.equal(backup.app,'money-owed-tracker');
+  assert.equal(backup.user.appMode,'advanced');assert.equal(backup.user.timezone,'Asia/Beirut');
   assert.match(backup.sha256,/^[a-f0-9]{64}$/);
   assert.ok(backup.data.people.length>=2);
   assert.ok(backup.data.accounts.some(row=>row.id==='account_bank'));
   assert.ok(backup.data.entries.some(row=>row.id==='entry_split'));
   assert.ok(backup.data.attachments.some(row=>row.id===attachmentId));
   assert.ok(backup.data.recurring_rules.length>=1);
+  assert.ok(backup.data.recurring_notifications.length>=1);
   assert.ok(backup.data.categories.length>=1);
   assert.ok(backup.data.budgets.length>=1);
   assert.ok(backup.data.bank_rules.length>=1);
+  assert.ok(backup.data.bank_import_batches.length>=1);
   assert.ok(backup.data.bank_feed_items.length>=1);
   const attachmentBackup=backup.data.attachments.find(row=>row.id===attachmentId);
   assert.equal(attachmentBackup.data.__type,'base64');
@@ -303,7 +311,9 @@ test('complete backup exports and transactionally restores every user-owned subs
   assert.equal(state.people.length,0);assert.equal(state.entries.length,0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM recurring_rules').get().count,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM recurring_notifications').get().count,0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items').get().count,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM bank_import_batches').get().count,0);
 
   const restored=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:backup});
   assert.equal(restored.res.status,200);state=restored.data.state;
@@ -311,9 +321,12 @@ test('complete backup exports and transactionally restores every user-owned subs
   assert.ok(state.people.some(p=>p.id==='person_alice'));
   assert.ok(state.entries.some(e=>e.id==='entry_split'));
   assert.equal(state.entries.find(e=>e.id==='entry_split').attachmentCount,1);
+  assert.equal(state.settings.appMode,'advanced');assert.equal(state.settings.timezone,'Asia/Beirut');
   assert.ok(db.prepare('SELECT COUNT(*) AS count FROM recurring_rules').get().count>=1);
+  assert.ok(db.prepare('SELECT COUNT(*) AS count FROM recurring_notifications').get().count>=1);
   assert.ok(db.prepare('SELECT COUNT(*) AS count FROM budgets').get().count>=1);
   assert.ok(db.prepare('SELECT COUNT(*) AS count FROM bank_rules').get().count>=1);
+  assert.ok(db.prepare('SELECT COUNT(*) AS count FROM bank_import_batches').get().count>=1);
   assert.ok(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items').get().count>=1);
   const raw=await requestRaw(`/api/attachments/${attachmentId}`,{cookie});
   assert.equal(raw.res.status,200);assert.equal(raw.data.toString(),'receipt');

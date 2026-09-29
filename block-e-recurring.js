@@ -4,6 +4,8 @@ import {
   deleteRecurringRule,
   postRecurringRule,
   skipRecurringRule,
+  listRecurringReminders,
+  acknowledgeRecurringReminder,
   loadState
 } from './lib/store.js';
 import { recurringStatus, shouldRemind, recurrenceLabel } from './lib/recurring.js';
@@ -17,6 +19,7 @@ function formatDate(value){
 }
 function statusClass(key){ return key==='overdue'?'red':key==='due'?'amber':key==='upcoming'?'blue':''; }
 async function refreshRules(){ return (await listRecurringRules()).rules || []; }
+async function refreshReminderInbox(){ return await listRecurringReminders(); }
 
 function scheduleCard(rule,state){
   const status=recurringStatus(rule,today());
@@ -88,9 +91,10 @@ function maybeNotify(rules){
 
 export async function renderRecurringPage(main,state,ctx){
   main.innerHTML='<div class="card panel"><div class="empty">Loading recurring schedules…</div></div>';
-  let rules;
-  try{ rules=await refreshRules(); }catch(error){ main.innerHTML=`<div class="card panel"><div class="warning">${escapeHtml(error.message||'Could not load recurring schedules.')}</div></div>`; return; }
-  const attention=rules.filter(rule=>shouldRemind(rule,today())).length;
+  let rules,reminderData={reminders:[],worker:{}};
+  try{ [rules,reminderData]=await Promise.all([refreshRules(),refreshReminderInbox()]); }catch(error){ main.innerHTML=`<div class="card panel"><div class="warning">${escapeHtml(error.message||'Could not load recurring schedules.')}</div></div>`; return; }
+  const reminders=reminderData.reminders||[];
+  const attention=Math.max(reminders.length,rules.filter(rule=>shouldRemind(rule,today())).length);
   const active=rules.filter(rule=>rule.isActive).length;
   const reload=()=>renderRecurringPage(main,state,ctx);
   main.innerHTML=`
@@ -101,12 +105,14 @@ export async function renderRecurringPage(main,state,ctx){
       </div>
       <div class="recurring-toolbar-actions">${browserAlertButton()}<button class="btn primary" id="newRecurring">＋ New schedule</button></div>
     </div>
-    <div class="card panel recurring-note"><strong>Review before posting.</strong><span>Schedules never silently change your ledger. “Post now” creates the real transaction and advances the next due date atomically.</span></div>
+    <div class="card panel recurring-note"><strong>Server reminders are active.</strong><span>Money Tracker checks schedules hourly using ${escapeHtml(state.settings.timezone||'UTC')} even while the app is closed. Posting remains review-first and atomic.</span></div>
+    ${reminders.length?`<section class="card panel" style="margin-bottom:16px"><div class="panel-head"><div><h3>Reminder inbox</h3><p>Created by the server-side recurring worker.</p></div></div><div class="dashboard-reminders">${reminders.map(rem=>`<div class="dashboard-reminder"><div><strong>${escapeHtml(rem.title||'Recurring schedule')}</strong><div class="muted tiny">Occurrence ${escapeHtml(rem.occurrenceDate)} · reminder began ${escapeHtml(rem.remindOnDate)}</div></div><button class="btn small" data-reminder-dismiss="${rem.id}">Dismiss</button></div>`).join('')}</div></section>`:''}
     ${rules.length?`<div class="recurring-grid">${rules.map(rule=>scheduleCard(rule,state)).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">⏰</div><h3>Create your first recurring schedule</h3><p>Use schedules for repeat repayments, purchases, transfers, and other regular money movements.</p><button class="btn primary" id="emptyRecurring">＋ New schedule</button></div>`}`;
   const openNew=()=>openRecurringRuleModal(null,state,ctx,reload);
   main.querySelector('#newRecurring')?.addEventListener('click',openNew);
   main.querySelector('#emptyRecurring')?.addEventListener('click',openNew);
   main.querySelector('#recurringNotify')?.addEventListener('click',async()=>{ if(!('Notification' in window))return; const p=await Notification.requestPermission(); if(p==='granted'){ctx.showToast('Browser alerts enabled while Money Tracker is open.');maybeNotify(rules);} reload(); });
+  main.querySelectorAll('[data-reminder-dismiss]').forEach(btn=>btn.addEventListener('click',async()=>{try{await acknowledgeRecurringReminder(btn.dataset.reminderDismiss);ctx.showToast('Reminder dismissed.');await reload();}catch(error){ctx.showToast(error.message||'Could not dismiss reminder.');}}));
   main.querySelectorAll('[data-rule-edit]').forEach(b=>b.addEventListener('click',()=>openRecurringRuleModal(rules.find(r=>r.id===b.dataset.ruleEdit),state,ctx,reload)));
   main.querySelectorAll('[data-rule-post]').forEach(b=>b.addEventListener('click',()=>postRule(rules.find(r=>r.id===b.dataset.rulePost),state,ctx)));
   main.querySelectorAll('[data-rule-skip]').forEach(b=>b.addEventListener('click',()=>skipRule(rules.find(r=>r.id===b.dataset.ruleSkip),ctx,reload)));

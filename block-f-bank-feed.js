@@ -1,12 +1,12 @@
 import {
-  listBankFeed, importBankFeed, postBankFeedItem, ignoreBankFeedItem, reopenBankFeedItem,
+  listBankFeed, importBankFeed, postBankFeedItem, undoBankFeedItem, ignoreBankFeedItem, reopenBankFeedItem,
   deleteBankFeedItem, createBankRule, deleteBankRule, previewSpreadsheet, loadState
 } from './lib/store.js';
 import { parseBankCsv, suggestBankMapping, normalizeBankRows, bankDirectionLabel } from './lib/bank-feed.js';
 import { categoryOptionsForType } from './lib/insights.js';
 import { escapeHtml, money } from './lib/utils.js';
 
-let feed={items:[],rules:[]};
+let feed={items:[],rules:[],history:[],stats:{pending:0,posted:0,ignored:0}};
 let draft=null;
 let selectedAccountId='';
 let statusFilter='pending';
@@ -125,7 +125,7 @@ function feedRowMarkup(item,state){
       <div class="field bank-note-wrap"><label>Ledger note</label><input class="input bank-note" maxlength="500" value="${escapeHtml(item.description)}"></div>
       <label class="bank-rule-check"><input type="checkbox" class="bank-save-rule"> Remember a rule for <input class="input bank-rule-text" maxlength="120" value="${escapeHtml(ruleText)}" aria-label="Rule match text"></label>
       <div class="page-actions"><button class="btn primary bank-post">Post to ledger</button><button class="btn bank-ignore">Ignore</button><button class="btn danger bank-delete">Delete</button></div>
-    </div>`:item.status==='ignored'?`<div class="bank-row-actions"><button class="btn small bank-reopen">Reopen</button><button class="btn small danger bank-delete">Delete</button></div>`:`<div class="bank-row-actions"><span class="muted tiny">Ledger entry: ${escapeHtml(item.postedEntryId||'posted')}</span></div>`}
+    </div>`:item.status==='ignored'?`<div class="bank-row-actions"><button class="btn small bank-reopen">Reopen</button><button class="btn small danger bank-delete">Delete</button></div>`:`<div class="bank-row-actions"><span class="muted tiny">Ledger entry: ${escapeHtml(item.postedEntryId||'posted')}</span><button class="btn small danger bank-undo">Undo posting</button></div>`}
   </article>`;
 }
 
@@ -138,10 +138,17 @@ function rulesMarkup(state){
       <select class="select" name="personId"><option value="">No person</option>${state.people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}</select>
       <select class="select" name="targetAccountId"><option value="">No transfer account</option>${state.accounts.map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')}</select>
       <select class="select" name="categoryId" id="bankRuleCategory"><option value="">No category</option></select>
+      <input class="input" name="priority" type="number" min="0" max="1000" value="100" aria-label="Rule priority" title="Higher priority wins when several rules match">
       <button class="btn" type="submit">Add rule</button>
     </form>
-    <div class="bank-rule-list">${feed.rules.length?feed.rules.map(rule=>`<div class="bank-rule-item"><div><strong>Contains “${escapeHtml(rule.matchText)}”</strong><small>${escapeHtml(ACTIONS.find(a=>a[0]===rule.classification)?.[1]||rule.classification)}${rule.personId?` · ${escapeHtml(personName(state,rule.personId))}`:''}${rule.targetAccountId?` · ${escapeHtml(accountName(state,rule.targetAccountId))}`:''}${rule.categoryId?` · ${escapeHtml(categoryName(state,rule.categoryId))}`:''}</small></div><button class="btn small danger" data-delete-bank-rule="${rule.id}">Delete</button></div>`).join(''):'<div class="empty compact-empty">No rules yet. You can also create one while posting a feed item.</div>'}</div>
+    <div class="bank-rule-list">${feed.rules.length?feed.rules.map(rule=>`<div class="bank-rule-item"><div><strong>Contains “${escapeHtml(rule.matchText)}”</strong><small>${escapeHtml(ACTIONS.find(a=>a[0]===rule.classification)?.[1]||rule.classification)}${rule.personId?` · ${escapeHtml(personName(state,rule.personId))}`:''}${rule.targetAccountId?` · ${escapeHtml(accountName(state,rule.targetAccountId))}`:''}${rule.categoryId?` · ${escapeHtml(categoryName(state,rule.categoryId))}`:''} · priority ${Number(rule.priority||100)}</small></div><button class="btn small danger" data-delete-bank-rule="${rule.id}">Delete</button></div>`).join(''):'<div class="empty compact-empty">No rules yet. You can also create one while posting a feed item.</div>'}</div>
   </section>`;
+}
+
+function historyMarkup(state){
+  if(!feed.history?.length)return '<section class="card panel" style="margin-top:16px"><div class="panel-head"><div><h3>Import history</h3><p>Every statement import is recorded for reconciliation.</p></div></div><div class="empty compact-empty">No imports yet.</div></section>';
+  const rows=feed.history.map(batch=>'<tr><td>'+escapeHtml(String(batch.createdAt||'').replace('T',' ').slice(0,16))+'</td><td>'+escapeHtml(batch.sourceName||'—')+'</td><td>'+escapeHtml(accountName(state,batch.accountId))+'</td><td class="right">'+batch.totalRows+'</td><td class="right">'+batch.importedRows+'</td><td class="right">'+batch.skippedRows+'</td><td class="right">'+batch.invalidRows+'</td></tr>').join('');
+  return '<section class="card panel" style="margin-top:16px"><div class="panel-head"><div><h3>Import history</h3><p>Every statement import is recorded for reconciliation.</p></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Imported</th><th>Source</th><th>Account</th><th class="right">Rows</th><th class="right">Added</th><th class="right">Duplicates</th><th class="right">Invalid</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
 }
 
 function paint(main,state,ctx){
@@ -150,7 +157,7 @@ function paint(main,state,ctx){
     main.querySelector('#bankGoAccounts')?.addEventListener('click',()=>location.hash='#accounts');return;
   }
   if(!selectedAccountId||!state.accounts.some(a=>a.id===selectedAccountId))selectedAccountId=state.accounts[0].id;
-  const counts={pending:0,posted:0,ignored:0};feed.items.forEach(i=>counts[i.status]=(counts[i.status]||0)+1);
+  const counts=feed.stats||{pending:0,posted:0,ignored:0};
   const shown=feed.items.filter(i=>statusFilter==='all'||i.status===statusFilter);
   main.innerHTML=`
     <div class="grid stats bank-stats">
@@ -164,6 +171,7 @@ function paint(main,state,ctx){
       <div class="panel-head"><div><h3>Bank feed inbox</h3><p>Nothing touches balances until you post it.</p></div><div class="segmented bank-status-tabs">${['pending','posted','ignored','all'].map(s=>`<button class="${statusFilter===s?'active':''}" data-bank-status="${s}">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</div></div>
       <div class="bank-feed-list">${shown.length?shown.map(i=>feedRowMarkup(i,state)).join(''):'<div class="card empty"><strong>No items in this view</strong>Import a statement or switch the status filter.</div>'}</div>
     </section>
+    ${historyMarkup(state)}
     ${rulesMarkup(state)}
   `;
   bind(main,state,ctx);
@@ -195,7 +203,7 @@ function bind(main,state,ctx){
     if(!normalized.items.length){ctx.showToast(normalized.errors[0]||'No valid rows to import.');return;}
     try{
       const result=await importBankFeed({accountId:account.id,sourceName:`${draft.filename}${draft.sheets.length>1?' · '+sheet.name:''}`,rows:normalized.items});
-      feed={items:result.items||[],rules:result.rules||[]};draft=null;statusFilter='pending';paint(main,state,ctx);
+      feed={items:result.items||[],rules:result.rules||[],history:result.history||[],stats:result.stats||{}};draft=null;statusFilter='pending';paint(main,state,ctx);
       const invalid=result.invalid+(normalized.errors?.length||0);
       ctx.showToast(`Imported ${result.imported} row${result.imported===1?'':'s'} · ${result.skipped} duplicate${result.skipped===1?'':'s'} skipped${invalid?' · '+invalid+' invalid':''}.`);
     }catch(error){ctx.showToast(error.message||'Could not import the statement.');}
@@ -207,7 +215,7 @@ function bind(main,state,ctx){
     const payload={expectedRevision:state.version,classification:action,personId:card.querySelector('.bank-person')?.value||null,targetAccountId:card.querySelector('.bank-target')?.value||null,categoryId:card.querySelector('.bank-category')?.value||null,note:card.querySelector('.bank-note')?.value||'',saveRule:!!card.querySelector('.bank-save-rule')?.checked,ruleMatchText:card.querySelector('.bank-rule-text')?.value||''};
     btn.disabled=true;
     try{
-      const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;
+      const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;feed.stats=result.stats||feed.stats;
       ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');ctx.replaceState(result.state);
     }catch(error){
       if(error.status===409){
@@ -218,15 +226,16 @@ function bind(main,state,ctx){
       ctx.showToast(error.message||'Could not post this bank transaction.');paint(main,state,ctx);
     }
   }));
-  main.querySelectorAll('.bank-ignore').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await ignoreBankFeedItem(id);feed.items=feed.items.map(i=>i.id===id?r.item:i);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not ignore this row.');}}));
-  main.querySelectorAll('.bank-reopen').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await reopenBankFeedItem(id);feed.items=feed.items.map(i=>i.id===id?r.item:i);statusFilter='pending';paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not reopen this row.');}}));
+  main.querySelectorAll('.bank-ignore').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await ignoreBankFeedItem(id);feed={items:r.items||feed.items,rules:r.rules||feed.rules,history:r.history||feed.history,stats:r.stats||feed.stats};paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not ignore this row.');}}));
+  main.querySelectorAll('.bank-reopen').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await reopenBankFeedItem(id);feed={items:r.items||feed.items,rules:r.rules||feed.rules,history:r.history||feed.history,stats:r.stats||feed.stats};statusFilter='pending';paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not reopen this row.');}}));
+  main.querySelectorAll('.bank-undo').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Undo this posting? The generated ledger entry will be deleted and all linked statement rows will return to Pending.'))return;btn.disabled=true;try{const r=await undoBankFeedItem(id,{expectedRevision:state.version});feed={items:r.items||[],rules:r.rules||[],history:r.history||feed.history,stats:r.stats||{}};statusFilter='pending';ctx.replaceState(r.state);ctx.showToast('Posting undone · '+(r.reopenedItems||1)+' statement row'+(r.reopenedItems===1?'':'s')+' reopened.');}catch(error){if(error.status===409){try{ctx.replaceState(await loadState());}catch{}}ctx.showToast(error.message||'Could not undo this posting.');}finally{btn.disabled=false;}}));
   main.querySelectorAll('.bank-delete').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Delete this unposted bank-feed row?'))return;try{await deleteBankFeedItem(id);feed.items=feed.items.filter(i=>i.id!==id);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete this row.');}}));
   const ruleForm=main.querySelector('#bankRuleForm');
   const syncRuleCategory=()=>{if(!ruleForm)return;const action=ruleForm.elements.classification.value,el=ruleForm.elements.categoryId,selected=el.value;el.innerHTML=['expense','income'].includes(action)?categoryOptions(state,action,selected):'<option value="">No category</option>';el.disabled=!['expense','income'].includes(action);};
   ruleForm?.elements.classification.addEventListener('change',syncRuleCategory);syncRuleCategory();
   main.querySelector('#bankRuleForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const fd=new FormData(e.currentTarget);
-    try{const r=await createBankRule({matchText:fd.get('matchText'),classification:fd.get('classification'),personId:fd.get('personId')||null,targetAccountId:fd.get('targetAccountId')||null,categoryId:fd.get('categoryId')||null});feed.rules.unshift(r.rule);paint(main,state,ctx);ctx.showToast('Bank rule added.');}catch(error){ctx.showToast(error.message||'Could not add that rule.');}
+    try{const r=await createBankRule({matchText:fd.get('matchText'),classification:fd.get('classification'),personId:fd.get('personId')||null,targetAccountId:fd.get('targetAccountId')||null,categoryId:fd.get('categoryId')||null,priority:Number(fd.get('priority')||100)});feed.rules.unshift(r.rule);paint(main,state,ctx);ctx.showToast('Bank rule added.');}catch(error){ctx.showToast(error.message||'Could not add that rule.');}
   });
   main.querySelectorAll('[data-delete-bank-rule]').forEach(btn=>btn.addEventListener('click',async()=>{try{await deleteBankRule(btn.dataset.deleteBankRule);feed.rules=feed.rules.filter(r=>r.id!==btn.dataset.deleteBankRule);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete that rule.');}}));
 }

@@ -35,9 +35,9 @@ test('imports statement rows and skips duplicate re-imports',async()=>{
     {date:'2026-09-28',description:'PAYROLL',merchant:'Employer',signedAmount:500,currency:'USD',externalId:'tx-2'}
   ];
   const first=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'statement.csv',rows}});
-  assert.equal(first.res.status,200);assert.equal(first.data.imported,2);assert.equal(first.data.skipped,0);assert.equal(first.data.items.length,2);
+  assert.equal(first.res.status,200);assert.equal(first.data.imported,2);assert.equal(first.data.skipped,0);assert.equal(first.data.items.length,2);assert.equal(first.data.history.length,1);assert.equal(first.data.stats.pending,2);assert.ok(first.data.batchId);
   const second=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'statement-again.csv',rows}});
-  assert.equal(second.res.status,200);assert.equal(second.data.imported,0);assert.equal(second.data.skipped,2);
+  assert.equal(second.res.status,200);assert.equal(second.data.imported,0);assert.equal(second.data.skipped,2);assert.equal(second.data.history.length,2);assert.equal(second.data.history[0].skippedRows,2);
 });
 
 test('posts an expense atomically into the ledger and updates account balance',async()=>{
@@ -48,6 +48,23 @@ test('posts an expense atomically into the ledger and updates account balance',a
   const entry=state.entries.find(e=>e.id===posted.data.entryId);assert.equal(entry.type,'account_expense');assert.equal(entry.accountId,'account_bank');assert.equal(entry.amount,25);assert.equal(entry.categoryId,'category_shopping');
   assert.equal(accountBalances(state.entries,state.accounts).account_bank,975);
   assert.equal(posted.data.item.status,'posted');assert.equal(posted.data.rules[0].matchText,'amazon');assert.equal(posted.data.rules[0].categoryId,'category_shopping');
+});
+
+test('posted Bank Feed rows can be undone and safely reposted',async()=>{
+  let feed=(await request('/api/bank-feed')).data;
+  const expense=feed.items.find(i=>i.externalId==='tx-1');
+  const beforeEntry=expense.postedEntryId;
+  const undone=await request(`/api/bank-feed/${expense.id}/undo`,{method:'POST',body:{expectedRevision:state.version}});
+  assert.equal(undone.res.status,200);state=undone.data.state;
+  assert.equal(undone.data.reopenedItems,1);
+  assert.equal(state.entries.some(e=>e.id===beforeEntry),false);
+  assert.equal(undone.data.items.find(i=>i.id===expense.id).status,'pending');
+  assert.equal(undone.data.stats.pending>=1,true);
+  assert.equal(accountBalances(state.entries,state.accounts).account_bank,1000);
+
+  const repost=await request(`/api/bank-feed/${expense.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'expense',categoryId:'category_shopping',note:'Personal Amazon order'}});
+  assert.equal(repost.res.status,200);state=repost.data.state;
+  assert.equal(accountBalances(state.entries,state.accounts).account_bank,975);
 });
 
 test('posting is stale-safe and direction-safe',async()=>{
@@ -69,6 +86,20 @@ test('saved rules auto-classify future matching rows and person posting works',a
   const post=await request(`/api/bank-feed/${item.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'paid_for_person',personId:'person_alice',saveRule:true,ruleMatchText:'marketplace'}});
   assert.equal(post.res.status,200);state=post.data.state;
   const entry=state.entries.find(e=>e.id===post.data.entryId);assert.equal(entry.type,'paid_for_person');assert.equal(entry.personId,'person_alice');
+});
+
+test('higher-priority and more-specific rules win when several rules match',async()=>{
+  let r=await request('/api/bank-rules',{method:'POST',body:{matchText:'priority shop',classification:'expense',categoryId:'category_shopping',priority:10}});
+  assert.equal(r.res.status,201);
+  r=await request('/api/bank-rules',{method:'POST',body:{matchText:'priority shop vip',classification:'paid_for_person',personId:'person_alice',priority:900}});
+  assert.equal(r.res.status,201);
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'priority.csv',rows:[{date:'2026-09-30',description:'PRIORITY SHOP VIP purchase',signedAmount:-7,currency:'USD',externalId:'priority-1'}]}});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(i=>i.externalId==='priority-1');
+  assert.equal(item.suggestedType,'paid_for_person');
+  assert.equal(item.suggestedPersonId,'person_alice');
+  const ordered=imported.data.rules.filter(rule=>rule.matchText.startsWith('priority shop'));
+  assert.equal(ordered[0].priority,900);
 });
 
 test('supports ignore and reopen without changing the ledger revision',async()=>{
@@ -103,6 +134,20 @@ test('posting both statement sides of one transfer creates only one ledger movem
   assert.equal(feed.items.find(i=>i.id===incoming.id).postedEntryId,first.data.entryId);
 });
 
+test('undoing either side of a matched transfer reopens both statement rows and removes one ledger transfer',async()=>{
+  let feed=(await request('/api/bank-feed')).data;
+  const outgoing=feed.items.find(i=>i.externalId==='transfer-out'),incoming=feed.items.find(i=>i.externalId==='transfer-in');
+  assert.equal(outgoing.status,'posted');assert.equal(incoming.status,'posted');assert.equal(outgoing.postedEntryId,incoming.postedEntryId);
+  const entryId=outgoing.postedEntryId,before=state.entries.length;
+  const undone=await request(`/api/bank-feed/${incoming.id}/undo`,{method:'POST',body:{expectedRevision:state.version}});
+  assert.equal(undone.res.status,200);state=undone.data.state;
+  assert.equal(undone.data.reopenedItems,2);
+  assert.equal(state.entries.length,before-1);
+  assert.equal(state.entries.some(e=>e.id===entryId),false);
+  assert.equal(undone.data.items.find(i=>i.id===outgoing.id).status,'pending');
+  assert.equal(undone.data.items.find(i=>i.id===incoming.id).status,'pending');
+});
+
 test('deleting an account cleans unposted feed rows and rules that reference it',async()=>{
   const t=new Date().toISOString();
   const added=await request('/api/state',{method:'PUT',body:{...state,accounts:[...state.accounts,{id:'account_unused',name:'Unused Wallet',type:'wallet',currency:'USD',openingBalance:0,createdAt:t}]}});
@@ -127,6 +172,8 @@ test('ledger reset also clears bank feed rows and rules',async()=>{
   const after=(await request('/api/bank-feed')).data;
   assert.deepEqual(after.items,[]);
   assert.deepEqual(after.rules,[]);
+  assert.deepEqual(after.history,[]);
+  assert.deepEqual(after.stats,{pending:0,posted:0,ignored:0});
 });
 
 test('bank feed is isolated per user',async()=>{

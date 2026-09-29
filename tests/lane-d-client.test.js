@@ -51,3 +51,22 @@ test('Lane D centralizes bounded storage and recovery limits',()=>{
   assert.match(server,/DATA_LIMITS\.fullBackupBodyBytes/);
   assert.match(bank,/DATA_LIMITS\.bankImportBatches/);
 });
+
+test('person statement has modern mobile/desktop design with 3-dots actions and no dash on notes',()=>{
+  const app=read('app.js'),css=read('styles.css'),mobileCss=read('mobile.css');
+  assert.match(app,/statement-back-link/);
+  assert.match(app,/statement-hero-card/);
+  assert.match(app,/statement-hero-balance/);
+  assert.match(app,/entry-menu-trigger/);
+  assert.match(app,/data-menu-trigger/);
+  assert.match(app,/data-menu-popover/);
+  assert.match(app,/positionEntryMenuPopover/);
+  assert.match(app,/closeAllEntryMenus/);
+  assert.match(app,/statementNotesMarkup/);
+  assert.doesNotMatch(app,/strong>\$\{escapeHtml\(e\.description\|\|['"—-]\)\}<\/strong>/);
+  assert.match(css,/\.statement-hero-card/);
+  assert.match(css,/\.entry-menu-trigger/);
+  assert.match(css,/\.entry-menu-popover/);
+  assert.match(mobileCss,/\.statement-table-wrap\.mobile-ledger-table/);
+  assert.match(mobileCss,/html\[data-theme="dark"\]\s+\.statement-table-wrap\.mobile-ledger-table/);
+});

@@ -204,6 +204,158 @@ button,a,[role="button"]{touch-action:manipulation}
   .mobile-ledger-table td.actions::before{display:none}
   .mobile-ledger-table td.actions .btn{width:100%}
 
+  .mobile-ledger-table td.actions.statement-actions-cell,
+  .mobile-ledger-table td.actions:has(.entry-menu-wrap){
+    display:block;
+    grid-template-columns:none;
+    gap:0;
+    padding-top:0;
+    width:auto;
+  }
+
+  /* Modern statement layout on mobile */
+  .statement-header{
+    flex-direction:column;
+    align-items:stretch;
+    gap:14px;
+    margin-bottom:16px;
+  }
+  .statement-person-title{width:100%}
+  .statement-avatar{width:46px;height:46px;font-size:18px}
+  .statement-name-badge h2{font-size:20px}
+  .statement-header-actions{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+  }
+  .statement-header-actions #personTxn{
+    grid-column:1/-1;
+  }
+  .statement-hero-card{
+    grid-template-columns:1fr;
+    padding:18px;
+    gap:16px;
+    margin-bottom:16px;
+  }
+  .statement-balance-amount{font-size:28px}
+  .statement-hero-stats{padding:12px;gap:10px}
+  .statement-stat-value{font-size:15px}
+  .statement-panel{padding:16px}
+  .statement-panel-head{
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+    margin-bottom:14px;
+  }
+  .statement-search-wrap{width:100%;min-width:0}
+
+  /* Table becomes modern cards on mobile */
+  .statement-table-wrap.mobile-ledger-table{
+    border:0;
+    background:transparent;
+    overflow:visible;
+  }
+  .statement-table-wrap.mobile-ledger-table .statement-table{
+    display:block;
+    min-width:0;
+  }
+  .statement-table-wrap.mobile-ledger-table thead{
+    display:none;
+  }
+  .statement-table-wrap.mobile-ledger-table tbody{
+    display:grid;
+    gap:10px;
+  }
+  .statement-table-wrap.mobile-ledger-table tr{
+    display:grid;
+    grid-template-columns:1fr auto;
+    gap:8px 12px;
+    padding:14px 15px;
+    border:1px solid var(--line);
+    border-radius:16px;
+    background:var(--panel);
+    box-shadow:0 2px 8px rgba(17,24,39,.04);
+    position:relative;
+  }
+  .statement-table-wrap.mobile-ledger-table td{
+    display:block;
+    padding:0;
+    border:0;
+    min-width:0;
+  }
+  .statement-table-wrap.mobile-ledger-table td::before{
+    display:none!important;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-type-cell{
+    grid-column:1/2;
+    order:1;
+    align-self:center;
+    justify-self:start;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-actions-cell{
+    grid-column:2/3;
+    order:2;
+    align-self:start;
+    justify-self:end;
+    display:block;
+    padding:0;
+    margin:-4px -4px 0 0;
+  }
+  .statement-table-wrap.mobile-ledger-table .entry-menu-trigger{
+    width:36px;
+    height:36px;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-date-cell{
+    grid-column:1/-1;
+    order:3;
+    font-size:12px;
+    color:var(--muted);
+    margin-top:-2px;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-notes-cell{
+    grid-column:1/-1;
+    order:4;
+    padding:2px 0 6px;
+    border-bottom:1px dashed var(--line);
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-change-cell{
+    grid-column:1/2;
+    order:5;
+    text-align:left!important;
+    display:flex;
+    align-items:baseline;
+    gap:5px;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-change-cell::before{
+    content:"Change: ";
+    display:inline!important;
+    font-size:11px;
+    font-weight:700;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:0;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-running-cell{
+    grid-column:2/3;
+    order:6;
+    text-align:right!important;
+    display:flex;
+    align-items:baseline;
+    justify-content:flex-end;
+    gap:5px;
+  }
+  .statement-table-wrap.mobile-ledger-table td.statement-running-cell::before{
+    content:"Bal: ";
+    display:inline!important;
+    font-size:11px;
+    font-weight:700;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:0;
+  }
+
   /* Remaining report/import tables retain smooth horizontal scrolling */
   .table-wrap,.imp-table{
     -webkit-overflow-scrolling:touch;
@@ -482,6 +634,7 @@ html[data-theme="dark"] .mobile-nav .mobile-add>span{
   color:#0b1120;
   border-color:#111827;
 }
-html[data-theme="dark"] .mobile-ledger-table tr{
+html[data-theme="dark"] .mobile-ledger-table tr,
+html[data-theme="dark"] .statement-table-wrap.mobile-ledger-table tr{
   background:#0e1727;
 }

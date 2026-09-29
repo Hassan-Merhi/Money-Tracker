@@ -554,8 +554,11 @@ function openTransferModal(existing=null){
 }
 
 function openModal(title,body,onSave=null,showFooter=true){
-  closeModal(false);
-  modalReturnFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
+  const existing=document.querySelector('.modal-backdrop');
+  const active=document.activeElement instanceof HTMLElement?document.activeElement:null;
+  const previousReturn=modalReturnFocus;
+  if(existing)closeModal(false);
+  modalReturnFocus=previousReturn?.isConnected?previousReturn:(active?.isConnected?active:null);
   const titleId='modal-title-'+(++modalSequence),back=document.createElement('div');
   back.className='modal-backdrop';
   back.innerHTML=`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}" tabindex="-1"><div class="modal-head"><h3 id="${titleId}">${escapeHtml(title)}</h3><button class="icon-btn" id="modalClose" aria-label="Close">×</button></div><div class="modal-body">${body}</div>${showFooter?`<div class="modal-foot"><button class="btn" id="modalCancel">Cancel</button><button class="btn primary" id="modalSave">Save</button></div>`:''}</div>`;

@@ -52,6 +52,17 @@ test('running statement orders chronologically', () => {
   assert.deepEqual(rows.map(r => r.running), [50,30]);
 });
 
+test('running statement keeps running balance separate per currency', () => {
+  const entries = [
+    {id:'a', type:'paid_for_person', amount:100, personId:'p1', currency:'USD', date:'2026-01-01', createdAt:'2026-01-01T00:00:00Z'},
+    {id:'b', type:'paid_for_person', amount:100, personId:'p1', currency:'EUR', date:'2026-01-02', createdAt:'2026-01-02T00:00:00Z'},
+    {id:'c', type:'received_from_person', amount:25, personId:'p1', currency:'USD', date:'2026-01-03', createdAt:'2026-01-03T00:00:00Z'}
+  ];
+  const rows = runningStatement(entries, 'p1');
+  assert.deepEqual(rows.map(r => r.running), [100,100,75]);
+  assert.deepEqual(rows.map(r => r.delta), [100,100,-25]);
+});
+
 test('transfer validation blocks same account', () => {
   const a = {id:'x'};
   assert.ok(validateTransfer(a,a,1,1));

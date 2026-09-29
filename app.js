@@ -253,24 +253,54 @@ function personCard(p,balance) {
   return `<a class="card person-card" data-person="${p.id}" href="#person?id=${encodeURIComponent(p.id)}"><div class="person-top"><div style="display:flex;gap:11px;align-items:center"><div class="avatar">${escapeHtml(p.name.slice(0,2).toUpperCase())}</div><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.note||'Personal statement')}</p></div></div><span class="pill">View</span></div><div class="balance ${netSign>0?'positive':netSign<0?'negative':''}">${balancesText(balance)}</div></a>`;
 }
 
+function statementDate(value){
+  const v=String(value||'');
+  const d=new Date(/^\d{4}-\d{2}-\d{2}$/.test(v)?`${v}T00:00:00`:v);
+  if(Number.isNaN(d.getTime()))return escapeHtml(v);
+  return escapeHtml(new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(d));
+}
+
+function statementNet(person,balances){
+  const rows=Object.entries(balances).map(([c,v])=>({c,v,minor:toMinor(v,c)}));
+  if(!rows.length)rows.push({c:state.settings?.defaultCurrency||'USD',v:0,minor:0});
+  return `<div class="statement-net">${rows.map(({c,v,minor})=>{
+    const cls=minor>0?'pos':minor<0?'neg':'flat';
+    const who=minor>0?`${escapeHtml(person.name)} owes you`:minor<0?`You owe ${escapeHtml(person.name)}`:'You are settled up';
+    return `<div class="statement-net-row ${cls}"><div class="statement-net-amount">${money(Math.abs(v),c)}</div><div class="statement-net-who">${who}</div></div>`;
+  }).join('')}</div>`;
+}
+
+function statementTable(person,entries,balances){
+  const rows=entries.map(e=>{
+    const d=Number.isFinite(e.delta)?e.delta:personDelta(e,e.personId);
+    const c=e.currency||'USD';
+    const dMinor=toMinor(d,c);
+    const impact=dMinor>0?'up':dMinor<0?'down':'flat';
+    const impactNote=dMinor>0?'↑ They owe you more':dMinor<0?'↓ You owe them more':'→ No change';
+    const rMinor=toMinor(e.running||0,c);
+    const balCls=rMinor>0?'pos':rMinor<0?'neg':'flat';
+    const balNote=rMinor>0?'They owe you':rMinor<0?'You owe them':'Settled up';
+    return `<tr><td data-label="Date">${statementDate(e.date)}</td><td data-label="Details"><span class="pill">${prettyType(e.type)}</span><div class="statement-desc"><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount}</div>`:''}</div></td><td data-label="Impact" class="right"><div class="statement-impact ${impact}">${money(Math.abs(d),c)}</div><div class="statement-note ${impact}">${impactNote}</div></td><td data-label="Balance after" class="right"><div class="statement-balance ${balCls}">${money(e.running||0,c)}</div><div class="statement-note ${balCls}">${balNote}</div></td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button><button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`;
+  }).join('');
+  const totalRows=Object.entries(balances).map(([c,v])=>({c,v,minor:toMinor(v,c)})).filter(({minor})=>minor!==0);
+  const tfootParts=totalRows.length?totalRows.map(({c,v,minor})=>`<span class="${minor>0?'pos':'neg'}">${minor>0?`${escapeHtml(person.name)} owes you ${money(Math.abs(v),c)}`:`You owe ${escapeHtml(person.name)} ${money(Math.abs(v),c)}`}</span>`).join('<span class="muted"> · </span>'):'<span>You are settled up</span>';
+  return `<div class="table-wrap mobile-ledger-table"><table class="table"><thead><tr><th>Date</th><th>Details</th><th class="right">Impact</th><th class="right">Balance after</th><th></th></tr></thead><tbody>${rows}</tbody><tfoot class="statement-tfoot"><tr><td colspan="5" data-label="Balance today"><span class="statement-tfoot-label">Balance today</span><strong>${tfootParts}</strong></td></tr></tfoot></table></div>`;
+}
+
 function renderPerson(main, personId) {
   const person=state.people.find(p=>p.id===personId);
   if(!person){ main.innerHTML='<div class="empty">Person not found.</div>'; return; }
   const balances=personBalances(state.entries,state.people)[person.id]||{};
-  const personEntries=runningStatement(state.entries,person.id).sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
+  const personEntries=runningStatement(state.entries,person.id);
   main.innerHTML=`
     <div class="detail-header"><div class="detail-title"><div class="avatar">${escapeHtml(person.name.slice(0,2).toUpperCase())}</div><div><h2>${escapeHtml(person.name)}</h2><p>${escapeHtml(person.note||'Personal statement')}</p></div></div><div class="page-actions"><button class="btn" id="personPdf">↓ PDF statement</button><button class="btn" id="editPerson">✎ Edit</button><button class="btn primary" id="personTxn">＋ Add transaction</button></div></div>
-    <div class="statement-summary">${Object.keys(balances).length?Object.entries(balances).map(([c,v])=>`<span class="pill ${v>0?'green':v<0?'red':''}">${v>0?'Owes you':v<0?'You owe':'Settled'} · ${money(Math.abs(v),c)}</span>`).join(''):'<span class="pill">Settled</span>'}</div>
-    <section class="card panel"><div class="panel-head"><div><h3>Statement</h3><p>Positive change means the person owes you more; negative means less.</p></div></div>${personEntries.length?statementTable(personEntries):'<div class="empty"><strong>No statement entries yet</strong>Add the first purchase, repayment, borrowing or opening balance.</div>'}</section>`;
+    ${statementNet(person,balances)}
+    <section class="card panel"><div class="panel-head"><div><h3>Statement</h3><p>Every entry, oldest first, with the balance after it. <span class="statement-legend pos">Green</span> = they owe you · <span class="statement-legend neg">Red</span> = you owe them.</p></div></div>${personEntries.length?statementTable(person,personEntries,balances):'<div class="empty"><strong>No statement entries yet</strong>Add the first purchase, repayment, borrowing or opening balance.</div>'}</section>`;
   main.querySelector('#personTxn')?.addEventListener('click',()=>openTransactionModal(null,{personId:person.id}));
   main.querySelector('#personPdf')?.addEventListener('click',()=>exportPersonPdf(state,person,today));
   main.querySelector('#editPerson')?.addEventListener('click',()=>openPersonModal(person));
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));
-}
-
-function statementTable(entries){
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Notes</th><th class="right">Change</th><th class="right">Running balance</th><th></th></tr></thead><tbody>${entries.map(e=>{const d=Number.isFinite(e.delta)?e.delta:personDelta(e,e.personId);const c=e.currency||'USD';return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount}</div>`:''}</td><td class="right ${d>=0?'amount-pos':'amount-neg'}">${d>=0?'+':''}${money(d,c)}</td><td class="right strong">${money(e.running||0,c)}</td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderAccounts(main) {

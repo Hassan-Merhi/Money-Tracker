@@ -49,6 +49,10 @@ test('persists people accounts and transactions in the database',async()=>{
   state.entries=[{id:'entry_1',type:'paid_for_person',personId:'person_alice',accountId:'account_bank',amount:125,currency:'USD',date:'2026-09-28',merchant:'Amazon',description:'Order',createdAt:t,updatedAt:t}];
   const put=await request('/api/state',{method:'PUT',cookie,csrf,body:state}); assert.equal(put.res.status,200); assert.equal(put.data.version,state.version+1); state=put.data;
   const read=await request('/api/state',{cookie}); assert.equal(read.data.people[0].name,'Alice'); assert.equal(read.data.accounts[0].openingBalance,1000); assert.equal(read.data.entries[0].amount,125);
+  const accountRow=db.prepare("SELECT opening_balance_minor AS openingMinor,typeof(opening_balance_minor) AS storageType FROM accounts WHERE user_id=? AND id='account_bank'").get(read.data.settings?db.prepare("SELECT id FROM users WHERE email LIKE 'owner-%' LIMIT 1").get().id:null);
+  assert.equal(accountRow.openingMinor,100000);assert.equal(accountRow.storageType,'integer');
+  const entryRow=db.prepare("SELECT amount_minor AS amountMinor,typeof(amount_minor) AS storageType FROM entries WHERE id='entry_1'").get();
+  assert.equal(entryRow.amountMinor,12500);assert.equal(entryRow.storageType,'integer');
 });
 
 
@@ -59,6 +63,13 @@ test('supports person debt activity without any bank or cash account',async()=>{
   assert.equal(put.res.status,200);state=put.data;
   const entry=state.entries.find(e=>e.id==='entry_debt_only');
   assert.equal(entry.accountId,null);assert.equal(entry.currency,'USD');assert.equal(entry.amount,40);
+});
+
+test('rejects money with precision the currency cannot store',async()=>{
+  const t=new Date().toISOString();
+  const invalid={...state,entries:[...state.entries,{id:'entry_bad_precision',type:'paid_for_person',personId:'person_alice',accountId:null,amount:1.001,currency:'USD',date:'2026-09-28',merchant:'',description:'Too precise',createdAt:t,updatedAt:t}]};
+  const put=await request('/api/state',{method:'PUT',cookie,csrf,body:invalid});
+  assert.equal(put.res.status,400);assert.match(put.data.error,/at most 2 decimal/);
 });
 
 test('persists validated split allocations',async()=>{
@@ -73,6 +84,8 @@ test('persists validated split allocations',async()=>{
   assert.equal(put.res.status,200); state=put.data;
   const split=state.entries.find(entry=>entry.id==='entry_split');
   assert.deepEqual(split.splits,[{personId:'person_alice',amount:40,note:'Item A'},{personId:'person_bob',amount:60,note:'Item B'}]);
+  const stored=JSON.parse(db.prepare("SELECT split_json AS splitJson FROM entries WHERE id='entry_split'").get().splitJson);
+  assert.deepEqual(stored.map(row=>row.amountMinor),[4000,6000]);assert.equal(Object.hasOwn(stored[0],'amount'),false);
 });
 
 test('stores authenticated receipt attachments outside ledger state',async()=>{

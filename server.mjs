@@ -8,6 +8,7 @@ import { parseWorkbook } from './lib/xlsx-import.js';
 import { nextRecurringDate } from './lib/recurring.js';
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
+import { createDatabaseSnapshot } from './lib/db-snapshot.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -174,6 +175,16 @@ const q = {
 };
 
 const bankFeed = createBankFeedService(db);
+
+if (process.env.WAVE0_BACKUP_ON_START === '1') {
+  const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});
+  console.log('WAVE0_BACKUP_CREATED '+JSON.stringify({
+    snapshotFile:snapshot.snapshotFile,
+    bytes:snapshot.bytes,
+    sha256:snapshot.sha256,
+    schemaSha256:snapshot.schemaSha256
+  }));
+}
 
 function nowIso() { return new Date().toISOString(); }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }

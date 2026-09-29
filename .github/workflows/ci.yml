@@ -38,3 +38,6 @@ jobs:
           node --check block-g-insights.js
           node --check lib/insights.js
           node --check lib/insights-server.js
+          node --check lib/db-snapshot.js
+          node --check scripts/create-db-snapshot.mjs
+          node --check scripts/restore-db-snapshot.mjs

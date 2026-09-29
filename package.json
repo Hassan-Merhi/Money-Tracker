@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "snapshot:db": "node scripts/create-db-snapshot.mjs",
+    "restore:db": "node scripts/restore-db-snapshot.mjs"
   }
 }

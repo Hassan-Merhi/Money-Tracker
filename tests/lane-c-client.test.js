@@ -51,10 +51,11 @@ test('theme bootstrap is external so script CSP does not block it',()=>{
 });
 
 
-test('quick paste importer is exposed in Settings and uses the statement-safe parser',()=>{
+test('quick paste importer stays available without exposing an import card in Settings',()=>{
   const source=readFileSync(new URL('../block-c-import.js',import.meta.url),'utf8');
-  assert.match(source,/Paste from Excel/);
+  assert.doesNotMatch(source,/data-import-card/);
   assert.match(source,/applyQuickPasteImport/);
   assert.match(source,/They owe me/);
   assert.match(source,/Took from them/);
+  assert.match(source,/data-open-quick-import/);
 });

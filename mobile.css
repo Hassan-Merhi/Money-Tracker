@@ -443,6 +443,15 @@ button,a,[role="button"]{touch-action:manipulation}
   .mobile-more-grid{grid-template-columns:1fr 1fr}
 }
 
+@media(max-width:430px){
+  .stats:not(.debt-stats){grid-template-columns:1fr}
+  .auth-shell{
+    padding:calc(16px + env(safe-area-inset-top,0px)) 12px calc(16px + env(safe-area-inset-bottom,0px));
+  }
+  .auth-card{padding:20px;border-radius:20px}
+  .auth-brand{align-items:flex-start;margin-bottom:18px}
+}
+
 @media(max-width:380px){
   :root{--mobile-gutter:11px}
   .quick-grid,.quick-menu{grid-template-columns:1fr}
@@ -454,8 +463,7 @@ button,a,[role="button"]{touch-action:manipulation}
 /* Standalone PWA feels like a native app */
 @media(display-mode:standalone){
   @media(max-width:760px){
-    body{user-select:none;-webkit-user-select:none}
-    input,textarea{user-select:text;-webkit-user-select:text}
+    .topbar,.mobile-nav{user-select:none;-webkit-user-select:none}
     .topbar{padding-top:calc(8px + env(safe-area-inset-top,0px))}
   }
 }

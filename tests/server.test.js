@@ -206,6 +206,45 @@ test('entries API creates updates and deletes only the target transaction and cl
   assert.equal(personRemoved.res.status,200);state=personRemoved.data;
 });
 
+
+test('dependency-safe deletes catch split allocations and linked account entries',async()=>{
+  const splitBlocked=await request('/api/people/person_bob',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(splitBlocked.res.status,400);assert.match(splitBlocked.data.error,/transactions first/);
+  const accountBlocked=await request('/api/accounts/account_bank',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(accountBlocked.res.status,400);assert.match(accountBlocked.data.error,/transactions first/);
+});
+
+test('atomic entries API handles transfers and protects linked accounts',async()=>{
+  let r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:state.version,id:'account_transfer_a',name:'Transfer A',type:'cash',currency:'USD',openingBalance:100}});
+  assert.equal(r.res.status,201);state=r.data;
+  r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:state.version,id:'account_transfer_b',name:'Transfer B',type:'cash',currency:'USD',openingBalance:0}});
+  assert.equal(r.res.status,201);state=r.data;
+
+  const created=await request('/api/entries',{method:'POST',cookie,csrf,body:{
+    expectedRevision:state.version,id:'entry_transfer_api',type:'account_transfer',fromAccountId:'account_transfer_a',toAccountId:'account_transfer_b',
+    amount:10,fromAmount:10,toAmount:10,date:'2026-09-29',merchant:'',description:'Atomic transfer'
+  }});
+  assert.equal(created.res.status,201);state=created.data;
+  const stored=db.prepare("SELECT from_amount_minor AS fromMinor,to_amount_minor AS toMinor FROM entries WHERE id='entry_transfer_api'").get();
+  assert.equal(stored.fromMinor,1000);assert.equal(stored.toMinor,1000);
+
+  const blocked=await request('/api/accounts/account_transfer_a',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(blocked.res.status,400);assert.match(blocked.data.error,/transactions first/);
+
+  const updated=await request('/api/entries/entry_transfer_api',{method:'PUT',cookie,csrf,body:{
+    expectedRevision:state.version,type:'account_transfer',fromAccountId:'account_transfer_a',toAccountId:'account_transfer_b',
+    amount:12.34,fromAmount:12.34,toAmount:12.34,date:'2026-09-29',merchant:'',description:'Updated transfer'
+  }});
+  assert.equal(updated.res.status,200);state=updated.data;
+  const updatedStored=db.prepare("SELECT from_amount_minor AS fromMinor,to_amount_minor AS toMinor FROM entries WHERE id='entry_transfer_api'").get();
+  assert.equal(updatedStored.fromMinor,1234);assert.equal(updatedStored.toMinor,1234);
+
+  const deleted=await request('/api/entries/entry_transfer_api',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
+  assert.equal(deleted.res.status,200);state=deleted.data;
+  r=await request('/api/accounts/account_transfer_a',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});assert.equal(r.res.status,200);state=r.data;
+  r=await request('/api/accounts/account_transfer_b',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});assert.equal(r.res.status,200);state=r.data;
+});
+
 test('settings API is revision-safe and does not rewrite ledger tables',async()=>{
   db.prepare('DELETE FROM lane_a_mutation_probe').run();
   const beforeVersion=state.version;

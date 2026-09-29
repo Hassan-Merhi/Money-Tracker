@@ -70,3 +70,15 @@ test('person statement has modern mobile/desktop design with 3-dots actions and 
   assert.match(mobileCss,/\.statement-table-wrap\.mobile-ledger-table/);
   assert.match(mobileCss,/html\[data-theme="dark"\]\s+\.statement-table-wrap\.mobile-ledger-table/);
 });
+
+
+test('settings keeps advanced utilities out of the main settings page and password-protects destructive actions',()=>{
+  const app=read('app.js'),importUi=read('block-c-import.js'),store=read('lib/store.js');
+  assert.doesNotMatch(app,/<h3>Complete backup & recovery<\/h3>/);
+  assert.doesNotMatch(app,/<h3>Balance rules<\/h3>/);
+  assert.doesNotMatch(importUi,/data-import-card/);
+  assert.match(app,/function openDeleteDataModal\(\)/);
+  assert.match(app,/resetState\(fd\.get\('password'\)\)/);
+  assert.match(app,/function openDeleteAccountModal\(\)[\s\S]*Current password/);
+  assert.match(store,/resetState\(password\)/);
+});

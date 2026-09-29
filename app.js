@@ -53,7 +53,7 @@ function parseRoute() {
   return { page, params: new URLSearchParams(query) };
 }
 
-window.addEventListener('hashchange', () => { route = parseRoute(); routeFocusPending=true; if (state) render(); });
+window.addEventListener('hashchange', () => { closeAllEntryMenus(); route = parseRoute(); routeFocusPending=true; if (state) render(); });
 document.querySelector('.skip-link')?.addEventListener('click',event=>{
   event.preventDefault();
   const main=document.querySelector('#main');
@@ -128,6 +128,7 @@ function subFor(page) {
 }
 
 function render() {
+  closeAllEntryMenus();
   const hiddenInSimpleMode=['accounts','bank','insights','scheduled'];
   const advanced=advancedMode();
   if(!advanced && hiddenInSimpleMode.includes(route.page)){location.hash='#dashboard';return;}
@@ -260,47 +261,234 @@ function statementDate(value){
   return escapeHtml(new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(d));
 }
 
-function statementNet(person,balances){
-  const rows=Object.entries(balances).map(([c,v])=>({c,v,minor:toMinor(v,c)}));
-  if(!rows.length)rows.push({c:state.settings?.defaultCurrency||'USD',v:0,minor:0});
-  return `<div class="statement-net">${rows.map(({c,v,minor})=>{
-    const cls=minor>0?'pos':minor<0?'neg':'flat';
-    const who=minor>0?`${escapeHtml(person.name)} owes you`:minor<0?`You owe ${escapeHtml(person.name)}`:'You are settled up';
-    return `<div class="statement-net-row ${cls}"><div class="statement-net-amount">${money(Math.abs(v),c)}</div><div class="statement-net-who">${who}</div></div>`;
-  }).join('')}</div>`;
+function entryMenuMarkup(entryId) {
+  return `<div class="entry-menu-wrap" data-entry-menu>
+    <button class="entry-menu-trigger icon-btn" type="button" aria-label="Transaction actions" aria-haspopup="true" aria-expanded="false" data-menu-trigger="${entryId}" title="Transaction actions">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="12" cy="5" r="2.2"></circle>
+        <circle cx="12" cy="12" r="2.2"></circle>
+        <circle cx="12" cy="19" r="2.2"></circle>
+      </svg>
+    </button>
+    <div class="entry-menu-popover" data-menu-popover="${entryId}" hidden role="menu" aria-label="Transaction actions">
+      <button type="button" class="entry-menu-item" role="menuitem" data-edit-entry="${entryId}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <span>Edit</span>
+      </button>
+      <button type="button" class="entry-menu-item danger" role="menuitem" data-delete-entry="${entryId}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        <span>Delete</span>
+      </button>
+    </div>
+  </div>`;
 }
 
-function statementTable(person,entries,balances){
-  const rows=entries.map(e=>{
-    const d=Number.isFinite(e.delta)?e.delta:personDelta(e,e.personId);
-    const c=e.currency||'USD';
-    const dMinor=toMinor(d,c);
-    const impact=dMinor>0?'up':dMinor<0?'down':'flat';
-    const impactNote=dMinor>0?'↑ They owe you more':dMinor<0?'↓ You owe them more':'→ No change';
-    const rMinor=toMinor(e.running||0,c);
-    const balCls=rMinor>0?'pos':rMinor<0?'neg':'flat';
-    const balNote=rMinor>0?'They owe you':rMinor<0?'You owe them':'Settled up';
-    return `<tr><td data-label="Date">${statementDate(e.date)}</td><td data-label="Details"><span class="pill">${prettyType(e.type)}</span><div class="statement-desc"><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount}</div>`:''}</div></td><td data-label="Impact" class="right"><div class="statement-impact ${impact}">${money(Math.abs(d),c)}</div><div class="statement-note ${impact}">${impactNote}</div></td><td data-label="Balance after" class="right"><div class="statement-balance ${balCls}">${money(e.running||0,c)}</div><div class="statement-note ${balCls}">${balNote}</div></td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button><button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`;
-  }).join('');
-  const totalRows=Object.entries(balances).map(([c,v])=>({c,v,minor:toMinor(v,c)})).filter(({minor})=>minor!==0);
-  const tfootParts=totalRows.length?totalRows.map(({c,v,minor})=>`<span class="${minor>0?'pos':'neg'}">${minor>0?`${escapeHtml(person.name)} owes you ${money(Math.abs(v),c)}`:`You owe ${escapeHtml(person.name)} ${money(Math.abs(v),c)}`}</span>`).join('<span class="muted"> · </span>'):'<span>You are settled up</span>';
-  return `<div class="table-wrap mobile-ledger-table"><table class="table"><thead><tr><th>Date</th><th>Details</th><th class="right">Impact</th><th class="right">Balance after</th><th></th></tr></thead><tbody>${rows}</tbody><tfoot class="statement-tfoot"><tr><td colspan="5" data-label="Balance today"><span class="statement-tfoot-label">Balance today</span><strong>${tfootParts}</strong></td></tr></tfoot></table></div>`;
+function statementNotesMarkup(e) {
+  const desc = (e.description || '').trim();
+  const merchant = (e.merchant || '').trim();
+  const category = state.categories?.find(x => x.id === e.categoryId);
+  let html = '';
+  if (desc) {
+    html += `<div class="statement-desc"><strong>${escapeHtml(desc)}</strong></div>`;
+    if (merchant) {
+      html += `<div class="statement-merchant muted tiny">${escapeHtml(merchant)}</div>`;
+    }
+  } else if (merchant) {
+    html += `<div class="statement-merchant statement-desc"><strong>${escapeHtml(merchant)}</strong></div>`;
+  }
+  if (category) {
+    html += `<div class="statement-category-tag attachment-count">${escapeHtml((category.icon ? category.icon + ' ' : '') + category.name)}</div>`;
+  }
+  if (e.attachmentCount) {
+    html += `<div class="statement-attachment-tag attachment-count">📎 ${e.attachmentCount}</div>`;
+  }
+  return html;
+}
+
+function statementTypePill(type, delta) {
+  let color = '';
+  let icon = '';
+  if (type === 'paid_for_person') { color = 'green'; icon = '↗'; }
+  else if (type === 'split_paid_for_people') { color = 'green'; icon = '👥'; }
+  else if (type === 'received_from_person') { color = 'blue'; icon = '💵'; }
+  else if (type === 'borrowed_from_person') { color = 'red'; icon = '↘'; }
+  else if (type === 'paid_to_person') { color = 'amber'; icon = '✅'; }
+  else if (type === 'person_adjustment') {
+    color = delta >= 0 ? 'green' : 'red';
+    icon = '±';
+  }
+  return `<span class="pill ${color} statement-type-pill"><span class="pill-icon" aria-hidden="true">${icon}</span><span>${escapeHtml(prettyType(type))}</span></span>`;
 }
 
 function renderPerson(main, personId) {
-  const person=state.people.find(p=>p.id===personId);
-  if(!person){ main.innerHTML='<div class="empty">Person not found.</div>'; return; }
-  const balances=personBalances(state.entries,state.people)[person.id]||{};
-  const personEntries=runningStatement(state.entries,person.id);
-  main.innerHTML=`
-    <div class="detail-header"><div class="detail-title"><div class="avatar">${escapeHtml(person.name.slice(0,2).toUpperCase())}</div><div><h2>${escapeHtml(person.name)}</h2><p>${escapeHtml(person.note||'Personal statement')}</p></div></div><div class="page-actions"><button class="btn" id="personPdf">↓ PDF statement</button><button class="btn" id="editPerson">✎ Edit</button><button class="btn primary" id="personTxn">＋ Add transaction</button></div></div>
-    ${statementNet(person,balances)}
-    <section class="card panel"><div class="panel-head"><div><h3>Statement</h3><p>Every entry, oldest first, with the balance after it. <span class="statement-legend pos">Green</span> = they owe you · <span class="statement-legend neg">Red</span> = you owe them.</p></div></div>${personEntries.length?statementTable(person,personEntries,balances):'<div class="empty"><strong>No statement entries yet</strong>Add the first purchase, repayment, borrowing or opening balance.</div>'}</section>`;
-  main.querySelector('#personTxn')?.addEventListener('click',()=>openTransactionModal(null,{personId:person.id}));
-  main.querySelector('#personPdf')?.addEventListener('click',()=>exportPersonPdf(state,person,today));
-  main.querySelector('#editPerson')?.addEventListener('click',()=>openPersonModal(person));
-  main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
-  main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));
+  const person = state.people.find(p => p.id === personId);
+  if (!person) { main.innerHTML = '<div class="empty">Person not found.</div>'; return; }
+  const balances = personBalances(state.entries, state.people)[person.id] || {};
+  const personEntries = runningStatement(state.entries, person.id).sort((a,b) => new Date(b.date) - new Date(a.date) || new Date(b.createdAt) - new Date(a.createdAt));
+
+  const balanceEntries = Object.entries(balances).filter(([c, v]) => {
+    try { return toMinor(v, c) !== 0; } catch { return Number(v) !== 0; }
+  });
+  const defaultCurrency = state.settings?.defaultCurrency || 'USD';
+  const primaryCurrency = balanceEntries.length ? balanceEntries[0][0] : defaultCurrency;
+  const primaryVal = balances[primaryCurrency] ?? 0;
+
+  let heroClass = 'settled';
+  let heroBadgeText = 'Settled';
+  let heroBadgeClass = '';
+  let heroAmount = money(0, primaryCurrency);
+  let heroExplanation = `All transactions with ${escapeHtml(person.name)} are currently settled.`;
+
+  if (balanceEntries.length === 1) {
+    if (primaryVal > 0) {
+      heroClass = 'positive';
+      heroBadgeText = 'Owes you';
+      heroBadgeClass = 'green';
+      heroAmount = `+${money(primaryVal, primaryCurrency)}`;
+      heroExplanation = `${escapeHtml(person.name)} owes you ${money(primaryVal, primaryCurrency)}.`;
+    } else if (primaryVal < 0) {
+      heroClass = 'negative';
+      heroBadgeText = 'You owe';
+      heroBadgeClass = 'red';
+      heroAmount = `-${money(Math.abs(primaryVal), primaryCurrency)}`;
+      heroExplanation = `You owe ${escapeHtml(person.name)} ${money(Math.abs(primaryVal), primaryCurrency)}.`;
+    }
+  } else if (balanceEntries.length > 1) {
+    heroClass = 'settled';
+    heroBadgeText = 'Multiple currencies';
+    heroBadgeClass = '';
+    heroAmount = `${balanceEntries.length} currencies`;
+    heroExplanation = `Balances with ${escapeHtml(person.name)} are kept separate by currency.`;
+  }
+
+  const multiCurrencyHtml = balanceEntries.length > 1 ? `
+    <div class="statement-currency-chips">
+      ${balanceEntries.map(([c, v]) => `<span class="pill ${v > 0 ? 'green' : v < 0 ? 'red' : ''}">${v > 0 ? 'Owes you' : 'You owe'} · ${money(Math.abs(v), c)}</span>`).join('')}
+    </div>` : '';
+
+  const totalTransactions = personEntries.length;
+  const lastActiveDate = personEntries[0] ? personEntries[0].date : 'No activity';
+
+  main.innerHTML = `
+    <div class="statement-nav">
+      <a class="statement-back-link" href="#people">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+        <span>Back to People</span>
+      </a>
+    </div>
+
+    <div class="detail-header statement-header">
+      <div class="detail-title statement-person-title">
+        <div class="avatar statement-avatar">${escapeHtml(person.name.slice(0,2).toUpperCase())}</div>
+        <div class="statement-person-info">
+          <div class="statement-name-badge">
+            <h2>${escapeHtml(person.name)}</h2>
+            <span class="pill ${heroBadgeClass}">${heroBadgeText}</span>
+          </div>
+          <p class="statement-person-note">${escapeHtml(person.note || 'Personal statement & running balance')}</p>
+        </div>
+      </div>
+      <div class="page-actions statement-header-actions">
+        <button class="btn" id="personPdf" title="Export PDF statement">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>PDF statement</span>
+        </button>
+        <button class="btn" id="editPerson" title="Edit person">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <span>Edit</span>
+        </button>
+        <button class="btn primary" id="personTxn" title="Add transaction with this person">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>Add transaction</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card statement-hero-card">
+      <div class="statement-hero-main">
+        <div class="statement-hero-label">Current Statement Balance</div>
+        <div class="statement-hero-balance ${heroClass}">
+          <span class="statement-balance-amount">${heroAmount}</span>
+          <span class="pill ${heroBadgeClass}">${heroBadgeText}</span>
+        </div>
+        <p class="statement-hero-desc">${heroExplanation}</p>
+        ${multiCurrencyHtml}
+      </div>
+      <div class="statement-hero-stats">
+        <div class="statement-stat-box">
+          <span class="statement-stat-label">Transactions</span>
+          <span class="statement-stat-value">${totalTransactions}</span>
+        </div>
+        <div class="statement-stat-box">
+          <span class="statement-stat-label">Last activity</span>
+          <span class="statement-stat-value">${lastActiveDate}</span>
+        </div>
+      </div>
+    </div>
+
+    <section class="card panel statement-panel">
+      <div class="panel-head statement-panel-head">
+        <div class="statement-panel-title-area">
+          <div class="statement-title-wrap">
+            <h3>Statement Ledger</h3>
+            <span class="pill statement-count-pill">${totalTransactions}</span>
+          </div>
+          <p class="muted">Chronological ledger with real-time running balance. Positive (+) increases what they owe.</p>
+        </div>
+        ${totalTransactions > 1 ? `
+        <div class="statement-filter-bar">
+          <div class="statement-search-wrap">
+            <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" id="statementSearch" class="input statement-search-input" placeholder="Filter statement…" aria-label="Filter statement entries">
+          </div>
+        </div>` : ''}
+      </div>
+      <div id="statementContent">
+        ${personEntries.length ? statementTable(personEntries) : `<div class="empty statement-empty"><strong>No statement entries yet</strong>Record the first purchase, repayment, borrowing or opening balance for ${escapeHtml(person.name)}.<div style="margin-top:14px"><button class="btn primary" id="emptyPersonTxn">＋ Add transaction</button></div></div>`}
+      </div>
+    </section>`;
+
+  const bindActions = (container) => {
+    container.querySelectorAll('[data-edit-entry]').forEach(b => b.addEventListener('click', () => openTransactionModal(state.entries.find(e => e.id === b.dataset.editEntry))));
+    container.querySelectorAll('[data-delete-entry]').forEach(b => b.addEventListener('click', () => deleteEntry(b.dataset.deleteEntry)));
+  };
+
+  main.querySelector('#personTxn')?.addEventListener('click', () => openTransactionModal(null, { personId: person.id }));
+  main.querySelector('#emptyPersonTxn')?.addEventListener('click', () => openTransactionModal(null, { personId: person.id }));
+  main.querySelector('#personPdf')?.addEventListener('click', () => exportPersonPdf(state, person, today));
+  main.querySelector('#editPerson')?.addEventListener('click', () => openPersonModal(person));
+  bindActions(main);
+
+  const searchInput = main.querySelector('#statementSearch');
+  if (searchInput) {
+    searchInput.addEventListener('input', e => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = q ? personEntries.filter(entry => {
+        const text = `${entry.description || ''} ${entry.merchant || ''} ${entry.date || ''} ${prettyType(entry.type) || ''}`.toLowerCase();
+        return text.includes(q);
+      }) : personEntries;
+      const content = main.querySelector('#statementContent');
+      if (content) {
+        content.innerHTML = filtered.length ? statementTable(filtered) : `<div class="empty"><strong>No matching transactions</strong>No statement records matching “${escapeHtml(q)}”.</div>`;
+        bindActions(content);
+      }
+    });
+  }
+}
+
+function statementTable(entries){
+  return `<div class="table-wrap mobile-ledger-table statement-table-wrap"><table class="table statement-table"><thead><tr><th>Date</th><th>Type</th><th>Notes & details</th><th class="right">Change</th><th class="right">Running balance</th><th class="right statement-actions-head"></th></tr></thead><tbody>${entries.map(e=>{
+    const d = Number.isFinite(e.delta) ? e.delta : personDelta(e, e.personId);
+    const c = e.currency || 'USD';
+    return `<tr>
+      <td data-label="Date" class="statement-date-cell"><time datetime="${escapeHtml(e.date)}">${statementDate(e.date)}</time></td>
+      <td data-label="Type" class="statement-type-cell">${statementTypePill(e.type, d)}</td>
+      <td data-label="Notes" class="statement-notes-cell">${statementNotesMarkup(e)}</td>
+      <td data-label="Change" class="right statement-change-cell ${d >= 0 ? 'amount-pos' : 'amount-neg'}"><span class="statement-change-value">${d >= 0 ? '+' : ''}${money(d, c)}</span></td>
+      <td data-label="Running balance" class="right strong statement-running-cell"><span class="statement-running-value">${money(e.running || 0, c)}</span></td>
+      <td class="actions statement-actions-cell">${entryMenuMarkup(e.id)}</td>
+    </tr>`;
+  }).join('')}</tbody></table></div>`;
 }
 
 function renderAccounts(main) {
@@ -346,7 +534,7 @@ function transactionTable(entries,{compact=false}={}){
     const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
     const category=state.categories?.find(x=>x.id===e.categoryId);
-    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
+    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions statement-actions-cell">${entryMenuMarkup(e.id)}</td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderSettings(main) {
@@ -632,6 +820,7 @@ function openModal(title,body,onSave=null,showFooter=true){
   requestAnimationFrame(()=>focusable()[0]?.focus()||dialog.focus());
 }
 function closeModal(restoreFocus=true){
+  closeAllEntryMenus();
   const back=document.querySelector('.modal-backdrop');
   if(!back)return;
   back.remove();
@@ -671,7 +860,91 @@ function renderAuth(message='',registrationOpen=false) {
   form.addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;button.textContent=mode==='register'?'Creating…':'Signing in…';try{user=mode==='register'?await register(fd.get('email'),fd.get('password')):await login(fd.get('email'),fd.get('password'));state=await loadState();location.hash='#dashboard';render();}catch(error){showAuth(error.message||'Could not sign in.');}finally{button.disabled=false;}});
 }
 
+let entryMenuInitialized = false;
+function initEntryMenuListeners() {
+  if (entryMenuInitialized) return;
+  entryMenuInitialized = true;
+
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-menu-trigger]');
+    if (trigger) {
+      event.preventDefault();
+      event.stopPropagation();
+      const entryId = trigger.dataset.menuTrigger;
+      const popover = document.querySelector(`[data-menu-popover="${entryId}"]`);
+      if (!popover) return;
+      const isAlreadyOpen = !popover.hidden;
+
+      closeAllEntryMenus();
+
+      if (!isAlreadyOpen) {
+        popover.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        positionEntryMenuPopover(trigger, popover);
+      }
+      return;
+    }
+
+    const menuItem = event.target.closest('.entry-menu-item');
+    if (menuItem) {
+      closeAllEntryMenus();
+      return;
+    }
+
+    if (!event.target.closest('.entry-menu-popover')) {
+      closeAllEntryMenus();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeAllEntryMenus();
+    }
+  });
+
+  window.addEventListener('resize', closeAllEntryMenus);
+  window.addEventListener('scroll', closeAllEntryMenus, { passive: true });
+}
+
+function positionEntryMenuPopover(trigger, popover) {
+  const rect = trigger.getBoundingClientRect();
+  const popoverWidth = 140;
+  const popoverHeight = 88;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const showAbove = spaceBelow < popoverHeight + 10 && rect.top > popoverHeight + 10;
+
+  popover.style.position = 'fixed';
+  popover.style.zIndex = '300';
+
+  if (showAbove) {
+    popover.style.top = 'auto';
+    popover.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 4)}px`;
+  } else {
+    popover.style.top = `${Math.max(8, rect.bottom + 4)}px`;
+    popover.style.bottom = 'auto';
+  }
+
+  const rightSpace = window.innerWidth - rect.right;
+  if (rect.right - popoverWidth < 8) {
+    popover.style.right = 'auto';
+    popover.style.left = '8px';
+  } else {
+    popover.style.left = 'auto';
+    popover.style.right = `${Math.max(8, rightSpace)}px`;
+  }
+}
+
+function closeAllEntryMenus() {
+  document.querySelectorAll('[data-menu-popover]').forEach(p => {
+    p.hidden = true;
+  });
+  document.querySelectorAll('[data-menu-trigger]').forEach(t => {
+    t.setAttribute('aria-expanded', 'false');
+  });
+}
+
 async function boot(){
+  initEntryMenuListeners();
   app.innerHTML='<div class="boot">Loading Money Tracker…</div>';
   try{user=await currentUser();if(!user){await showAuth();return;}state=await loadState();render();}catch(error){showAuth(error.message||'Could not load Money Tracker.');}
 }

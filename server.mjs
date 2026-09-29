@@ -684,12 +684,12 @@ function staticFile(req,res,url){
 export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1});}
+    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
     if(url.pathname==='/api/auth/register'&&req.method==='POST'){
-      if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
+      if(rateLimited(req,'register',{limit:10,windowMs:10*60_000}))return fail(res,429,'Too many attempts. Try again later.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||'');
       if(!/^\S+@\S+\.\S+$/.test(email))return fail(res,400,'Enter a valid email.');
       if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
@@ -704,7 +704,7 @@ export const server=http.createServer(async(req,res)=>{
       const session=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:session.csrf}, {'Set-Cookie':cookie(session.token)});
     }
     if(url.pathname==='/api/auth/login'&&req.method==='POST'){
-      if(rateLimited(req))return fail(res,429,'Too many attempts. Try again later.');
+      if(rateLimited(req,'login',{limit:20,windowMs:10*60_000}))return fail(res,429,'Too many attempts. Try again later.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||''), u=q.userByEmail.get(email);
       if(!u||!verifyPassword(password,u.password_hash))return fail(res,401,'Email or password is incorrect.');
       const s=createSession(u.id); return json(res,200,{user:{id:u.id,email:u.email,displayName:u.display_name,defaultCurrency:u.default_currency,isOwner:Boolean(u.is_owner)},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
@@ -714,6 +714,36 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return; q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
+    }
+    if(url.pathname==='/api/auth/password'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      if(rateLimited(req,'password-change',{limit:10,windowMs:15*60_000}))return fail(res,429,'Too many password attempts. Try again later.');
+      const body=await bodyJson(req),currentPassword=String(body.currentPassword||''),newPassword=String(body.newPassword||''),u=q.userSecret.get(a.user_id);
+      if(!u||!verifyPassword(currentPassword,u.password_hash))return fail(res,403,'Current password is incorrect.');
+      if(newPassword.length<10||newPassword.length>200)return fail(res,400,'New password must be at least 10 characters.');
+      if(currentPassword===newPassword)return fail(res,400,'Choose a different new password.');
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        q.updatePassword.run(hashPassword(newPassword),a.user_id);
+        q.deleteOtherSessions.run(a.user_id,a.token_hash);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      return json(res,200,{ok:true,otherSessionsRevoked:true});
+    }
+    if(url.pathname==='/api/auth/sessions/revoke-others'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const result=q.deleteOtherSessions.run(a.user_id,a.token_hash);
+      return json(res,200,{ok:true,revoked:Number(result.changes||0)});
+    }
+    if(url.pathname==='/api/account'&&req.method==='DELETE'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      if(rateLimited(req,'account-delete',{limit:5,windowMs:30*60_000}))return fail(res,429,'Too many account deletion attempts. Try again later.');
+      const body=await bodyJson(req),password=String(body.password||''),confirmation=String(body.confirmation||''),u=q.userSecret.get(a.user_id);
+      if(confirmation!=='DELETE')return fail(res,400,'Type DELETE to confirm account deletion.');
+      if(!u||!verifyPassword(password,u.password_hash))return fail(res,403,'Password is incorrect.');
+      if(u.isOwner&&Number(q.otherUserCount.get(a.user_id)?.count||0)>0)return fail(res,400,'Delete the additional user accounts before deleting the owner account.');
+      q.deleteUser.run(a.user_id);
+      return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
     if(url.pathname==='/api/users'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return;
@@ -730,6 +760,27 @@ export const server=http.createServer(async(req,res)=>{
       const id=`user_${randomUUID()}`, createdAt=nowIso(), display='Money Tracker';
       q.createUser.run(id,email,display,hashPassword(password),a.default_currency,0,createdAt);
       return json(res,201,{user:{id,email,isOwner:false,createdAt}});
+    }
+    if(url.pathname.startsWith('/api/users/')){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      if(!a.is_owner)return fail(res,403,'Only the owner can manage user accounts.');
+      const parts=url.pathname.slice('/api/users/'.length).split('/').filter(Boolean),id=decodeURIComponent(parts[0]||''),action=parts[1]||'';
+      if(!/^user_[A-Za-z0-9_-]+$/.test(id))return fail(res,400,'Invalid user account.');
+      const target=q.userSecret.get(id);if(!target)return fail(res,404,'User account not found.');
+      if(target.isOwner)return fail(res,400,'The owner account cannot be changed through secondary-user controls.');
+      if(action==='password'&&req.method==='POST'){
+        const body=await bodyJson(req),password=String(body.password||'');
+        if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
+        db.exec('BEGIN IMMEDIATE');
+        try{q.updatePassword.run(hashPassword(password),id);q.deleteUserSessions.run(id);db.exec('COMMIT');}
+        catch(error){db.exec('ROLLBACK');throw error;}
+        return json(res,200,{ok:true,sessionsRevoked:true});
+      }
+      if(!action&&req.method==='DELETE'){
+        q.deleteUser.run(id);
+        return json(res,200,{ok:true});
+      }
+      return fail(res,405,'User account action not supported.');
     }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
@@ -1007,6 +1058,17 @@ export const server=http.createServer(async(req,res)=>{
       if(action==='reopen'&&req.method==='POST')return json(res,200,{item:bankFeed.reopen(a.user_id,id)});
       if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));
       return fail(res,405,'Bank feed action not supported.');
+    }
+    if(url.pathname==='/api/backup/full'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;
+      return json(res,200,exportFullBackup(db,a.user_id));
+    }
+    if(url.pathname==='/api/backup/full/restore'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req,140_000_000);
+      restoreFullBackup(db,a.user_id,body);
+      bankFeed.reconcileReferences(a.user_id);
+      return json(res,200,{ok:true,state:loadState(a.user_id)});
     }
     if(url.pathname==='/api/backup/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

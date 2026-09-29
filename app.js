@@ -862,6 +862,8 @@ function openTransferModal(existing=null){
     e.preventDefault();const fd=new FormData(e.currentTarget),from=fd.get('fromAccountId'),to=fd.get('toAccountId'),fa=Number(fd.get('fromAmount')),ta=Number(fd.get('toAmount'));
     if(!from||!to||from===to){showToast('Choose two different accounts.');return}
     if(!(fa>0)||!(ta>0)){showToast('Enter both transfer amounts.');return}
+    const fromAccount=state.accounts.find(account=>account.id===from),toAccount=state.accounts.find(account=>account.id===to);
+    if(fromAccount?.currency===toAccount?.currency&&toMinor(fa,fromAccount.currency)!==toMinor(ta,toAccount.currency)){showToast('Same-currency transfers must use the same amount.');return}
     const item={id:existing?.id||uid('entry'),type:'account_transfer',fromAccountId:from,toAccountId:to,fromAmount:fa,toAmount:ta,amount:fa,date:fd.get('date'),description:String(fd.get('description')||'').trim(),merchant:'',splits:[],createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
     const saved=await runMutation(version=>existing?updateEntry(existing.id,item,version):createEntry(item,version),existing?'Transfer updated.':'Transfer saved.');
     if(saved)closeModal();

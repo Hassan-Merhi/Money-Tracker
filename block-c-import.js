@@ -1,7 +1,7 @@
 import { loadState, saveState, uid, previewSpreadsheet } from './lib/store.js';
 import { escapeHtml } from './lib/utils.js';
 import { buildXlsx } from './lib/xlsx.js';
-import { applyImport, detectImportMode, guessHeader } from './lib/importer.js';
+import { applyImport, applyQuickPasteImport, detectImportMode, guessHeader, parseQuickPaste } from './lib/importer.js';
 import { analyzeLegacyWorkbook, applyLegacyWorkbook } from './lib/legacy-excel.js';
 
 let state=null,preview=null,sheetIndex=0,injecting=false,legacyAnalysis=null,manualMode=false;
@@ -20,13 +20,42 @@ function inject(){
   if(injecting)return;injecting=true;
   try{
     const settings=document.querySelector('.settings-grid');
-    if(settings&&!settings.querySelector('[data-import-card]')){const card=document.createElement('section');card.className='card settings-card';card.dataset.importCard='1';card.innerHTML='<h3>Import & migration</h3><p class="muted">Upload your existing money workbook exactly as it is. Known legacy layouts are recognized automatically; other Excel/CSV files can still use manual mapping.</p><div class="page-actions"><button class="btn primary" type="button" data-open-import>Import data</button><button class="btn" type="button" data-template>Download template</button></div>';card.querySelector('[data-open-import]').onclick=openImporter;card.querySelector('[data-template]').onclick=downloadTemplate;settings.prepend(card);}
+    if(settings&&!settings.querySelector('[data-import-card]')){const card=document.createElement('section');card.className='card settings-card';card.dataset.importCard='1';card.innerHTML='<h3>Import & migration</h3><p class="muted">Paste ordinary Excel rows straight into person statements, or use the full workbook importer for larger migrations.</p><div class="page-actions"><button class="btn primary" type="button" data-open-quick-import>Paste from Excel</button><button class="btn" type="button" data-open-import>Import workbook</button><button class="btn" type="button" data-template>Download template</button></div>';card.querySelector('[data-open-quick-import]').onclick=openQuickImporter;card.querySelector('[data-open-import]').onclick=openImporter;card.querySelector('[data-template]').onclick=downloadTemplate;settings.prepend(card);}
     const exportBtn=document.querySelector('#exportXlsx');
     const actions=exportBtn?.parentElement;
-    if(actions&&!actions.querySelector('[data-open-import]')){const b=document.createElement('button');b.className='btn';b.type='button';b.dataset.openImport='1';b.textContent='↑ Import data';b.onclick=openImporter;actions.prepend(b);}
+    if(actions&&!actions.querySelector('[data-open-import]')){const b=document.createElement('button');b.className='btn';b.type='button';b.dataset.openImport='1';b.textContent='↑ Import data';b.onclick=openImporter;actions.prepend(b);const quick=document.createElement('button');quick.className='btn';quick.type='button';quick.dataset.openQuickImport='1';quick.textContent='⌘ Paste Excel';quick.onclick=openQuickImporter;actions.prepend(quick);}
   }finally{injecting=false;}
 }
 new MutationObserver(inject).observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('DOMContentLoaded',inject);inject();
+
+function quickPasteEffect(row){
+  const amount=moneyText(row.Amount,row.Currency||state?.settings?.defaultCurrency||'USD');
+  return Number(row['Signed Amount'])>=0?`+${amount} they owe you`:`-${amount} taken / paid from them`;
+}
+function renderQuickPastePreview(){
+  const host=q('#impQuickPreview'),text=q('#impQuickPaste')?.value||'';if(!host)return;
+  const parsed=parseQuickPaste(text);
+  if(!String(text).trim()){host.innerHTML='<div class="imp-status">Paste rows above to preview them before importing.</div>';return;}
+  const sample=parsed.rows.slice(0,10),issues=parsed.errors.slice(0,6);
+  host.innerHTML=`<div class="imp-quick-summary"><strong>${parsed.rows.length}</strong> valid row${parsed.rows.length===1?'':'s'}${parsed.errors.length?` · <span>${parsed.errors.length} issue${parsed.errors.length===1?'':'s'}</span>`:''}</div>${sample.length?`<div class="imp-table"><table><thead><tr><th>Person</th><th>Amount</th><th>Direction</th><th>Merchant / source</th><th>Date</th></tr></thead><tbody>${sample.map(r=>`<tr><td>${escapeHtml(r.Person)}</td><td>${escapeHtml(String(r.Amount))}</td><td>${escapeHtml(quickPasteEffect(r))}</td><td>${escapeHtml(r.Merchant||'')}</td><td>${escapeHtml(r.Date)}</td></tr>`).join('')}</tbody></table></div>`:''}${issues.length?`<div class="imp-error"><strong>Fix or skip these rows:</strong><br>${issues.map(escapeHtml).join('<br>')}${parsed.errors.length>issues.length?'<br>…':''}</div>`:''}`;
+}
+async function openQuickImporter(){
+  try{state=await loadState();}catch(e){alert(e.message||'Could not load ledger.');return;}
+  closeImporter();
+  const wrap=document.createElement('div');wrap.className='imp-backdrop';wrap.innerHTML=`<div class="imp-shell imp-quick-shell" role="dialog" aria-modal="true"><header class="imp-head"><div><div class="imp-kicker">QUICK EXCEL PASTE</div><h2>Paste rows into person statements</h2><p>Copy from a normal Excel sheet and paste. No special workbook format needed.</p></div><button class="imp-close" aria-label="Close">×</button></header><div class="imp-body"><section class="imp-card"><div class="imp-quick-columns"><span>Name</span><span>Amount</span><span>Direction</span><span>Merchant / Source</span><span>Date</span><span>Description <em>optional</em></span><span>Currency <em>optional</em></span></div><div class="imp-note"><strong>Direction:</strong> use “They owe me” to add to the person’s balance, or “Took from them” / “They paid me” to subtract from it. Date accepts YYYY-MM-DD or DD/MM/YYYY. A header row is optional; without one, use the column order shown above.</div><textarea id="impQuickPaste" class="imp-quick-paste" spellcheck="false" placeholder="Name&#9;Amount&#9;Direction&#9;Merchant / Source&#9;Date&#9;Description&#9;Currency&#10;Adam&#9;120&#9;They owe me&#9;Amazon&#9;29/09/2026&#9;Order 123&#9;USD&#10;Adam&#9;40&#9;Took from them&#9;Cash&#9;30/09/2026&#9;Partial payment&#9;USD"></textarea><div class="imp-actions imp-quick-actions"><button class="btn" type="button" id="impQuickPreviewBtn">Preview</button><button class="btn primary" type="button" id="impQuickApply">Import valid rows</button></div><div id="impQuickPreview"><div class="imp-status">Paste rows above to preview them before importing.</div></div></section></div></div>`;document.body.appendChild(wrap);
+  wrap.querySelector('.imp-close').onclick=closeImporter;wrap.addEventListener('click',e=>{if(e.target===wrap)closeImporter();});q('#impQuickPreviewBtn').onclick=renderQuickPastePreview;q('#impQuickApply').onclick=reviewQuickPaste;q('#impQuickPaste').addEventListener('paste',()=>setTimeout(renderQuickPastePreview,0));
+}
+async function reviewQuickPaste(){
+  const text=q('#impQuickPaste')?.value||'';if(!text.trim()){alert('Paste Excel rows first.');return;}
+  let prepared;try{prepared=applyQuickPasteImport({state,text,uidFactory:uid});}catch(e){alert(e.message||'Could not prepare the pasted rows.');return;}
+  const r=prepared.result,parts=[r.people?`${r.people} new people`:'',r.entries?`${r.entries} statement entries`:'',r.skipped?`${r.skipped} skipped`:''].filter(Boolean),issues=(r.errors||[]).slice(0,8);
+  if(!r.entries){alert(`Nothing to import.${issues.length?`\n\n${issues.join('\n')}`:''}`);return;}
+  if(!confirm(`Import these pasted rows?\n\n${parts.join(', ')}.${issues.length?`\n\nRows with issues will be skipped:\n${issues.join('\n')}`:''}\n\nEach valid row will appear on that person's statement.`))return;
+  const btn=q('#impQuickApply'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
+  try{state=await saveState(prepared.state);alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
+  catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the paste importer and review again.':(e.message||'Could not save import.'));}
+  finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
+}
 
 async function openImporter(){
   try{state=await loadState();}catch(e){alert(e.message||'Could not load ledger.');return;}

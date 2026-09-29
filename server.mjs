@@ -714,9 +714,10 @@ function staticFile(req,res,url){
   securityHeaders(res); res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream'); res.setHeader('Cache-Control',extname(file)==='.html'?'no-cache':'public, max-age=300'); res.writeHead(200);res.end(readFileSync(file));
 }
 
+let recurringTimer=null;
 if(process.env.NODE_ENV!=='test'){
   try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}
-  const recurringTimer=setInterval(()=>{try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}},60*60*1000);
+  recurringTimer=setInterval(()=>{try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}},60*60*1000);
   recurringTimer.unref?.();
 }
 
@@ -766,7 +767,7 @@ export const server=http.createServer(async(req,res)=>{
     }
 
     if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
-      const a=requireAuth(req,res,{csrf:true}); if(!a)return; q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return; securityOps.event(a.user_id,'logout');q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
     if(url.pathname==='/api/auth/password'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
@@ -796,6 +797,7 @@ export const server=http.createServer(async(req,res)=>{
       if(confirmation!=='DELETE')return fail(res,400,'Type DELETE to confirm account deletion.');
       if(!u||!verifyPassword(password,u.password_hash))return fail(res,403,'Password is incorrect.');
       if(u.isOwner&&Number(q.otherUserCount.get(a.user_id)?.count||0)>0)return fail(res,400,'Delete the additional user accounts before deleting the owner account.');
+      securityOps.event(a.user_id,'account_deleted');
       q.deleteUser.run(a.user_id);
       return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
@@ -829,9 +831,11 @@ export const server=http.createServer(async(req,res)=>{
         db.exec('BEGIN IMMEDIATE');
         try{q.updatePassword.run(hashPassword(password),id);q.deleteUserSessions.run(id);db.exec('COMMIT');}
         catch(error){db.exec('ROLLBACK');throw error;}
+        securityOps.event(a.user_id,'secondary_user_password_reset',{detail:{targetUserId:id}});
         return json(res,200,{ok:true,sessionsRevoked:true});
       }
       if(!action&&req.method==='DELETE'){
+        securityOps.event(a.user_id,'secondary_user_deleted',{detail:{targetUserId:id}});
         q.deleteUser.run(id);
         return json(res,200,{ok:true});
       }
@@ -1201,5 +1205,16 @@ export const server=http.createServer(async(req,res)=>{
 });
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port=Number(process.env.PORT||4173); server.listen(port,'0.0.0.0',()=>console.log(`Money Owed Tracker listening on http://0.0.0.0:${port}`));
+  const port=Number(process.env.PORT||4173);
+  server.listen(port,'0.0.0.0',()=>console.log(`Money Owed Tracker listening on http://0.0.0.0:${port}`));
+  let shuttingDown=false;
+  const shutdown=signal=>{
+    if(shuttingDown)return;shuttingDown=true;
+    console.log('LANE_C_SHUTDOWN '+JSON.stringify({signal}));
+    if(recurringTimer)clearInterval(recurringTimer);
+    const hard=setTimeout(()=>process.exit(1),10_000);hard.unref?.();
+    server.close(()=>{try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}try{db.close();}catch{}clearTimeout(hard);process.exit(0);});
+  };
+  process.once('SIGTERM',()=>shutdown('SIGTERM'));
+  process.once('SIGINT',()=>shutdown('SIGINT'));
 }

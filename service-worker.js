@@ -1,11 +1,48 @@
-const CACHE='money-tracker-debt-v8';
-const ASSETS=['/','/index.html','/styles.css','/app.js','/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css','/block-f-bank-feed.js','/block-f-bank-feed.css','/lib/bank-feed.js','/block-g-insights.js','/block-g-insights.css','/lib/insights.js','/manifest.webmanifest','/assets/icon.svg','/lib/ledger.js','/lib/money.js','/lib/store.js','/lib/recurring.js','/lib/recurring-rule-form.js','/lib/utils.js','/lib/reporting.js','/lib/xlsx.js','/lib/importer.js','/lib/legacy-excel.js','/lib/pdf.js','/lib/reports-ui.js'];
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
-self.addEventListener('fetch',e=>{
-  if(e.request.method!=='GET'||new URL(e.request.url).pathname.startsWith('/api/'))return;
-  if(e.request.mode==='navigate'){
-    e.respondWith(fetch(e.request).catch(()=>caches.match('/index.html'))); return;
+const CACHE='money-tracker-debt-v9';
+const CORE=[
+  '/','/index.html','/styles.css','/app.js',
+  '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
+  '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
+  '/manifest.webmanifest','/assets/icon.svg',
+  '/lib/ledger.js','/lib/money.js','/lib/store.js','/lib/utils.js','/lib/pwa.js',
+  '/lib/recurring.js','/lib/recurring-rule-form.js','/lib/bank-feed.js','/lib/insights.js',
+  '/lib/reporting.js','/lib/xlsx.js','/lib/importer.js','/lib/legacy-excel.js','/lib/pdf.js','/lib/reports-ui.js'
+];
+
+self.addEventListener('install',event=>{
+  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
+});
+
+self.addEventListener('activate',event=>{
+  event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));
+});
+
+self.addEventListener('message',event=>{
+  if(event.data?.type==='SKIP_WAITING')self.skipWaiting();
+});
+
+async function networkFirst(request){
+  try{
+    const response=await fetch(request);
+    if(response?.ok){const cache=await caches.open(CACHE);cache.put(request,response.clone()).catch(()=>{});}
+    return response;
+  }catch{
+    return await caches.match(request)||await caches.match('/index.html')||Response.error();
   }
-  e.respondWith(caches.match(e.request).then(cached=>cached||fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r;})));
+}
+
+async function staleWhileRevalidate(request){
+  const cached=await caches.match(request);
+  const fetchPromise=fetch(request).then(async response=>{
+    if(response?.ok){const cache=await caches.open(CACHE);cache.put(request,response.clone()).catch(()=>{});}
+    return response;
+  }).catch(()=>null);
+  return cached||await fetchPromise||Response.error();
+}
+
+self.addEventListener('fetch',event=>{
+  const url=new URL(event.request.url);
+  if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
+  if(event.request.mode==='navigate'){event.respondWith(networkFirst(event.request));return;}
+  event.respondWith(staleWhileRevalidate(event.request));
 });

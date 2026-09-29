@@ -17,7 +17,7 @@
     "finance",
     "productivity"
   ],
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "icons": [
     {
       "src": "/assets/icon.svg",

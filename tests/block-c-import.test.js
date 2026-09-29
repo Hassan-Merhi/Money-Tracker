@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildXlsx } from '../lib/xlsx.js';
 import { parseWorkbook } from '../lib/xlsx-import.js';
-import { applyImport, detectImportMode, guessHeader, parseSplitDetails } from '../lib/importer.js';
+import { applyImport, applyQuickPasteImport, dateValue, detectImportMode, guessHeader, parseQuickPaste, parseSplitDetails } from '../lib/importer.js';
 
 const baseState=()=>({version:1,settings:{displayName:'Ledger',defaultCurrency:'USD'},people:[],accounts:[],entries:[]});
 function ids(){let n=0;return prefix=>`${prefix}_${++n}`;}
@@ -139,4 +139,72 @@ test('transaction import rejects unsupported currency precision before save',()=
   assert.equal(out.result.entries,0);
   assert.equal(out.result.skipped,1);
   assert.match(out.result.errors[0],/at most 2 decimal/);
+});
+
+
+test('quick Excel paste accepts normal tab-separated rows with an optional header',()=>{
+  const parsed=parseQuickPaste([
+    'Name\tAmount\tDirection\tMerchant / Source\tDate\tDescription\tCurrency',
+    'Adam\t120.50\tThey owe me\tAmazon\t29/09/2026\tOrder 123\tUSD',
+    'Adam\t40\tTook from them\tCash\t30/09/2026\tPartial payment\tUSD'
+  ].join('\n'));
+  assert.equal(parsed.headerDetected,true);
+  assert.equal(parsed.totalRows,2);
+  assert.equal(parsed.errors.length,0);
+  assert.deepEqual(parsed.rows.map(row=>row['Signed Amount']),[120.5,-40]);
+  assert.deepEqual(parsed.rows.map(row=>row.Date),['2026-09-29','2026-09-30']);
+  assert.deepEqual(parsed.rows.map(row=>row.Merchant),['Amazon','Cash']);
+});
+
+test('quick Excel paste supports positional rows when the header is not copied',()=>{
+  const parsed=parseQuickPaste('Alice\t15\tThey paid me\tCash\t2026-09-29\tRepayment\tUSD');
+  assert.equal(parsed.headerDetected,false);
+  assert.equal(parsed.rows.length,1);
+  assert.equal(parsed.rows[0].Person,'Alice');
+  assert.equal(parsed.rows[0]['Signed Amount'],-15);
+});
+
+test('quick paste applies directly to person statements and safely skips exact re-imports',()=>{
+  const uid=ids(),text=[
+    'Name\tAmount\tDirection\tMerchant / Source\tDate',
+    'Adam\t120\tThey owe me\tAmazon\t29/09/2026',
+    'Adam\t40\tTook from them\tCash\t30/09/2026'
+  ].join('\n');
+  let out=applyQuickPasteImport({state:baseState(),text,uidFactory:uid,nowIso:()=> '2026-09-29T10:00:00.000Z'});
+  assert.equal(out.result.people,1);
+  assert.equal(out.result.entries,2);
+  assert.deepEqual(out.state.entries.map(e=>e.type),['person_adjustment','person_adjustment']);
+  assert.deepEqual(out.state.entries.map(e=>e.signedAmount),[120,-40]);
+  assert.deepEqual(out.state.entries.map(e=>e.merchant),['Amazon','Cash']);
+  out=applyQuickPasteImport({state:out.state,text,uidFactory:uid,nowIso:()=> '2026-09-29T10:05:00.000Z'});
+  assert.equal(out.result.entries,0);
+  assert.equal(out.result.skipped,2);
+});
+
+test('person-adjustment duplicate detection keeps opposite directions as separate rows',()=>{
+  const rows=[
+    {Date:'2026-09-29',Type:'person_adjustment',Person:'Adam',Amount:25,Currency:'USD',Direction:'They owe me',Merchant:'Cash'},
+    {Date:'2026-09-29',Type:'person_adjustment',Person:'Adam',Amount:25,Currency:'USD',Direction:'I owe them',Merchant:'Cash'}
+  ];
+  const out=applyImport({state:baseState(),rows,mode:'transactions',mapping:{date:'Date',type:'Type',person:'Person',amount:'Amount',currency:'Currency',direction:'Direction',merchant:'Merchant'},uidFactory:ids()});
+  assert.equal(out.result.entries,2);
+  assert.deepEqual(out.state.entries.map(e=>e.signedAmount),[25,-25]);
+});
+
+test('quick paste reports invalid direction and date instead of silently guessing',()=>{
+  const parsed=parseQuickPaste([
+    'Name\tAmount\tDirection\tMerchant / Source\tDate',
+    'Adam\t20\tMaybe\tAmazon\t29/09/2026',
+    'Bob\t10\tThey owe me\tStore\tnot-a-date'
+  ].join('\n'));
+  assert.equal(parsed.rows.length,0);
+  assert.equal(parsed.errors.length,2);
+  assert.match(parsed.errors[0],/direction/i);
+  assert.match(parsed.errors[1],/valid date/i);
+});
+
+test('date parser accepts ISO and day-first dates used in ordinary spreadsheets',()=>{
+  assert.equal(dateValue('2026-09-29'),'2026-09-29');
+  assert.equal(dateValue('29/09/2026'),'2026-09-29');
+  assert.equal(dateValue('05/04/2026'),'2026-04-05');
 });

@@ -1,4 +1,4 @@
-const CACHE='money-tracker-debt-v10';
+const CACHE='money-tracker-debt-v11';
 const CORE=[
   '/','/index.html','/styles.css','/theme-init.js','/app.js',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
@@ -31,18 +31,23 @@ async function networkFirst(request){
   }
 }
 
-async function staleWhileRevalidate(request){
-  const cached=await caches.match(request);
-  const fetchPromise=fetch(request).then(async response=>{
-    if(response?.ok){const cache=await caches.open(CACHE);cache.put(request,response.clone()).catch(()=>{});}
+function fetchAndCache(request){
+  return fetch(request).then(async response=>{
+    if(response?.ok){const cache=await caches.open(CACHE);await cache.put(request,response.clone()).catch(()=>{});}
     return response;
   }).catch(()=>null);
-  return cached||await fetchPromise||Response.error();
+}
+
+async function staleWhileRevalidate(request,revalidatePromise){
+  const cached=await caches.match(request);
+  return cached||await revalidatePromise||Response.error();
 }
 
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
   if(event.request.mode==='navigate'){event.respondWith(networkFirst(event.request));return;}
-  event.respondWith(staleWhileRevalidate(event.request));
+  const revalidatePromise=fetchAndCache(event.request);
+  event.waitUntil(revalidatePromise.then(()=>undefined));
+  event.respondWith(staleWhileRevalidate(event.request,revalidatePromise));
 });

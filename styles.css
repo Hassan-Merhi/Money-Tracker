@@ -154,3 +154,13 @@ html[data-theme="dark"] .g-budget-ok{background:var(--green-bg);color:var(--gree
 .runtime-grid>div{padding:12px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line);display:grid;gap:3px}
 .runtime-grid strong{font-size:15px}.runtime-grid span{color:var(--muted);font-size:11px}
 @media(max-width:760px){.connection-pill{display:none}.pwa-status-grid,.runtime-grid{grid-template-columns:1fr}.security-row{align-items:flex-start}}
+
+
+/* Lane D — accessibility and interaction quality */
+.skip-link{position:fixed;top:8px;left:8px;z-index:300;padding:10px 14px;border-radius:10px;background:var(--panel);color:var(--text);border:2px solid var(--blue);font-weight:800;text-decoration:none;transform:translateY(-180%);transition:transform .12s ease}
+.skip-link:focus{transform:translateY(0)}
+.person-card{color:inherit;text-decoration:none}
+.account-card[role="button"]{outline-offset:3px}
+:where(button,a,input,select,textarea,[role="button"]):focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+@media(pointer:coarse){.nav button,.mobile-nav button,.icon-btn,.sidebar-logout{min-width:44px;min-height:44px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}

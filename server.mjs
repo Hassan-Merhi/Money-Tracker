@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -10,7 +10,7 @@ import { createRecurringReminderService, safeTimeZone } from './lib/recurring-wo
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
-import { exportFullBackup, restoreFullBackup } from './lib/full-backup.js';
+import { exportFullBackup, restoreFullBackup, DATA_LIMITS } from './lib/full-backup.js';
 import { normalizeMoney, toMinor } from './lib/money.js';
 import { createSecurityOps } from './lib/security-ops.js';
 import { createRuntimeOps } from './lib/runtime-ops.js';
@@ -199,6 +199,7 @@ const q = {
   entryCount: db.prepare('SELECT COUNT(*) AS count FROM entries WHERE user_id=?'),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
+  attachmentUsage: db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(size_bytes),0) AS bytes FROM attachments WHERE user_id=?'),
   attachmentRefs: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? ORDER BY created_at'),
   attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
   attachmentById: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,data,created_at AS createdAt FROM attachments WHERE user_id=? AND id=?'),
@@ -230,6 +231,7 @@ console.log('EXACT_MONEY_READY '+JSON.stringify({version:exactMoneySchemaVersion
 console.log('LANE_A_READY '+JSON.stringify({waves:[2,3,4,5],ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true}));
 console.log('LANE_B_READY '+JSON.stringify({waves:[6,8,9,10],appModes:true,serverRecurringReminders:true,bankFeedHistory:true,reportingVersion:2}));
 console.log('LANE_C_READY '+JSON.stringify({waves:[7,13,14],pwaResilience:true,securityEvents:true,sessionControl:true,runtimeDiagnostics:true,manualSnapshots:true}));
+console.log('LANE_D_READY '+JSON.stringify({waves:[11,12,15],accessibility:true,scaleHardening:true,coherentRecoveryLimits:true,releaseQa:true}));
 
 if (process.env.WAVE0_BACKUP_ON_START === '1') {
   const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});
@@ -356,7 +358,7 @@ function validateState(input, user) {
   const people=Array.isArray(input.people)?input.people:[];
   const accounts=Array.isArray(input.accounts)?input.accounts:[];
   const entries=Array.isArray(input.entries)?input.entries:[];
-  if(people.length>10000||accounts.length>1000||entries.length>50000) throw new Error('Ledger is too large.');
+  if(people.length>DATA_LIMITS.people||accounts.length>DATA_LIMITS.accounts||entries.length>DATA_LIMITS.entries) throw new Error('Ledger is too large.');
   const pSeen=new Set(), aSeen=new Set(), eSeen=new Set();
   const cleanPeople=people.map(p=>{
     if(!idOk(p.id,'person')||pSeen.has(p.id)) throw new Error('Invalid person record.'); pSeen.add(p.id);
@@ -712,8 +714,11 @@ function staticFile(req,res,url){
   const safe=normalize(p).replace(/^(\.\.[/\\])+/, ''); const file=join(ROOT,safe);
   if(!file.startsWith(ROOT)||!existsSync(file)||file.includes(`${join(ROOT,'data')}`)){fail(res,404,'Not found.');return;}
   securityHeaders(res);res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');
-  const base=String(file).split(/[\\/]/).at(-1);res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
+  const base=String(file).split(/[\\/]/).at(-1),stats=statSync(file),etag=`W/"${stats.size}-${Math.floor(stats.mtimeMs)}"`;
+  res.setHeader('ETag',etag);
+  res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
   if(base==='service-worker.js')res.setHeader('Service-Worker-Allowed','/');
+  if(String(req.headers['if-none-match']||'')===etag){res.writeHead(304);res.end();return;}
   res.writeHead(200);res.end(readFileSync(file));
 }
 
@@ -728,7 +733,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,pwaCacheVersion:9,recurringWorker:recurringReminders.status(),runtime});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:11,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -860,7 +865,7 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/people'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
-      if(Number(q.personCount.get(a.user_id)?.count||0)>=10000)return fail(res,400,'You can keep up to 10,000 people.');
+      if(Number(q.personCount.get(a.user_id)?.count||0)>=DATA_LIMITS.people)return fail(res,400,`You can keep up to ${DATA_LIMITS.people.toLocaleString('en-US')} people.`);
       const person=cleanPersonInput(body);
       if(q.personById.get(a.user_id,person.id))return fail(res,409,'That person id already exists.');
       withLedgerMutation(a.user_id,expected,()=>{
@@ -868,7 +873,7 @@ export const server=http.createServer(async(req,res)=>{
         const openingRaw=body.openingBalance??body.opening??0,opening=finite(openingRaw);
         if(opening===null||opening<0)throw ledgerError('Opening balance must be zero or greater.');
         if(opening>0){
-          if(Number(q.entryCount.get(a.user_id)?.count||0)>=50000)throw ledgerError('You can keep up to 50,000 transactions.');
+          if(Number(q.entryCount.get(a.user_id)?.count||0)>=DATA_LIMITS.entries)throw ledgerError(`You can keep up to ${DATA_LIMITS.entries.toLocaleString('en-US')} transactions.`);
           const currency=String(body.currency||a.default_currency||'USD').toUpperCase();
           if(!validCurrency(currency))throw ledgerError('Choose a valid currency.');
           const amount=exactMoney(opening,currency,{allowNegative:false,allowZero:false});
@@ -907,7 +912,7 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/accounts'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
-      if(Number(q.accountCount.get(a.user_id)?.count||0)>=1000)return fail(res,400,'You can keep up to 1,000 accounts.');
+      if(Number(q.accountCount.get(a.user_id)?.count||0)>=DATA_LIMITS.accounts)return fail(res,400,`You can keep up to ${DATA_LIMITS.accounts.toLocaleString('en-US')} accounts.`);
       const account=cleanAccountInput(body,{defaultCurrency:a.default_currency});
       if(q.accountById.get(a.user_id,account.id))return fail(res,409,'That account id already exists.');
       withLedgerMutation(a.user_id,expected,()=>{
@@ -945,7 +950,7 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname==='/api/entries'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
-      if(Number(q.entryCount.get(a.user_id)?.count||0)>=50000)return fail(res,400,'You can keep up to 50,000 transactions.');
+      if(Number(q.entryCount.get(a.user_id)?.count||0)>=DATA_LIMITS.entries)return fail(res,400,`You can keep up to ${DATA_LIMITS.entries.toLocaleString('en-US')} transactions.`);
       const entry=cleanLedgerEntry(a,body);
       if(q.entryExists.get(a.user_id,entry.id))return fail(res,409,'That transaction id already exists.');
       withLedgerMutation(a.user_id,expected,()=>insertLedgerEntry(a.user_id,entry));
@@ -986,6 +991,9 @@ export const server=http.createServer(async(req,res)=>{
       if(!name||!ALLOWED_ATTACHMENT_TYPES.has(mimeType))return fail(res,400,'Use a JPG, PNG, WebP, GIF, PDF, or text file.');
       let data; try{data=Buffer.from(String(b.data||''),'base64');}catch{return fail(res,400,'Invalid attachment data.');}
       if(!data.length||data.length>MAX_ATTACHMENT_BYTES)return fail(res,413,'Attachments must be 8 MB or smaller.');
+      const usage=q.attachmentUsage.get(a.user_id);
+      if(Number(usage?.count||0)>=DATA_LIMITS.attachments)return fail(res,413,`You can keep up to ${DATA_LIMITS.attachments.toLocaleString('en-US')} attachments.`);
+      if(Number(usage?.bytes||0)+data.length>DATA_LIMITS.attachmentBytes)return fail(res,413,`Attachment storage is limited to ${Math.floor(DATA_LIMITS.attachmentBytes/1024/1024)} MB per account.`);
       const id=`attachment_${randomUUID()}`, createdAt=nowIso();
       q.insertAttachment.run(a.user_id,id,entryId,name,mimeType,data.length,data,createdAt);
       return json(res,201,{attachment:{id,entryId,name,mimeType,sizeBytes:data.length,createdAt}});
@@ -1019,7 +1027,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/recurring'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      if(Number(q.recurringCount.get(a.user_id)?.count||0)>=500)return fail(res,400,'You can keep up to 500 recurring schedules.');
+      if(Number(q.recurringCount.get(a.user_id)?.count||0)>=DATA_LIMITS.recurringRules)return fail(res,400,`You can keep up to ${DATA_LIMITS.recurringRules.toLocaleString('en-US')} recurring schedules.`);
       const body=await bodyJson(req); let clean;
       try{clean=cleanRecurringRule(body,a.user_id,a.default_currency);}catch(error){return fail(res,400,error.message);}
       const stamp=nowIso();
@@ -1142,7 +1150,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/ops/status'&&req.method==='GET'){
       const a=requireAuth(req,res);if(!a)return;if(!a.is_owner)return fail(res,403,'Only the owner can view operational diagnostics.');
-      return json(res,200,{runtime:runtimeOps.diagnostics({force:true}),recurringWorker:recurringReminders.status(),laneCVersion:1});
+      return json(res,200,{runtime:runtimeOps.diagnostics({force:true}),recurringWorker:recurringReminders.status(),laneCVersion:1,laneDVersion:1});
     }
     if(url.pathname==='/api/ops/snapshot'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;if(!a.is_owner)return fail(res,403,'Only the owner can create a server snapshot.');
@@ -1156,7 +1164,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/backup/full/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
-      const body=await bodyJson(req,140_000_000);
+      const body=await bodyJson(req,DATA_LIMITS.fullBackupBodyBytes);
       restoreFullBackup(db,a.user_id,body);
       bankFeed.reconcileReferences(a.user_id);securityOps.event(a.user_id,'complete_backup_restored');
       return json(res,200,{ok:true,state:loadState(a.user_id)});

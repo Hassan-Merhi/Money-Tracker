@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-test('Lane C PWA cache v10 includes the resilience controller and core finance modules',()=>{
+test('current PWA cache includes the Lane C resilience controller and core finance modules',()=>{
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
-  assert.match(sw,/money-tracker-debt-v10/);
+  assert.match(sw,/money-tracker-debt-v11/);
   assert.match(sw,/\/lib\/pwa\.js/);
   assert.match(sw,/SKIP_WAITING/);
   assert.match(sw,/networkFirst/);

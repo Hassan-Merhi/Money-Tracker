@@ -14,6 +14,10 @@ let user = null;
 let route = parseRoute();
 let toastTimer;
 let saving = false;
+let routeFocusPending = false;
+let modalReturnFocus = null;
+let modalSequence = 0;
+let a11yFieldSequence = 0;
 let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false};
 
 const app = document.querySelector('#app');
@@ -48,7 +52,14 @@ function parseRoute() {
   return { page, params: new URLSearchParams(query) };
 }
 
-window.addEventListener('hashchange', () => { route = parseRoute(); if (state) render(); });
+window.addEventListener('hashchange', () => { route = parseRoute(); routeFocusPending=true; if (state) render(); });
+document.querySelector('.skip-link')?.addEventListener('click',event=>{
+  event.preventDefault();
+  const main=document.querySelector('#main');
+  if(!main)return;
+  main.focus({preventScroll:true});
+  main.scrollIntoView({block:'start'});
+});
 
 async function runMutation(action,message='') {
   if (saving) { showToast('Saving the previous change…'); return false; }
@@ -75,9 +86,21 @@ function showToast(message) {
   clearTimeout(toastTimer);
   const el = document.createElement('div');
   el.className = 'toast';
+  el.setAttribute('role','status');
+  el.setAttribute('aria-live','polite');
+  el.setAttribute('aria-atomic','true');
   el.textContent = message;
   document.body.appendChild(el);
   toastTimer = setTimeout(() => el.remove(), 2600);
+}
+
+function wireFieldLabels(root=document){
+  root.querySelectorAll?.('.field').forEach(field=>{
+    const label=field.querySelector('label'),control=field.querySelector('input,select,textarea');
+    if(!label||!control)return;
+    if(!control.id)control.id='mot-field-'+(++a11yFieldSequence);
+    if(!label.htmlFor)label.htmlFor=control.id;
+  });
 }
 
 function iconFor(page) {
@@ -113,18 +136,18 @@ function render() {
     <div class="layout">
       <aside class="sidebar">
         <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Who owes who</small></div></div>
-        <nav class="nav">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <nav class="nav" aria-label="Primary navigation">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
         <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>${advanced?'Advanced money mode · accounts, bank feed & schedules':'Simple mode · focused debt tracking'}<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
-          <div class="topbar-title"><h2>${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
+          <div class="topbar-title"><h2 id="pageHeading" tabindex="-1">${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
+          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
         </header>
-        <main class="main" id="main"></main>
+        <main class="main" id="main" aria-labelledby="pageHeading" tabindex="-1"></main>
       </section>
       <button class="mobile-fab" id="mobileQuickEntry" aria-label="Add debt transaction">＋</button>
-      <nav class="mobile-nav" style="grid-template-columns:repeat(${visiblePages.length},1fr)">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav" aria-label="Mobile navigation" style="grid-template-columns:repeat(${visiblePages.length},1fr)">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
@@ -146,6 +169,11 @@ function render() {
   else if (route.page === 'settings') renderSettings(main);
   else if (route.page === 'person') renderPerson(main, route.params.get('id'));
   else { location.hash = '#dashboard'; }
+  wireFieldLabels(main);
+  if(routeFocusPending){
+    routeFocusPending=false;
+    requestAnimationFrame(()=>document.querySelector('#pageHeading')?.focus());
+  }
 }
 
 function currencyTotalsMarkup(totals, key, fallback='0') {
@@ -209,7 +237,7 @@ function renderPeople(main) {
 function personCard(p,balance) {
   const values=Object.values(balance);
   const netSign=values.reduce((a,b)=>a+b,0);
-  return `<div class="card person-card" data-person="${p.id}"><div class="person-top"><div style="display:flex;gap:11px;align-items:center"><div class="avatar">${escapeHtml(p.name.slice(0,2).toUpperCase())}</div><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.note||'Personal statement')}</p></div></div><span class="pill">View</span></div><div class="balance ${netSign>0?'positive':netSign<0?'negative':''}">${balancesText(balance)}</div></div>`;
+  return `<a class="card person-card" data-person="${p.id}" href="#person?id=${encodeURIComponent(p.id)}"><div class="person-top"><div style="display:flex;gap:11px;align-items:center"><div class="avatar">${escapeHtml(p.name.slice(0,2).toUpperCase())}</div><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.note||'Personal statement')}</p></div></div><span class="pill">View</span></div><div class="balance ${netSign>0?'positive':netSign<0?'negative':''}">${balancesText(balance)}</div></a>`;
 }
 
 function renderPerson(main, personId) {
@@ -235,18 +263,22 @@ function statementTable(entries){
 function renderAccounts(main) {
   const balances=accountBalances(state.entries,state.accounts);
   main.innerHTML=`<div class="panel-head"><div><p class="muted">Opening balance + all linked money movements.</p></div><div class="page-actions"><button class="btn" id="transferBtn">⇄ Transfer</button><button class="btn primary" id="addAccount">＋ Add account</button></div></div>
-  ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
+  ${state.accounts.length?`<div class="accounts-grid">${state.accounts.map(a=>`<div class="card account-card" data-account="${a.id}" role="button" tabindex="0"><div class="account-top"><div><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(a.type)} · ${escapeHtml(a.currency)}</p></div><span class="pill">${a.type==='cash'?'Cash':'Account'}</span></div><div class="balance ${balances[a.id]<0?'negative':''}">${money(balances[a.id]||0,a.currency)}</div><div class="muted tiny">Opening: ${money(a.openingBalance||0,a.currency)}</div></div>`).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">🏦</div><h3>Add your bank accounts and cash</h3><p>When you pay for someone, receive money, borrow, repay or transfer funds, the linked account balance updates automatically.</p><button class="btn primary" id="emptyAddAccount">＋ Add account</button></div>`}`;
   main.querySelector('#addAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#emptyAddAccount')?.addEventListener('click',()=>openAccountModal());
   main.querySelector('#transferBtn')?.addEventListener('click',()=>openTransferModal());
-  main.querySelectorAll('[data-account]').forEach(c=>c.addEventListener('click',()=>openAccountDetail(c.dataset.account)));
+  main.querySelectorAll('[data-account]').forEach(c=>{
+    const open=()=>openAccountDetail(c.dataset.account);
+    c.addEventListener('click',open);
+    c.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open();}});
+  });
 }
 
 function openAccountDetail(accountId){
   const a=state.accounts.find(x=>x.id===accountId); if(!a)return;
   const balances=accountBalances(state.entries,state.accounts);
   const entries=state.entries.filter(e=>e.accountId===a.id||e.fromAccountId===a.id||e.toAccountId===a.id).sort((x,y)=>new Date(y.date)-new Date(x.date)||new Date(y.createdAt)-new Date(x.createdAt));
-  openModal(`${escapeHtml(a.name)} · ${money(balances[a.id]||0,a.currency)}`, `${entries.length?transactionTable(entries,{compact:true}):'<div class="empty">No activity yet.</div>'}<div style="margin-top:16px;display:flex;gap:8px"><button class="btn" id="modalEditAccount">Edit account</button><button class="btn danger" id="modalDeleteAccount">Delete account</button></div>`, null, false);
+  openModal(`${a.name} · ${money(balances[a.id]||0,a.currency)}`, `${entries.length?transactionTable(entries,{compact:true}):'<div class="empty">No activity yet.</div>'}<div style="margin-top:16px;display:flex;gap:8px"><button class="btn" id="modalEditAccount">Edit account</button><button class="btn danger" id="modalDeleteAccount">Delete account</button></div>`, null, false);
   document.querySelector('#modalEditAccount')?.addEventListener('click',()=>{closeModal();openAccountModal(a)});
   document.querySelector('#modalDeleteAccount')?.addEventListener('click',()=>deleteAccount(a.id));
 }
@@ -529,9 +561,41 @@ function openTransferModal(existing=null){
 }
 
 function openModal(title,body,onSave=null,showFooter=true){
-  closeModal();const back=document.createElement('div');back.className='modal-backdrop';back.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>${title}</h3><button class="icon-btn" id="modalClose" aria-label="Close">×</button></div><div class="modal-body">${body}</div>${showFooter?`<div class="modal-foot"><button class="btn" id="modalCancel">Cancel</button><button class="btn primary" id="modalSave">Save</button></div>`:''}</div>`;document.body.appendChild(back);back.querySelector('#modalClose')?.addEventListener('click',closeModal);back.querySelector('#modalCancel')?.addEventListener('click',closeModal);back.querySelector('#modalSave')?.addEventListener('click',()=>onSave?.());back.addEventListener('click',e=>{if(e.target===back)closeModal()});
+  const existing=document.querySelector('.modal-backdrop');
+  const active=document.activeElement instanceof HTMLElement?document.activeElement:null;
+  const previousReturn=modalReturnFocus;
+  if(existing)closeModal(false);
+  modalReturnFocus=previousReturn?.isConnected?previousReturn:(active?.isConnected?active:null);
+  const titleId='modal-title-'+(++modalSequence),back=document.createElement('div');
+  back.className='modal-backdrop';
+  back.innerHTML=`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}" tabindex="-1"><div class="modal-head"><h3 id="${titleId}">${escapeHtml(title)}</h3><button class="icon-btn" id="modalClose" aria-label="Close">×</button></div><div class="modal-body">${body}</div>${showFooter?`<div class="modal-foot"><button class="btn" id="modalCancel">Cancel</button><button class="btn primary" id="modalSave">Save</button></div>`:''}</div>`;
+  document.body.appendChild(back);
+  wireFieldLabels(back);
+  const dialog=back.querySelector('.modal');
+  const focusable=()=>[...dialog.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(el=>!el.hidden);
+  back.querySelector('#modalClose')?.addEventListener('click',()=>closeModal());
+  back.querySelector('#modalCancel')?.addEventListener('click',()=>closeModal());
+  back.querySelector('#modalSave')?.addEventListener('click',()=>onSave?.());
+  back.addEventListener('click',event=>{if(event.target===back)closeModal();});
+  back.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){event.preventDefault();closeModal();return;}
+    if(event.key!=='Tab')return;
+    const items=focusable();
+    if(!items.length){event.preventDefault();dialog.focus();return;}
+    const first=items[0],last=items.at(-1);
+    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+  });
+  requestAnimationFrame(()=>focusable()[0]?.focus()||dialog.focus());
 }
-function closeModal(){document.querySelector('.modal-backdrop')?.remove()}
+function closeModal(restoreFocus=true){
+  const back=document.querySelector('.modal-backdrop');
+  if(!back)return;
+  back.remove();
+  const target=modalReturnFocus;
+  modalReturnFocus=null;
+  if(restoreFocus&&target?.isConnected)requestAnimationFrame(()=>target.focus());
+}
 
 async function deleteEntry(id){const e=state.entries.find(x=>x.id===id);if(!e)return;if(confirm('Delete this transaction? Balances will recalculate immediately.')){const saved=await runMutation(version=>removeEntry(id,version),'Transaction deleted.');if(saved)closeModal();}}
 async function deletePerson(id){const linked=state.entries.some(e=>entryTouchesPerson(e,id));if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){const saved=await runMutation(version=>removePerson(id,version),'Person deleted.');if(saved){closeModal();location.hash='#people';}}}
@@ -557,7 +621,8 @@ async function showAuth(message=''){
 }
 
 function renderAuth(message='',registrationOpen=false) {
-  app.innerHTML=`<div class="auth-shell"><div class="auth-card card"><div class="auth-brand"><div class="brand-mark">M</div><div><h1>Money Owed Tracker</h1><p>Track money people owe you and money you owe.</p></div></div>${message?`<div class="auth-message">${escapeHtml(message)}</div>`:''}${registrationOpen?`<div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="register">Create account</button></div>`:'<div class="auth-tabs"><button class="active">Sign in</button></div>'}<form id="authForm" class="auth-form"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="10" required></div><button class="btn primary full" type="submit">Sign in</button><p class="auth-hint">${registrationOpen?'Create the owner account once. After that, extra accounts can only be added from Settings.':'Additional accounts can only be created by the owner from Settings.'}</p></form></div></div>`;
+  app.innerHTML=`<div class="auth-shell"><div class="auth-card card"><div class="auth-brand"><div class="brand-mark">M</div><div><h1>Money Owed Tracker</h1><p>Track money people owe you and money you owe.</p></div></div>${message?`<div class="auth-message" role="alert">${escapeHtml(message)}</div>`:''}${registrationOpen?`<div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="register">Create account</button></div>`:'<div class="auth-tabs"><button class="active">Sign in</button></div>'}<form id="authForm" class="auth-form"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="email" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="10" required></div><button class="btn primary full" type="submit">Sign in</button><p class="auth-hint">${registrationOpen?'Create the owner account once. After that, extra accounts can only be added from Settings.':'Additional accounts can only be created by the owner from Settings.'}</p></form></div></div>`;
+  wireFieldLabels(app);
   let mode='login'; const form=app.querySelector('#authForm');
   app.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>{mode=btn.dataset.authTab||'login';app.querySelectorAll('[data-auth-tab]').forEach(b=>b.classList.toggle('active',b===btn));form.querySelector('button[type=submit]').textContent=mode==='register'?'Create account':'Sign in';form.password.autocomplete=mode==='register'?'new-password':'current-password';}));
   form.addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;button.textContent=mode==='register'?'Creating…':'Signing in…';try{user=mode==='register'?await register(fd.get('email'),fd.get('password')):await login(fd.get('email'),fd.get('password'));state=await loadState();location.hash='#dashboard';render();}catch(error){showAuth(error.message||'Could not sign in.');}finally{button.disabled=false;}});

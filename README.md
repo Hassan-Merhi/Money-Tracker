@@ -182,3 +182,19 @@ The automated suite covers core ledger math, exact-money storage, account-only i
 ## Still outside current scope
 
 Live bank-provider connections (OAuth/open-banking APIs), background provider syncing, and provider-specific credential management remain outside the current scope. The current app supports statement-file ingestion, automatic classification/category rules, review-before-post, budgets, and personal cash-flow insights without storing bank credentials.
+
+
+## Lane D — final quality and scale closure
+
+Lane D completes Waves **11, 12, and 15**: accessibility/interaction hardening, scale/data-lifecycle hardening, and release/QA closure.
+
+Highlights:
+- keyboard and screen-reader navigation, focus-safe dialogs, labelled form controls, visible focus, reduced-motion support;
+- coherent storage and complete-backup limits from one shared contract;
+- Bank Feed full-table reconciliation totals and transactional scale limits;
+- bounded recurring/import history and continuously enforced security-event retention;
+- PWA cache v10 with reliable stale-while-revalidate updates;
+- ETag/304 static delivery;
+- dedicated Lane D regression and release gates in CI.
+
+See `docs/LANE_D_WAVES_11_12_15.md` for the full contract and release checklist.

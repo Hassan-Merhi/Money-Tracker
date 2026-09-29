@@ -22,6 +22,11 @@ test('Wave 0 freezes every current ledger balance movement',()=>{
 test('Wave 0 freezes reporting cash-flow semantics',()=>{
   const report=reportingSnapshot(fixture);
   assert.deepEqual(report.personalCashFlow,fixture.expected.personalCashFlow);
+  assert.deepEqual(report.receivablesMovement,[{month:'2026-09',currencies:{USD:75,EUR:30}}]);
+  assert.deepEqual(report.cashFlow,[{month:'2026-09',currencies:{USD:45}}]);
+  // The USD->USD transfer cancels, but the USD->LBP transfer has a -10 USD leg.
+  assert.deepEqual(report.transferFlow,[{month:'2026-09',currencies:{USD:-10,LBP:900000}}]);
+  assert.equal(Object.hasOwn(report,'monthly'),false);
   assert.equal(report.transactionCount,fixture.entries.length);
 });
 

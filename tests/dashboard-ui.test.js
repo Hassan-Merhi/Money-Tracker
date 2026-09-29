@@ -75,3 +75,82 @@ test('dashboard assets are local, loaded last, and included in the upgraded offl
   assert.match(icon('people'), /aria-hidden="true"/);
   assert.doesNotMatch(icon('<script>'), /<script>/);
 });
+
+
+test('dashboard mounts both widgets only in Advanced mode with a revision-safe state replacement',()=>{
+  const app=read('app.js');
+  const dashboard=app.slice(app.indexOf('function renderDashboard('),app.indexOf('function renderPeople('));
+  assert.match(dashboard,/advancedMode\(\)\?`<section class="card panel" id="dashboardRecurring"><\/section><section class="card panel" id="dashboardBudgets"><\/section>`/);
+  assert.match(dashboard,/if\(advancedMode\(\)\)\{[\s\S]*?const ctx=\{showToast,replaceState\(next\)\{state=next;render\(\);\}\};[\s\S]*?mountRecurringDashboardWidget\(main\.querySelector\('#dashboardRecurring'\),state,ctx\);[\s\S]*?mountBudgetDashboardWidget\(main\.querySelector\('#dashboardBudgets'\),state\);/);
+  assert.match(dashboard,/id="enableAdvanced"/); // Simple-mode teaser remains available.
+  const recurring=read('block-e-recurring.js');
+  assert.match(recurring,/expectedRevision:state.version/);
+  assert.match(recurring,/ctx.replaceState\(result.state\)/);
+  assert.match(recurring,/data-dashboard-post/);
+});
+
+test('transactions page reads the category route param and preserves all three filters',()=>{
+  const app=read('app.js');
+  const transactions=app.slice(app.indexOf('function renderTransactions('),app.indexOf('function transactionTable('));
+  assert.match(transactions,/route.params.get\('category'\)/);
+  assert.match(transactions,/filterTransactionList\(visible,\{type,personId:person,categoryId:category,people:state.people\}\)/);
+  assert.match(transactions,/id="filterCategory"/);
+  assert.match(transactions,/c.archived\?' \(archived\)'/);
+  for(const key of ['type','person','category'])assert.ok(transactions.includes(`q.set('${key}'`));
+  assert.match(read('block-g-insights.js'),/row.categoryId\|\|'uncategorized'/);
+});
+
+// Exercise the existing widgets, not just their newly wired call sites.
+test('recurring widget shows due/overdue items and posts with the mounted revision, then refreshes on conflict',async t=>{
+  const { mountRecurringDashboardWidget }=await import('../block-e-recurring.js');
+  const { today }=await import('../lib/utils.js');
+  const original={window:globalThis.window,confirm:globalThis.confirm};
+  globalThis.window={};globalThis.confirm=()=>true;
+  t.after(()=>{for(const [key,value] of Object.entries(original))value===undefined?delete globalThis[key]:globalThis[key]=value;});
+  const date=today(),yesterday=new Date(date+'T12:00:00');yesterday.setDate(yesterday.getDate()-1);
+  const previous=`${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
+  const rules=[['due',date],['overdue',previous]].map(([id,nextDueDate])=>({id,title:id,nextDueDate,isActive:true,remindDaysBefore:0,template:{type:'paid_for_person',personId:'p1',amount:10,currency:'USD'}}));
+  const mounted={version:7,people:[{id:'p1',name:'Alice'}],accounts:[]},next={...mounted,version:8};
+  const calls=[],replacements=[],toasts=[],buttons=rules.map(rule=>({dataset:{dashboardPost:rule.id},addEventListener(event,handler){this.click=handler;}}));
+  const host={innerHTML:'',querySelector:()=>null,querySelectorAll:()=>buttons};
+  let conflict=false;
+  t.mock.method(globalThis,'fetch',async(path,options={})=>{
+    calls.push({path,body:options.body?JSON.parse(options.body):null});
+    if(path==='/api/recurring')return {ok:true,json:async()=>({rules})};
+    if(path==='/api/state')return {ok:true,json:async()=>next};
+    assert.equal(path,'/api/recurring/due/post');
+    return conflict?{ok:false,status:409,json:async()=>({error:'Ledger changed. Try again.'})}:{ok:true,json:async()=>({state:next})};
+  });
+  await mountRecurringDashboardWidget(host,mounted,{replaceState:s=>replacements.push(s),showToast:s=>toasts.push(s)});
+  assert.match(host.innerHTML,/Scheduled reminders/);
+  assert.match(host.innerHTML,/Due today/);
+  assert.match(host.innerHTML,/1 day overdue/);
+  await buttons[0].click();
+  assert.deepEqual(calls.at(-1).body,{expectedRevision:7,occurrenceDate:date,transactionDate:date});
+  assert.deepEqual(replacements,[next]);
+  assert.match(toasts.at(-1),/posted/);
+  conflict=true;
+  await buttons[0].click();
+  assert.equal(calls.at(-1).path,'/api/state');
+  assert.deepEqual(replacements,[next,next]);
+  assert.match(toasts.at(-1),/Ledger changed/);
+});
+
+test('budget widget shows near/over budgets and its Insights link works',async t=>{
+  const { mountBudgetDashboardWidget }=await import('../block-g-insights.js');
+  const { today }=await import('../lib/utils.js');
+  const original=globalThis.location;
+  globalThis.location={hash:''};
+  t.after(()=>{if(original===undefined)delete globalThis.location;else globalThis.location=original;});
+  const button={addEventListener(event,handler){this.click=handler;}};
+  const host={innerHTML:'',querySelector:()=>button};
+  const state={categories:[{id:'near',name:'Near category'},{id:'over',name:'Over category'}],
+    budgets:['near','over'].map(categoryId=>({id:categoryId,categoryId,currency:'USD',monthlyLimit:100})),
+    entries:[['near',85],['over',110]].map(([categoryId,amount])=>({type:'account_expense',categoryId,amount,currency:'USD',date:today()}))};
+  mountBudgetDashboardWidget(host,state);
+  assert.match(host.innerHTML,/Monthly budget watch/);
+  assert.match(host.innerHTML,/>Near</);
+  assert.match(host.innerHTML,/>Over</);
+  button.click();
+  assert.equal(globalThis.location.hash,'#insights');
+});

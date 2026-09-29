@@ -9,6 +9,7 @@ import { nextRecurringDate } from './lib/recurring.js';
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
+import { exportFullBackup, restoreFullBackup } from './lib/full-backup.js';
 import { normalizeMoney, toMinor } from './lib/money.js';
 import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
@@ -42,6 +43,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   csrf_token TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key_hash TEXT PRIMARY KEY,
+  window_start_ms INTEGER NOT NULL,
+  count INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS people (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -144,6 +151,19 @@ const q = {
   insertSession: db.prepare('INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
   cleanupSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+  deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id=? AND token_hash<>?'),
+  deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id=?'),
+  userSecret: db.prepare('SELECT id,email,password_hash,is_owner AS isOwner FROM users WHERE id=?'),
+  updatePassword: db.prepare('UPDATE users SET password_hash=? WHERE id=?'),
+  deleteUser: db.prepare('DELETE FROM users WHERE id=?'),
+  otherUserCount: db.prepare('SELECT COUNT(*) AS count FROM users WHERE id<>?'),
+  rateLimitUpsert: db.prepare(`INSERT INTO rate_limits(key_hash,window_start_ms,count,updated_at) VALUES(?,?,1,?)
+    ON CONFLICT(key_hash) DO UPDATE SET
+      count=CASE WHEN excluded.window_start_ms-rate_limits.window_start_ms>=? THEN 1 ELSE rate_limits.count+1 END,
+      window_start_ms=CASE WHEN excluded.window_start_ms-rate_limits.window_start_ms>=? THEN excluded.window_start_ms ELSE rate_limits.window_start_ms END,
+      updated_at=excluded.updated_at`),
+  rateLimitRead: db.prepare('SELECT window_start_ms AS windowStartMs,count FROM rate_limits WHERE key_hash=?'),
+  cleanupRateLimits: db.prepare('DELETE FROM rate_limits WHERE updated_at < ?'),
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
   personById: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? AND id=?'),
   personCount: db.prepare('SELECT COUNT(*) AS count FROM people WHERE user_id=?'),
@@ -284,12 +304,15 @@ function requireAuth(req,res,{csrf=false}={}) {
   return a;
 }
 
-const attempts = new Map();
-function rateLimited(req) {
-  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
-  const t=Date.now(); const row=attempts.get(ip)||{start:t,count:0};
-  if(t-row.start>10*60_000){row.start=t;row.count=0;} row.count++; attempts.set(ip,row);
-  return row.count>30;
+function requestIp(req){
+  return String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].trim();
+}
+function rateLimited(req,scope='auth',{limit=30,windowMs=10*60_000}={}) {
+  const now=Date.now(),key=sha256(scope+'|'+requestIp(req)),stamp=nowIso();
+  q.rateLimitUpsert.run(key,now,stamp,windowMs,windowMs);
+  const row=q.rateLimitRead.get(key);
+  if(Math.random()<0.01)q.cleanupRateLimits.run(new Date(Date.now()-24*60*60_000).toISOString());
+  return Number(row?.count||0)>limit;
 }
 
 function validateState(input, user) {

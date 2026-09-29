@@ -1,0 +1,53 @@
+{
+  "settings": {"displayName":"Wave 0 Baseline","defaultCurrency":"USD"},
+  "people": [
+    {"id":"person_alice","name":"Alice","note":"","createdAt":"2026-09-01T00:00:00.000Z"},
+    {"id":"person_bob","name":"Bob","note":"","createdAt":"2026-09-01T00:00:00.000Z"},
+    {"id":"person_charlie","name":"Charlie","note":"","createdAt":"2026-09-01T00:00:00.000Z"},
+    {"id":"person_dana","name":"Dana","note":"","createdAt":"2026-09-01T00:00:00.000Z"}
+  ],
+  "accounts": [
+    {"id":"account_bank_usd","name":"Main Bank USD","type":"bank","currency":"USD","openingBalance":1000,"createdAt":"2026-09-01T00:00:00.000Z"},
+    {"id":"account_cash_usd","name":"Cash USD","type":"cash","currency":"USD","openingBalance":200,"createdAt":"2026-09-01T00:00:00.000Z"},
+    {"id":"account_wallet_lbp","name":"Wallet LBP","type":"wallet","currency":"LBP","openingBalance":1000000,"createdAt":"2026-09-01T00:00:00.000Z"}
+  ],
+  "categories": [
+    {"id":"category_food","name":"Food","kind":"expense","icon":"🍽️","archived":false},
+    {"id":"category_salary","name":"Salary","kind":"income","icon":"💼","archived":false}
+  ],
+  "budgets": [],
+  "entries": [
+    {"id":"entry_paid_alice","type":"paid_for_person","personId":"person_alice","accountId":"account_bank_usd","amount":120,"currency":"USD","date":"2026-09-10","merchant":"Amazon","description":"Purchase","createdAt":"2026-09-10T10:00:00.000Z","updatedAt":"2026-09-10T10:00:00.000Z"},
+    {"id":"entry_received_alice","type":"received_from_person","personId":"person_alice","accountId":"account_bank_usd","amount":20,"currency":"USD","date":"2026-09-11","merchant":"","description":"Partial repayment","createdAt":"2026-09-11T10:00:00.000Z","updatedAt":"2026-09-11T10:00:00.000Z"},
+    {"id":"entry_borrowed_bob","type":"borrowed_from_person","personId":"person_bob","accountId":"account_cash_usd","amount":50,"currency":"USD","date":"2026-09-12","merchant":"","description":"Borrowed cash","createdAt":"2026-09-12T10:00:00.000Z","updatedAt":"2026-09-12T10:00:00.000Z"},
+    {"id":"entry_paid_bob","type":"paid_to_person","personId":"person_bob","accountId":"account_cash_usd","amount":15,"currency":"USD","date":"2026-09-13","merchant":"","description":"Partial payback","createdAt":"2026-09-13T10:00:00.000Z","updatedAt":"2026-09-13T10:00:00.000Z"},
+    {"id":"entry_adjust_charlie","type":"person_adjustment","personId":"person_charlie","accountId":null,"amount":30,"currency":"EUR","signedAmount":30,"date":"2026-09-14","merchant":"","description":"Opening balance","createdAt":"2026-09-14T10:00:00.000Z","updatedAt":"2026-09-14T10:00:00.000Z"},
+    {"id":"entry_split","type":"split_paid_for_people","personId":null,"accountId":"account_bank_usd","amount":90,"currency":"USD","date":"2026-09-15","merchant":"Shared Shop","description":"Shared order","splits":[{"personId":"person_alice","amount":40,"note":"Alice item"},{"personId":"person_bob","amount":50,"note":"Bob item"}],"createdAt":"2026-09-15T10:00:00.000Z","updatedAt":"2026-09-15T10:00:00.000Z"},
+    {"id":"entry_expense","type":"account_expense","personId":null,"accountId":"account_bank_usd","amount":25,"currency":"USD","categoryId":"category_food","date":"2026-09-16","merchant":"Lunch","description":"Personal expense","createdAt":"2026-09-16T10:00:00.000Z","updatedAt":"2026-09-16T10:00:00.000Z"},
+    {"id":"entry_income","type":"account_income","personId":null,"accountId":"account_bank_usd","amount":70,"currency":"USD","categoryId":"category_salary","date":"2026-09-17","merchant":"Work","description":"Income","createdAt":"2026-09-17T10:00:00.000Z","updatedAt":"2026-09-17T10:00:00.000Z"},
+    {"id":"entry_transfer_cash","type":"account_transfer","personId":null,"accountId":null,"fromAccountId":"account_bank_usd","toAccountId":"account_cash_usd","amount":100,"fromAmount":100,"toAmount":100,"currency":null,"date":"2026-09-18","merchant":"","description":"ATM withdrawal","createdAt":"2026-09-18T10:00:00.000Z","updatedAt":"2026-09-18T10:00:00.000Z"},
+    {"id":"entry_borrowed_dana","type":"borrowed_from_person","personId":"person_dana","accountId":null,"amount":100,"currency":"USD","date":"2026-09-19","merchant":"","description":"Debt-only borrowing","createdAt":"2026-09-19T10:00:00.000Z","updatedAt":"2026-09-19T10:00:00.000Z"},
+    {"id":"entry_paid_dana","type":"paid_to_person","personId":"person_dana","accountId":null,"amount":20,"currency":"USD","date":"2026-09-20","merchant":"","description":"Debt-only repayment","createdAt":"2026-09-20T10:00:00.000Z","updatedAt":"2026-09-20T10:00:00.000Z"},
+    {"id":"entry_transfer_fx","type":"account_transfer","personId":null,"accountId":null,"fromAccountId":"account_bank_usd","toAccountId":"account_wallet_lbp","amount":10,"fromAmount":10,"toAmount":900000,"currency":null,"date":"2026-09-21","merchant":"","description":"USD to LBP transfer","createdAt":"2026-09-21T10:00:00.000Z","updatedAt":"2026-09-21T10:00:00.000Z"}
+  ],
+  "expected": {
+    "personBalances": {
+      "person_alice":{"USD":140},
+      "person_bob":{"USD":15},
+      "person_charlie":{"EUR":30},
+      "person_dana":{"USD":-80}
+    },
+    "accountBalances": {
+      "account_bank_usd":745,
+      "account_cash_usd":335,
+      "account_wallet_lbp":1900000
+    },
+    "totals": {
+      "USD":{"owedToMe":155,"iOwe":80,"net":75},
+      "EUR":{"owedToMe":30,"iOwe":0,"net":30}
+    },
+    "personalCashFlow": {
+      "USD":{"expense":25,"income":70,"net":45}
+    }
+  }
+}

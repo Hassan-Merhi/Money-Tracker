@@ -18,7 +18,7 @@ let routeFocusPending = false;
 let modalReturnFocus = null;
 let modalSequence = 0;
 let a11yFieldSequence = 0;
-let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false};
+let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false,ios:false};
 
 const app = document.querySelector('#app');
 const advancedMode=()=>state?.settings?.appMode==='advanced';
@@ -132,6 +132,8 @@ function render() {
   if(!advanced && hiddenInSimpleMode.includes(route.page)){location.hash='#dashboard';return;}
   const navPage = route.page === 'person' ? 'people' : route.page;
   const visiblePages=advanced?['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings']:['dashboard','people','transactions','reports','settings'];
+  const mobilePrimary=['dashboard','people','transactions'];
+  const mobileMoreActive=!mobilePrimary.includes(navPage);
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
@@ -146,14 +148,20 @@ function render() {
         </header>
         <main class="main" id="main" aria-labelledby="pageHeading" tabindex="-1"></main>
       </section>
-      <button class="mobile-fab" id="mobileQuickEntry" aria-label="Add debt transaction">＋</button>
-      <nav class="mobile-nav" aria-label="Mobile navigation" style="grid-template-columns:repeat(${visiblePages.length},1fr)">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav" aria-label="Mobile navigation">
+        <button data-nav="dashboard" class="${navPage==='dashboard'?'active':''}"${navPage==='dashboard'?' aria-current="page"':''}><span>${iconFor('dashboard')}</span>Home</button>
+        <button data-nav="people" class="${navPage==='people'?'active':''}"${navPage==='people'?' aria-current="page"':''}><span>${iconFor('people')}</span>People</button>
+        <button class="mobile-add" id="mobileQuickEntry" aria-label="Add debt activity"><span>＋</span>Add</button>
+        <button data-nav="transactions" class="${navPage==='transactions'?'active':''}"${navPage==='transactions'?' aria-current="page"':''}><span>${iconFor('transactions')}</span>Activity</button>
+        <button id="mobileMoreBtn" class="${mobileMoreActive?'active':''}"${mobileMoreActive?' aria-current="page"':''}><span>•••</span>More</button>
+      </nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
   document.querySelector('#applyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#mobileQuickEntry')?.addEventListener('click', () => openQuickMenu());
+  document.querySelector('#mobileMoreBtn')?.addEventListener('click', () => openMobileMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());
   document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; showAuth(); });
 
@@ -174,6 +182,18 @@ function render() {
     routeFocusPending=false;
     requestAnimationFrame(()=>document.querySelector('#pageHeading')?.focus());
   }
+}
+
+function openMobileMenu(){
+  const pages=advancedMode()?['accounts','bank','insights','scheduled','reports','settings']:['reports','settings'];
+  openModal('More',`<div class="mobile-more-grid">${pages.map(page=>`<button class="mobile-more-item" type="button" data-mobile-more="${page}"><span class="mobile-more-icon">${iconFor(page)}</span><strong>${titleFor(page)}</strong><small>${subFor(page)}</small></button>`).join('')}</div>`,null,false);
+  const back=document.querySelector('.modal-backdrop');
+  back?.classList.add('mobile-more-backdrop');
+  back?.querySelectorAll('[data-mobile-more]').forEach(button=>button.addEventListener('click',()=>{
+    const page=button.dataset.mobileMore;
+    closeModal(false);
+    location.hash=`#${page}`;
+  }));
 }
 
 function currencyTotalsMarkup(totals, key, fallback='0') {
@@ -257,7 +277,7 @@ function renderPerson(main, personId) {
 }
 
 function statementTable(entries){
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Notes</th><th class="right">Change</th><th class="right">Running balance</th><th></th></tr></thead><tbody>${entries.map(e=>{const d=Number.isFinite(e.delta)?e.delta:personDelta(e,e.personId);const c=e.currency||'USD';return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount}</div>`:''}</td><td class="right ${d>=0?'amount-pos':'amount-neg'}">${d>=0?'+':''}${money(d,c)}</td><td class="right strong">${money(e.running||0,c)}</td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`}).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap mobile-ledger-table"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Notes</th><th class="right">Change</th><th class="right">Running balance</th><th></th></tr></thead><tbody>${entries.map(e=>{const d=Number.isFinite(e.delta)?e.delta:personDelta(e,e.personId);const c=e.currency||'USD';return `<tr><td data-label="Date">${escapeHtml(e.date)}</td><td data-label="Type"><span class="pill">${prettyType(e.type)}</span></td><td data-label="Notes"><strong>${escapeHtml(e.description||'—')}</strong>${e.merchant?`<div class="muted tiny">${escapeHtml(e.merchant)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount}</div>`:''}</td><td data-label="Change" class="right ${d>=0?'amount-pos':'amount-neg'}">${d>=0?'+':''}${money(d,c)}</td><td data-label="Running balance" class="right strong">${money(e.running||0,c)}</td><td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button><button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td></tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderAccounts(main) {
@@ -297,13 +317,13 @@ function renderTransactions(main) {
 }
 
 function transactionTable(entries,{compact=false}={}){
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
+  return `<div class="table-wrap mobile-ledger-table"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
     const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
     const category=state.categories?.find(x=>x.id===e.categoryId);
-    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
+    return `<tr><td data-label="Date">${escapeHtml(e.date)}</td><td data-label="Type"><span class="pill">${prettyType(e.type)}</span></td><td data-label="Person / transfer">${personText}</td><td data-label="Notes">${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td data-label="Amount" class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button><button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderSettings(main) {
@@ -314,7 +334,7 @@ function renderSettings(main) {
       <div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div>
       <div class="field"><label>Timezone</label><input class="input" id="settingTimezone" value="${escapeHtml(state.settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}" readonly><span class="muted tiny">Used by server-side recurring reminders.</span></div>
     </div><div class="warning" style="margin-top:12px"><strong>Simple mode</strong> hides accounts, Bank Feed, budgets and schedules without deleting them. Switch back to Advanced at any time.</div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
-    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Money Tracker keeps its interface available offline, but financial changes are only sent when you are online.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div></section>
+    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Money Tracker keeps its interface available offline, but financial changes are only sent when you are online.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div>${pwa.ios&&!pwa.installed?'<div class="ios-install-card"><strong>Install on iPhone like a real app</strong><div>Add Money Tracker to your Home Screen for full-screen standalone mode and faster access.</div><div class="ios-install-steps"><span>1. Tap the Share button in Safari.</span><span>2. Choose “Add to Home Screen”.</span><span>3. Open Money Tracker from the new Home Screen icon.</span></div></div>':''}</section>
     ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. You can reset or delete secondary sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
     ${user?.isOwner?'<section class="card settings-card"><h3>Operations & integrity</h3><p class="muted">Owner-only database integrity status and server snapshot controls.</p><div id="runtimeStatus" class="muted">Loading diagnostics…</div><div class="page-actions" style="margin-top:14px"><button class="btn" id="refreshRuntime">Refresh diagnostics</button><button class="btn primary" id="serverSnapshot">Create server snapshot</button></div></section>':''}
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Password changes revoke every other session automatically.</p>

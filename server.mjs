@@ -9,6 +9,8 @@ import { nextRecurringDate } from './lib/recurring.js';
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
+import { fromMinor, normalizeMoney, sameMoney, toMinor } from './lib/money.js';
+import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -55,7 +57,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   name TEXT NOT NULL,
   type TEXT NOT NULL,
   currency TEXT NOT NULL,
-  opening_balance REAL NOT NULL DEFAULT 0,
+  opening_balance_minor INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   PRIMARY KEY (user_id, id)
 );
@@ -67,11 +69,11 @@ CREATE TABLE IF NOT EXISTS entries (
   account_id TEXT,
   from_account_id TEXT,
   to_account_id TEXT,
-  amount REAL NOT NULL DEFAULT 0,
+  amount_minor INTEGER NOT NULL DEFAULT 0,
   currency TEXT,
-  from_amount REAL,
-  to_amount REAL,
-  signed_amount REAL,
+  from_amount_minor INTEGER,
+  to_amount_minor INTEGER,
+  signed_amount_minor INTEGER,
   date TEXT NOT NULL,
   merchant TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
@@ -127,6 +129,7 @@ if (!ownerCount) db.prepare("UPDATE users SET is_owner=1 WHERE id=(SELECT id FRO
 const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
 if (!entryColumns.has('split_json')) db.exec("ALTER TABLE entries ADD COLUMN split_json TEXT NOT NULL DEFAULT '[]'");
 if (!entryColumns.has('category_id')) db.exec("ALTER TABLE entries ADD COLUMN category_id TEXT");
+ensureCoreExactMoneySchema(db);
 
 const insights = createInsightsService(db);
 
@@ -142,16 +145,16 @@ const q = {
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
   cleanupSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
-  accounts: db.prepare('SELECT id,name,type,currency,opening_balance AS openingBalance,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
+  accounts: db.prepare('SELECT id,name,type,currency,opening_balance_minor AS openingBalanceMinor,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
   entries: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
-    amount,currency,from_amount AS fromAmount,to_amount AS toAmount,signed_amount AS signedAmount,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
+    amount_minor AS amountMinor,currency,from_amount_minor AS fromAmountMinor,to_amount_minor AS toAmountMinor,signed_amount_minor AS signedAmountMinor,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
     FROM entries WHERE user_id=? ORDER BY date, created_at`),
   deleteEntries: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deletePeople: db.prepare('DELETE FROM people WHERE user_id=?'),
   deleteAccounts: db.prepare('DELETE FROM accounts WHERE user_id=?'),
   insertPerson: db.prepare('INSERT INTO people(user_id,id,name,note,created_at) VALUES(?,?,?,?,?)'),
-  insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance,created_at) VALUES(?,?,?,?,?,?,?)'),
-  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount,currency,from_amount,to_amount,signed_amount,date,merchant,description,category_id,split_json,created_at,updated_at)
+  insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance_minor,created_at) VALUES(?,?,?,?,?,?,?)'),
+  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount_minor,currency,from_amount_minor,to_amount_minor,signed_amount_minor,date,merchant,description,category_id,split_json,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),

@@ -82,7 +82,7 @@ test('owner can run diagnostics and create a verified server snapshot',async()=>
   assert.equal(snap.res.status,201);
   assert.match(snap.data.sha256,/^[a-f0-9]{64}$/);
   assert.match(snap.data.schemaSha256,/^[a-f0-9]{64}$/);
-  assert.equal(existsSync(join(dir,snap.data.snapshotFile)),true);
+  assert.equal(existsSync(join(dir,'backups',snap.data.snapshotFile)),true);
   const events=await request('/api/security/events',{cookie:ownerCookie});
   assert.ok(events.data.events.some(e=>e.eventType==='server_snapshot_created'));
 });

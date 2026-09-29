@@ -551,13 +551,23 @@ function renderTransactions(main) {
 }
 
 function transactionTable(entries,{compact=false}={}){
-  return `<div class='table-wrap mobile-ledger-table activity-table-wrap'><table class='table activity-table'><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class='right'>Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
+  const head=`<div class='activity-list-head' role='row'><div role='columnheader'>Date</div><div role='columnheader'>Type</div><div role='columnheader'>Person / transfer</div><div role='columnheader'>Notes</div><div role='columnheader' class='activity-head-amount'>Amount</div>${compact?'':"<div role='columnheader' aria-label='Actions'></div>"}</div>`;
+  const rows=entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
     const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income'||e.type==='account_adjustment')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:e.type==='account_adjustment'?`${Number(e.signedAmount)<0?'−':'+'}${money(e.amount,e.currency||acc?.currency||'USD')}`:money(e.amount,e.currency||acc?.currency||'USD');
     const category=state.categories?.find(x=>x.id===e.categoryId);
-    return `<tr class='activity-row'><td data-label='Date' class='activity-date-cell'><time datetime='${escapeHtml(e.date)}'>${escapeHtml(e.date)}</time></td><td data-label='Type' class='activity-type-cell'><span class='pill'>${prettyType(e.type)}</span></td><td data-label='Person / transfer' class='activity-person-cell'>${personText}</td><td data-label='Notes' class='activity-notes-cell'><span class='activity-note-text'>${escapeHtml(e.description||e.merchant||'—')}</span>${category?`<div class='attachment-count'>${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class='attachment-count'>📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td data-label='Amount' class='right strong activity-amount-cell'><span class='activity-amount'>${amt}</span></td>${compact?'':`<td class='actions statement-actions-cell activity-actions-cell'>${entryMenuMarkup(e.id)}</td>`}</tr>`}).join('')}</tbody></table></div>`;
+    return `<div class='activity-list-row' role='row'>
+      <div class='activity-date-cell' role='cell'><span class='activity-mobile-label'>Date</span><time datetime='${escapeHtml(e.date)}'>${escapeHtml(e.date)}</time></div>
+      <div class='activity-type-cell' role='cell'><span class='activity-mobile-label'>Type</span><span class='pill'>${prettyType(e.type)}</span></div>
+      <div class='activity-person-cell' role='cell'><span class='activity-mobile-label'>Person / transfer</span><span>${personText}</span></div>
+      <div class='activity-notes-cell' role='cell'><span class='activity-mobile-label'>Notes</span><span class='activity-note-text'>${escapeHtml(e.description||e.merchant||'—')}</span>${category?`<div class='attachment-count'>${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class='attachment-count'>📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</div>
+      <div class='activity-amount-cell strong' role='cell'><span class='activity-mobile-label'>Amount</span><span class='activity-amount'>${amt}</span></div>
+      ${compact?'':`<div class='activity-actions-cell' role='cell'>${entryMenuMarkup(e.id)}</div>`}
+    </div>`;
+  }).join('');
+  return `<div class='activity-list ${compact?'activity-list-compact':''}' role='table' aria-label='Activity'>${head}<div class='activity-list-body' role='rowgroup'>${rows}</div></div>`;
 }
 
 function renderSettings(main) {

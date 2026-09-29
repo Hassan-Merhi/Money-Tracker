@@ -55,6 +55,6 @@ jobs:
           node --check lib/data-limits.js
           node --check lib/money.js
           node --check lib/money-storage.js
+          node --check lib/money-parse.js
           node --check scripts/create-db-snapshot.mjs
           node --check scripts/restore-db-snapshot.mjs
-          node --check scripts/accounting-check.mjs

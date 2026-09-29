@@ -3,6 +3,7 @@ import { escapeHtml } from './lib/utils.js';
 import { buildXlsx } from './lib/xlsx.js';
 import { applyImport, applyQuickPasteImport, detectImportMode, guessHeader, parseQuickPaste } from './lib/importer.js';
 import { analyzeLegacyWorkbook, applyLegacyWorkbook } from './lib/legacy-excel.js';
+import { currencyExponent } from './lib/money.js';
 
 let state=null,preview=null,sheetIndex=0,injecting=false,legacyAnalysis=null,manualMode=false;
 const q=s=>document.querySelector(s);
@@ -48,8 +49,8 @@ async function openQuickImporter(){
 async function reviewQuickPaste(){
   const text=q('#impQuickPaste')?.value||'';if(!text.trim()){alert('Paste Excel rows first.');return;}
   let prepared;try{prepared=applyQuickPasteImport({state,text,uidFactory:uid});}catch(e){alert(e.message||'Could not prepare the pasted rows.');return;}
-  const r=prepared.result,parts=[r.people?`${r.people} new people`:'',r.entries?`${r.entries} statement entries`:'',r.skipped?`${r.skipped} skipped`:''].filter(Boolean),issues=(r.errors||[]).slice(0,8);
-  if(!r.entries){alert(`Nothing to import.${issues.length?`\n\n${issues.join('\n')}`:''}`);return;}
+  const r=prepared.result,parts=[r.people?`${r.people} new people`:'',r.entries?`${r.entries} statement entries`:'',r.updated?`${r.updated} updated`:'',r.skipped?`${r.skipped} skipped`:''].filter(Boolean),issues=(r.errors||[]).slice(0,8);
+  if(!r.entries && !r.updated){alert(`Nothing to import.${issues.length?`\n\n${issues.join('\n')}`:''}`);return;}
   if(!confirm(`Import these pasted rows?\n\n${parts.join(', ')}.${issues.length?`\n\nRows with issues will be skipped:\n${issues.join('\n')}`:''}\n\nEach valid row will appear on that person's statement.`))return;
   const btn=q('#impQuickApply'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
   try{state=await saveState(prepared.state);alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
@@ -65,7 +66,7 @@ async function openImporter(){
 }
 function closeImporter(){document.querySelector('.imp-backdrop')?.remove();}
 
-function parseCsv(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const ch=text[i];if(quoted){if(ch==='"'&&text[i+1]==='"'){cell+='"';i++;}else if(ch==='"')quoted=false;else cell+=ch;}else if(ch==='"')quoted=true;else if(ch===','){row.push(cell);cell='';}else if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';}else cell+=ch;}if(cell||row.length){row.push(cell);rows.push(row);}const headers=(rows.shift()||[]).map((h,i)=>String(h).trim()||`Column ${i+1}`);return {sheets:[{name:'CSV',headers,rows:rows.filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??''])))}]};}
+function parseCsv(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const ch=text[i];if(quoted){if(ch==='\"'&&text[i+1]==='\"'){cell+='\"';i++;}else if(ch==='\"')quoted=false;else cell+=ch;}else if(ch==='\"')quoted=true;else if(ch===','){row.push(cell);cell='';}else if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';}else cell+=ch;}if(cell||row.length){row.push(cell);rows.push(row);}const headers=(rows.shift()||[]).map((h,i)=>String(h).trim()||`Column ${i+1}`);return {sheets:[{name:'CSV',headers,rows:rows.filter(r=>r.some(v=>String(v).trim())).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??''])))}]};}
 async function readFile(file){
   if(!file)return;const area=q('#impArea');area.innerHTML='<div class="imp-status">Reading file…</div>';
   try{
@@ -85,7 +86,11 @@ function legacyEffect(record){
 function renderLegacyPreview(){
   const area=q('#impArea'),a=legacyAnalysis;if(!area||!a)return;
   const sample=a.records.slice(0,10),ignored=a.ignoredSheets||[];
-  area.innerHTML=`<div class="imp-sub imp-legacy"><div class="imp-preview-head"><div><div class="imp-kicker">LEGACY EXCEL RECOGNIZED</div><h3>Your current workbook format is ready</h3><p>${a.records.length} transaction row${a.records.length===1?'':'s'} found across ${a.recognizedSheets.length} recognized sheet${a.recognizedSheets.length===1?'':'s'}.</p></div></div><div class="imp-legacy-stats"><div class="imp-legacy-stat"><strong>${a.records.length}</strong><span>transactions found</span></div><div class="imp-legacy-stat"><strong>${a.people.length}</strong><span>people detected</span></div><div class="imp-legacy-stat"><strong>${a.accounts.length}</strong><span>money accounts detected</span></div><div class="imp-legacy-stat"><strong>${a.unknownDates}</strong><span>legacy rows without dates</span></div></div><div class="imp-table"><table><thead><tr><th>Sheet</th><th>Person / account</th><th>Description</th><th>Effect</th><th>Date</th></tr></thead><tbody>${sample.map(r=>`<tr><td>${escapeHtml(r.sourceSheet)}</td><td>${escapeHtml(r.personName||r.accountName||'')}</td><td>${escapeHtml(r.description)}</td><td>${escapeHtml(legacyEffect(r))}</td><td>${escapeHtml(r.dateUnknown?'Legacy / no date':r.date)}</td></tr>`).join('')}</tbody></table></div>${a.unknownDates?`<div class="imp-note"><strong>${a.unknownDates} undated rows:</strong> your spreadsheet does not contain an exact date for these entries. They will be preserved as legacy rows and labeled “Legacy date not recorded” instead of inventing a date.</div>`:''}${ignored.length?`<div class="imp-note"><strong>Protected from double-counting:</strong> ${ignored.map(x=>`${escapeHtml(x.sheet)} — ${escapeHtml(x.reason)}`).join('<br>')}</div>`:''}<div class="imp-note">Re-uploading the same workbook is safe: unchanged rows are skipped. If you correct an already imported amount in the same legacy row, the existing imported entry is updated instead of duplicated.</div><div class="imp-actions imp-legacy-actions"><button class="btn" id="impManual">Use manual mapper instead</button><button class="btn primary" id="impLegacyReview">Review & import ${a.records.length}</button></div></div>`;
+  const reconciliation = a.reconciliation||[];
+  const expectedBalances = a.expectedBalances||[];
+  const hasMismatch = reconciliation.some(r=>Math.abs(r.delta)>0.000001);
+  const reconciliationTable = reconciliation.length ? `<div class="imp-reconciliation"><h4>Reconciliation — expected vs stated totals</h4><div class="imp-table"><table><thead><tr><th>Person</th><th>Expected (sum of details)</th><th>Stated (from total rows)</th><th>Delta</th></tr></thead><tbody>${reconciliation.map(r=>`<tr class="${Math.abs(r.delta)>0.000001?'imp-mismatch':''}"><td>${escapeHtml(r.personName)}</td><td>${escapeHtml(moneyText(r.expected, state?.settings?.defaultCurrency||'USD'))}</td><td>${escapeHtml(moneyText(r.stated, state?.settings?.defaultCurrency||'USD'))}</td><td>${escapeHtml(moneyText(r.delta, state?.settings?.defaultCurrency||'USD'))}</td></tr>`).join('')}</tbody></table></div>${hasMismatch?`<div class="imp-error">Reconciliation mismatch detected for: ${escapeHtml(reconciliation.filter(r=>Math.abs(r.delta)>0.000001).map(r=>r.personName).join(', '))}. You will need to explicitly confirm these people before import.</div>`:''}</div>` : '';
+  area.innerHTML=`<div class="imp-sub imp-legacy"><div class="imp-preview-head"><div><div class="imp-kicker">LEGACY EXCEL RECOGNIZED</div><h3>Your current workbook format is ready</h3><p>${a.records.length} transaction row${a.records.length===1?'':'s'} found across ${a.recognizedSheets.length} recognized sheet${a.recognizedSheets.length===1?'':'s'}.</p></div></div><div class="imp-legacy-stats"><div class="imp-legacy-stat"><strong>${a.records.length}</strong><span>transactions found</span></div><div class="imp-legacy-stat"><strong>${a.people.length}</strong><span>people detected</span></div><div class="imp-legacy-stat"><strong>${a.accounts.length}</strong><span>money accounts detected</span></div><div class="imp-legacy-stat"><strong>${a.unknownDates}</strong><span>legacy rows without dates</span></div></div><div class="imp-table"><table><thead><tr><th>Sheet</th><th>Person / account</th><th>Description</th><th>Effect</th><th>Date</th></tr></thead><tbody>${sample.map(r=>`<tr><td>${escapeHtml(r.sourceSheet)}</td><td>${escapeHtml(r.personName||r.accountName||'')}</td><td>${escapeHtml(r.description)}</td><td>${escapeHtml(legacyEffect(r))}</td><td>${escapeHtml(r.dateUnknown?'Legacy / no date':r.date)}</td></tr>`).join('')}</tbody></table></div>${reconciliationTable}${a.unknownDates?`<div class="imp-note"><strong>${a.unknownDates} undated rows:</strong> your spreadsheet does not contain an exact date for these entries. They will be preserved as legacy rows and labeled “Legacy date not recorded” instead of inventing a date.</div>`:''}${ignored.length?`<div class="imp-note"><strong>Protected from double-counting:</strong> ${ignored.map(x=>`${escapeHtml(x.sheet)} — ${escapeHtml(x.reason)}`).join('<br>')}</div>`:''}<div class="imp-note">Re-uploading the same workbook is safe: unchanged rows are skipped. If you correct an already imported amount in the same legacy row, the existing imported entry is updated instead of duplicated.</div><div class="imp-actions imp-legacy-actions"><button class="btn" id="impManual">Use manual mapper instead</button><button class="btn primary" id="impLegacyReview">Review & import ${a.records.length}</button></div></div>`;
   q('#impManual').onclick=()=>{manualMode=true;renderPreview();};q('#impLegacyReview').onclick=reviewLegacy;
 }
 async function reviewLegacy(){
@@ -94,7 +99,26 @@ async function reviewLegacy(){
   const changes=r.people+r.accounts+r.entries+r.updated;
   if(!changes){alert(`No new changes to import.${parts.length?`\n\n${parts.join(', ')}.`:''}`);return;}
   const warning=(r.warnings||[]).slice(0,6).join('\n');
+  const reconciliation = legacyAnalysis?.reconciliation||[];
+  const mismatches = reconciliation.filter(m=>Math.abs(m.delta)>0.000001);
   if(!confirm(`Import this legacy workbook?\n\n${parts.join(', ')}.${warning?`\n\nProtected/ignored sections:\n${warning}`:''}\n\nYour Excel file itself is not changed.`))return;
+  if(mismatches.length){
+    const names = mismatches.map(m=>m.personName).join(', ');
+    const expectedList = mismatches.map(m=>`${m.personName}: expected ${moneyText(m.expected, state?.settings?.defaultCurrency||'USD')} vs stated ${moneyText(m.stated, state?.settings?.defaultCurrency||'USD')} delta ${moneyText(m.delta, state?.settings?.defaultCurrency||'USD')}`).join('\n');
+    if(!confirm(`Reconciliation mismatch detected for: ${names}\n\n${expectedList}\n\nThese people have a difference between expected (sum of detail rows) and stated (total row). Do you want to proceed anyway?`)) return;
+    // Require explicit extra confirmation naming the people
+    const typed = prompt(`To confirm import with mismatches for ${names}, please type the names of the affected people separated by comma (e.g. "${names}"):`);
+    if(!typed){
+      alert('Import cancelled — explicit confirmation naming the people with mismatches is required.');
+      return;
+    }
+    const typedLower = typed.toLowerCase();
+    const missing = mismatches.filter(m=>!typedLower.includes(m.personName.toLowerCase()));
+    if(missing.length){
+      alert(`Confirmation failed — you must name all people with mismatches: ${names}. Missing: ${missing.map(m=>m.personName).join(', ')}`);
+      return;
+    }
+  }
   const btn=q('#impLegacyReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
   try{state=await saveState(prepared.state);alert(`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
@@ -118,8 +142,8 @@ function requiredMapped(mode,m){if(mode==='people')return !!m.name;if(mode==='ac
 async function review(){
   const mode=q('#impMode').value,mapping=mapFromUi();if(!requiredMapped(mode,mapping)){alert(mode==='transactions'?'Map Date, Type, and Amount first.':'Map the Name column first.');return;}
   const sheet=preview.sheets[sheetIndex];let prepared;try{prepared=applyImport({state,rows:sheet.rows,mode,mapping,uidFactory:uid});}catch(e){alert(e.message||'Could not prepare the import.');return;}
-  const r=prepared.result,parts=[r.people?`${r.people} new people`:'',r.accounts?`${r.accounts} new accounts`:'',r.entries?`${r.entries} new entries`:'',r.skipped?`${r.skipped} skipped`:''].filter(Boolean);const issues=r.errors.slice(0,6).join('\n');
-  if(!r.people&&!r.accounts&&!r.entries){alert(`Nothing to import.${parts.length?' '+parts.join(', '):''}${issues?`\n\n${issues}`:''}`);return;}
+  const r=prepared.result,parts=[r.people?`${r.people} new people`:'',r.accounts?`${r.accounts} new accounts`:'',r.entries?`${r.entries} new entries`:'',r.updated?`${r.updated} updated`:'',r.skipped?`${r.skipped} skipped`:''].filter(Boolean);const issues=r.errors.slice(0,6).join('\n');
+  if(!r.people&&!r.accounts&&!r.entries&&!r.updated){alert(`Nothing to import.${parts.length?' '+parts.join(', '):''}${issues?`\n\n${issues}`:''}`);return;}
   if(!confirm(`Apply import?\n\n${parts.join(', ')}.${issues?`\n\nFirst issues:\n${issues}`:''}\n\nThis appends to your current ledger.`))return;
   const btn=q('#impReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Applying…';
   try{state=await saveState(prepared.state);alert(`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}

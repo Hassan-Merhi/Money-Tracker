@@ -60,7 +60,7 @@ test('security history reads purge records older than 90 days',async()=>{
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM security_events WHERE id='security_expired'").get().count),0);
 });
 
-test('Bank Feed stats count all rows beyond the 5,000-row UI page',async()=>{
+test('Bank Feed stats count every row beyond the paginated UI page',async()=>{
   const stamp=new Date().toISOString();
   db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance_minor,created_at) VALUES(?,?,?,?,?,?,?)')
     .run(userId,'account_scale','Scale Bank','bank','USD',0,stamp);
@@ -70,9 +70,10 @@ test('Bank Feed stats count all rows beyond the 5,000-row UI page',async()=>{
     for(let i=1;i<=5001;i++)insert.run(userId,'scale_'+i,'account_scale','scale_fp_'+i,'scale.csv','scale_ext_'+i,'2026-09-29','Scale row '+i,'',-100,'USD','pending','expense',stamp,stamp);
     db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
-  const r=await request('/api/bank-feed',{cookie});
+  const r=await request('/api/bank-feed?status=pending&limit=500&offset=0',{cookie});
   assert.equal(r.res.status,200);
-  assert.equal(r.data.items.length,5000);
+  assert.equal(r.data.items.length,500);
+  assert.equal(r.data.page.total,5001);
   assert.equal(r.data.stats.pending,5001);
 });
 

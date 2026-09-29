@@ -68,7 +68,8 @@ async function runMutation(action,message='') {
   saving = true;
   try {
     state = await action(state.version);
-    if (message) showToast(message);
+    if (Number(state?.reopenedFeedItems)>0) showToast('Bank Feed row reopened - the posted amount no longer matches this transaction.');
+    else if (message) showToast(message);
     render();
     return true;
   } catch (error) {

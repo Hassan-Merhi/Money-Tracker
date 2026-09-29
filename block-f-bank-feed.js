@@ -2,14 +2,16 @@ import {
   listBankFeed, importBankFeed, postBankFeedItem, undoBankFeedItem, ignoreBankFeedItem, reopenBankFeedItem,
   deleteBankFeedItem, createBankRule, deleteBankRule, previewSpreadsheet, loadState
 } from './lib/store.js';
-import { parseBankCsv, suggestBankMapping, normalizeBankRows, bankDirectionLabel } from './lib/bank-feed.js';
+import { parseBankCsv, suggestBankMapping, normalizeBankRows, bankDirectionLabel, reconcileFeed } from './lib/bank-feed.js';
 import { categoryOptionsForType } from './lib/insights.js';
+import { fromMinor } from './lib/money.js';
 import { escapeHtml, money } from './lib/utils.js';
 
 let feed={items:[],rules:[],history:[],stats:{pending:0,posted:0,ignored:0}};
 let draft=null;
 let selectedAccountId='';
 let statusFilter='pending';
+let pageOffset=0;
 
 const PERSON_ACTIONS=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person']);
 const ACTIONS=[
@@ -158,7 +160,7 @@ function paint(main,state,ctx){
   }
   if(!selectedAccountId||!state.accounts.some(a=>a.id===selectedAccountId))selectedAccountId=state.accounts[0].id;
   const counts=feed.stats||{pending:0,posted:0,ignored:0};
-  const shown=feed.items.filter(i=>statusFilter==='all'||i.status===statusFilter);
+  const shown=feed.items;const page=feed.page||{limit:100,offset:0,returned:shown.length,total:shown.length};const start=page.total? page.offset+1:0,end=page.offset+page.returned;const reconciliation=reconcileFeed(feed.items,state.entries,state.accounts);const accountStats=new Map((feed.accountStats||[]).map(a=>[a.accountId,a]));for(const a of reconciliation){const aggregate=accountStats.get(a.accountId);if(aggregate)a.postedAmount=fromMinor(Number(aggregate.postedMinor||0),a.currency);}
   main.innerHTML=`
     <div class="grid stats bank-stats">
       <div class="card stat"><div class="stat-label">TO REVIEW</div><div class="stat-value">${counts.pending}</div><div class="stat-note">Rows waiting for a decision</div></div>
@@ -169,7 +171,7 @@ function paint(main,state,ctx){
     ${importMarkup(state)}
     <section class="bank-feed-section">
       <div class="panel-head"><div><h3>Bank feed inbox</h3><p>Nothing touches balances until you post it.</p></div><div class="segmented bank-status-tabs">${['pending','posted','ignored','all'].map(s=>`<button class="${statusFilter===s?'active':''}" data-bank-status="${s}">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</div></div>
-      <div class="bank-feed-list">${shown.length?shown.map(i=>feedRowMarkup(i,state)).join(''):'<div class="card empty"><strong>No items in this view</strong>Import a statement or switch the status filter.</div>'}</div>
+      <div class="bank-reconciliation"><h4>Reconciliation</h4>${reconciliation.map(a=>{const totals=accountStats.get(a.accountId)||{};const imported=Number(totals.imported||0);return `<div class="reconcile-row"><strong>${escapeHtml(a.name)}</strong><span>Imported: ${imported}</span><span>Posted / ignored / pending: ${totals.posted||0} / ${totals.ignored||0} / ${totals.pending||0}</span><span>Feed posted: ${money(a.postedAmount,a.currency)} · Ledger movements: ${money(a.ledgerAmount,a.currency)}</span></div>`;}).join('')}</div><div class="bank-feed-list">${shown.length?shown.map(i=>feedRowMarkup(i,state)).join(''):'<div class="card empty"><strong>No items in this view</strong>Import a statement or switch the status filter.</div>'}</div><div class="bank-pager"><button class="btn secondary" data-bank-prev ${page.offset<=0?'disabled':''}>Prev</button><span>Showing ${start}-${end} of ${page.total}</span><button class="btn secondary" data-bank-next ${page.offset+page.returned>=page.total?'disabled':''}>Next</button></div>
     </section>
     ${historyMarkup(state)}
     ${rulesMarkup(state)}
@@ -203,12 +205,15 @@ function bind(main,state,ctx){
     if(!normalized.items.length){ctx.showToast(normalized.errors[0]||'No valid rows to import.');return;}
     try{
       const result=await importBankFeed({accountId:account.id,sourceName:`${draft.filename}${draft.sheets.length>1?' · '+sheet.name:''}`,rows:normalized.items});
-      feed={items:result.items||[],rules:result.rules||[],history:result.history||[],stats:result.stats||{}};draft=null;statusFilter='pending';paint(main,state,ctx);
+      feed={items:result.items||[],rules:result.rules||[],history:result.history||[],stats:result.stats||{},accountStats:result.accountStats||[],page:result.page};draft=null;statusFilter='pending';await reloadFeed(main,state,ctx);
       const invalid=result.invalid+(normalized.errors?.length||0);
-      ctx.showToast(`Imported ${result.imported} row${result.imported===1?'':'s'} · ${result.skipped} duplicate${result.skipped===1?'':'s'} skipped${invalid?' · '+invalid+' invalid':''}.`);
+      const reasons = result.invalidReasons ? Object.entries(result.invalidReasons).map(([r,c])=>`${c}× ${r}`).join(', ') : '';
+      const invalidText = invalid ? ` · ${invalid} invalid${reasons?` (${reasons})`:''}` : '';
+      ctx.showToast(`Imported ${result.imported} row${result.imported===1?'':'s'} · ${result.skipped} duplicate${result.skipped===1?'':'s'} skipped${invalidText}.`);
     }catch(error){ctx.showToast(error.message||'Could not import the statement.');}
   });
-  main.querySelectorAll('[data-bank-status]').forEach(btn=>btn.addEventListener('click',()=>{statusFilter=btn.dataset.bankStatus;paint(main,state,ctx);}));
+  main.querySelectorAll('[data-bank-status]').forEach(btn=>btn.addEventListener('click',async()=>{statusFilter=btn.dataset.bankStatus;pageOffset=0;await reloadFeed(main,state,ctx);}));
+  main.querySelector('[data-bank-prev]')?.addEventListener('click',()=>{pageOffset=Math.max(0,(feed.page?.offset||0)-(feed.page?.limit||100));reloadFeed(main,state,ctx);});main.querySelector('[data-bank-next]')?.addEventListener('click',()=>{pageOffset=(feed.page?.offset||0)+(feed.page?.limit||100);reloadFeed(main,state,ctx);});
   main.querySelectorAll('[data-bank-item]').forEach(card=>{card.querySelector('.bank-action')?.addEventListener('change',()=>syncRow(card,state));syncRow(card,state);});
   main.querySelectorAll('.bank-post').forEach(btn=>btn.addEventListener('click',async()=>{
     const card=btn.closest('[data-bank-item]'),id=card.dataset.bankItem,action=card.querySelector('.bank-action').value;
@@ -216,7 +221,7 @@ function bind(main,state,ctx){
     btn.disabled=true;
     try{
       const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;feed.stats=result.stats||feed.stats;
-      ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');ctx.replaceState(result.state);
+      ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');ctx.replaceState(result.state);await reloadFeed(main,state,ctx);
     }catch(error){
       if(error.status===409){
         try{ctx.replaceState(await loadState());}catch{}
@@ -240,7 +245,9 @@ function bind(main,state,ctx){
   main.querySelectorAll('[data-delete-bank-rule]').forEach(btn=>btn.addEventListener('click',async()=>{try{await deleteBankRule(btn.dataset.deleteBankRule);feed.rules=feed.rules.filter(r=>r.id!==btn.dataset.deleteBankRule);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete that rule.');}}));
 }
 
+async function reloadFeed(main,state,ctx){try{feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not load this bank feed page.');}}
+
 export async function renderBankFeedPage(main,state,ctx){
   main.innerHTML='<div class="card panel"><div class="muted">Loading bank feed…</div></div>';
-  try{feed=await listBankFeed();paint(main,state,ctx);}catch(error){main.innerHTML=`<div class="card empty"><strong>Could not load bank feed</strong>${escapeHtml(error.message||'Try again.')}</div>`;}
+  try{pageOffset=0;feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){main.innerHTML=`<div class="card empty"><strong>Could not load bank feed</strong>${escapeHtml(error.message||'Try again.')}</div>`;}
 }

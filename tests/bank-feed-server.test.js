@@ -163,6 +163,50 @@ test('deleting an account cleans unposted feed rows and rules that reference it'
   assert.equal(feed.rules.some(item=>item.targetAccountId==='account_unused'),false);
 });
 
+test('editing a posted entry amount reopens its feed row and decreases posted stats',async()=>{
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'edit.csv',rows:[{date:'2026-09-30',description:'Editable expense',signedAmount:-45,currency:'USD',externalId:'edit-amount'}]}});
+  const row=imported.data.items.find(i=>i.externalId==='edit-amount');const posted=await request(`/api/bank-feed/${row.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'expense'}});assert.equal(posted.res.status,200);state=posted.data.state;
+  const entry=state.entries.find(e=>e.id===posted.data.entryId);const edited=await request(`/api/entries/${entry.id}`,{method:'PUT',body:{...entry,amount:60,expectedRevision:state.version}});assert.equal(edited.res.status,200);assert.equal(edited.data.reopenedFeedItems,1);state=edited.data;
+  const feed=(await request('/api/bank-feed')).data;assert.equal(feed.items.find(i=>i.id===row.id).status,'pending');assert.equal(feed.stats.posted,3);
+});
+
+test('description-only edits preserve posted links while reclassification reopens them',async()=>{
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'edit.csv',rows:[{date:'2026-09-30',description:'Description safe expense',signedAmount:-12,currency:'USD',externalId:'edit-description'}]}});
+  const row=imported.data.items.find(i=>i.externalId==='edit-description');const posted=await request(`/api/bank-feed/${row.id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'expense'}});state=posted.data.state;
+  let entry=state.entries.find(e=>e.id===posted.data.entryId);let edit=await request(`/api/entries/${entry.id}`,{method:'PUT',body:{...entry,description:'New note text',merchant:'New merchant',expectedRevision:state.version}});assert.equal(edit.res.status,200);assert.equal(edit.data.reopenedFeedItems,0);state=edit.data;
+  entry=state.entries.find(e=>e.id===posted.data.entryId);edit=await request(`/api/entries/${entry.id}`,{method:'PUT',body:{...entry,type:'account_income',expectedRevision:state.version}});assert.equal(edit.res.status,200);assert.equal(edit.data.reopenedFeedItems,1);state=edit.data;
+  const feed=(await request('/api/bank-feed')).data;assert.equal(feed.items.find(i=>i.id===row.id).status,'pending');
+});
+
+test('bank-feed listing paginates within a status and keeps global stats',async()=>{
+  const first=await request('/api/bank-feed?status=pending&limit=1&offset=0'),second=await request('/api/bank-feed?status=pending&limit=1&offset=1');
+  assert.equal(first.res.status,200);assert.equal(first.data.page.limit,1);assert.equal(first.data.page.returned,1);assert.equal(first.data.page.total,first.data.stats.pending);assert.notEqual(first.data.items[0].id,second.data.items[0].id);assert.equal(first.data.stats.posted,3);
+});
+
+test('same-amount transfers with distinct descriptions remain separate movements',async()=>{
+  const rowsA=[{date:'2026-09-25',description:'Ski trip',signedAmount:-30,currency:'USD',externalId:'rent-out'}];
+  const rowsB=[{date:'2026-09-25',description:'University tuition',signedAmount:-30,currency:'USD',externalId:'travel-out'}];
+  await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'out.csv',rows:[...rowsA,...rowsB]}});
+  await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_cash',sourceName:'in.csv',rows:[{date:'2026-09-25',description:'Ski trip',signedAmount:30,currency:'USD',externalId:'rent-in'},{date:'2026-09-25',description:'University tuition',signedAmount:30,currency:'USD',externalId:'travel-in'}]}});
+  let feed=(await request('/api/bank-feed')).data;const row=id=>feed.items.find(i=>i.externalId===id);
+  const a=await request(`/api/bank-feed/${row('rent-out').id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_cash'}});assert.equal(a.res.status,200);state=a.data.state;
+  const b=await request(`/api/bank-feed/${row('travel-out').id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_cash'}});assert.equal(b.res.status,200);state=b.data.state;
+  const c=await request(`/api/bank-feed/${row('rent-in').id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_bank'}});assert.equal(c.res.status,200);assert.equal(c.data.linkedExistingTransfer,true);state=c.data.state;
+  const d=await request(`/api/bank-feed/${row('travel-in').id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_bank'}});assert.equal(d.res.status,200);assert.equal(d.data.linkedExistingTransfer,true);state=d.data.state;
+  assert.notEqual(c.data.entryId,d.data.entryId);
+  feed=(await request('/api/bank-feed')).data;
+  for(const id of ['rent-out','travel-out','rent-in','travel-in'])assert.equal(row(id).status,'posted');
+});
+
+test('ambiguous transfer candidates create a new movement instead of guessing',async()=>{
+  await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'ambiguous-out.csv',rows:[{date:'2026-09-25',description:'Shared movement',signedAmount:-22,currency:'USD',externalId:'ambiguous-out-1'},{date:'2026-09-26',description:'Shared movement',signedAmount:-22,currency:'USD',externalId:'ambiguous-out-2'}]}});
+  await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_cash',sourceName:'ambiguous-in.csv',rows:[{date:'2026-09-26',description:'Shared movement',signedAmount:22,currency:'USD',externalId:'ambiguous-in'}]}});
+  let feed=(await request('/api/bank-feed')).data;const find=id=>feed.items.find(i=>i.externalId===id);
+  for(const id of ['ambiguous-out-1','ambiguous-out-2']){const result=await request(`/api/bank-feed/${find(id).id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_cash'}});assert.equal(result.res.status,200);state=result.data.state;}
+  const before=state.entries.length;const result=await request(`/api/bank-feed/${find('ambiguous-in').id}/post`,{method:'POST',body:{expectedRevision:state.version,classification:'transfer',targetAccountId:'account_bank'}});
+  assert.equal(result.res.status,200);assert.equal(result.data.linkedExistingTransfer,false);assert.equal(result.data.state.entries.length,before+1);state=result.data.state;
+});
+
 test('ledger reset also clears bank feed rows and rules',async()=>{
   const before=(await request('/api/bank-feed')).data;
   assert.ok(before.items.length>0);

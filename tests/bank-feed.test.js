@@ -59,3 +59,18 @@ test('normalizes European-formatted statement amounts and withdrawal/deposit col
   assert.equal(out.items[0].signedAmount,-1234.56);
   assert.equal(out.items[1].signedAmount,100.25);
 });
+
+test('reconcileFeed matches posted signed amounts to ledger movements and excludes opening balances',async()=>{
+  const {reconcileFeed}=await import('../lib/bank-feed.js');
+  const accounts=[{id:'a',name:'Bank',currency:'USD'},{id:'b',name:'Cash',currency:'USD'}];
+  const entries=[{id:'opening',type:'opening_balance',accountId:'a',amount:1000},{type:'account_expense',accountId:'a',amount:45},{type:'account_income',accountId:'a',amount:20},{type:'account_transfer',fromAccountId:'a',toAccountId:'b',fromAmount:10,toAmount:10}];
+  const items=[{accountId:'a',status:'posted',signedAmount:-45},{accountId:'a',status:'posted',signedAmount:20},{accountId:'a',status:'posted',signedAmount:-10},{accountId:'b',status:'posted',signedAmount:10}];
+  const result=reconcileFeed(items,entries,accounts);
+  assert.equal(result[0].postedAmount,-35);assert.equal(result[0].ledgerAmount,-35);assert.equal(result[1].postedAmount,10);assert.equal(result[1].ledgerAmount,10);
+});
+
+test('reconcileFeed exposes edited-entry amount mismatches',async()=>{
+  const {reconcileFeed}=await import('../lib/bank-feed.js');
+  const [result]=reconcileFeed([{accountId:'a',status:'posted',signedAmount:-45}],[{type:'account_expense',accountId:'a',amount:60}],[{id:'a',name:'Bank',currency:'USD'}]);
+  assert.equal(result.postedAmount,-45);assert.equal(result.ledgerAmount,-60);assert.notEqual(result.postedAmount,result.ledgerAmount);
+});

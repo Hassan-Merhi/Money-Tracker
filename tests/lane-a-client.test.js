@@ -75,7 +75,7 @@ test('bulk spreadsheet import intentionally keeps compatibility state save',()=>
 
 test('service worker forces Lane A client refresh and caches exact-money dependency',()=>{
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
-  assert.match(sw,/money-tracker-debt-v13/);
+  assert.match(sw,/money-tracker-debt-v16/);
   assert.match(sw,/'\/lib\/money\.js'/);
 });
 
@@ -117,7 +117,8 @@ test('Lane B client has persisted modes and no hard-coded debt-only flag',()=>{
   const app=readFileSync(new URL('../app.js',import.meta.url),'utf8');
   assert.equal(app.includes('DEBT_ONLY_MODE'),false);
   assert.match(app,/appMode==='advanced'/);
-  assert.match(app,/Enable Advanced mode/);
+  assert.match(app,/id="settingMode"/);
+  assert.doesNotMatch(app,/id="enableAdvanced"/);
 });
 
 test('Lane B recurring and Bank Feed clients expose durable reminder and undo actions',async()=>{

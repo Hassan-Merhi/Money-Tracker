@@ -1,3 +1,4 @@
+import { icon, mobilePages, recentDebtEntries, activityMarkup, peopleOverviewMarkup } from './lib/dashboard-ui.js';
 import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
@@ -18,7 +19,7 @@ let routeFocusPending = false;
 let modalReturnFocus = null;
 let modalSequence = 0;
 let a11yFieldSequence = 0;
-let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false,ios:false};
+let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false};
 
 const app = document.querySelector('#app');
 const advancedMode=()=>state?.settings?.appMode==='advanced';
@@ -35,7 +36,7 @@ function applyTheme(preference=themePreference()){
   const effective=preference==='system'?(themeMedia?.matches?'dark':'light'):preference;
   document.documentElement.dataset.theme=effective;
   document.documentElement.style.colorScheme=effective;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',effective==='dark'?'#0b1120':'#111827');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',effective==='dark'?'#0e191d':'#f5f7f8');
 }
 function saveThemePreference(preference){
   const value=['system','light','dark'].includes(preference)?preference:'system';
@@ -104,7 +105,7 @@ function wireFieldLabels(root=document){
 }
 
 function iconFor(page) {
-  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',bank:'🏦',insights:'◫',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
+  return icon(page);
 }
 
 function titleFor(page) {
@@ -132,36 +133,32 @@ function render() {
   if(!advanced && hiddenInSimpleMode.includes(route.page)){location.hash='#dashboard';return;}
   const navPage = route.page === 'person' ? 'people' : route.page;
   const visiblePages=advanced?['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings']:['dashboard','people','transactions','reports','settings'];
-  const mobilePrimary=['dashboard','people','transactions'];
-  const mobileMoreActive=!mobilePrimary.includes(navPage);
+  const mobileNavPages=mobilePages(advanced);
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Who owes who</small></div></div>
-        <nav class="nav" aria-label="Primary navigation">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
-        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>${advanced?'Advanced money mode · accounts, bank feed & schedules':'Simple mode · focused debt tracking'}<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
+        <div class="brand"><div class="brand-mark">${icon('insights')}</div><div><h1>Money Tracker</h1><small>A little more clarity.</small></div></div>
+        <div class="nav-caption">WORKSPACE</div><nav class="nav" aria-label="Primary navigation">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <div class="sidebar-foot"><span class="mode-label">${advanced?'Advanced workspace':'Simple workspace'}</span><strong>${escapeHtml(user?.email || '')}</strong><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2 id="pageHeading" tabindex="-1">${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
+          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">${icon('plus')} Add activity</button></div>
         </header>
         <main class="main" id="main" aria-labelledby="pageHeading" tabindex="-1"></main>
       </section>
-      <nav class="mobile-nav" aria-label="Mobile navigation">
-        <button data-nav="dashboard" class="${navPage==='dashboard'?'active':''}"${navPage==='dashboard'?' aria-current="page"':''}><span>${iconFor('dashboard')}</span>Home</button>
-        <button data-nav="people" class="${navPage==='people'?'active':''}"${navPage==='people'?' aria-current="page"':''}><span>${iconFor('people')}</span>People</button>
-        <button class="mobile-add" id="mobileQuickEntry" aria-label="Add debt activity"><span>＋</span>Add</button>
-        <button data-nav="transactions" class="${navPage==='transactions'?'active':''}"${navPage==='transactions'?' aria-current="page"':''}><span>${iconFor('transactions')}</span>Activity</button>
-        <button id="mobileMoreBtn" class="${mobileMoreActive?'active':''}"${mobileMoreActive?' aria-current="page"':''}><span>•••</span>More</button>
-      </nav>
+      <nav class="mobile-nav" aria-label="Mobile navigation">${mobileNavPages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span>${iconFor(p)}</span>${p==='dashboard'?'Home':p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}${advanced?`<button id="mobileMore" class="${!mobileNavPages.includes(navPage)?'active':''}" aria-label="More navigation" aria-haspopup="dialog"><span>${icon('more')}</span>More</button>`:''}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
+  document.querySelector('#mobileMore')?.addEventListener('click',()=>{
+    const pages=visiblePages.filter(p=>!mobileNavPages.includes(p));
+    openModal('Your workspace',`<nav class="more-nav" aria-label="More navigation">${pages.map(p=>`<button class="btn ${navPage===p?'selected':''}" data-more-nav="${p}"${navPage===p?' aria-current="page"':''}>${iconFor(p)}${titleFor(p)}${icon('arrow')}</button>`).join('')}</nav>`,null,false);
+    document.querySelectorAll('[data-more-nav]').forEach(button=>button.addEventListener('click',()=>{closeModal();location.hash=`#${button.dataset.moreNav}`;}));
+  });
   document.querySelector('#applyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
-  document.querySelector('#mobileQuickEntry')?.addEventListener('click', () => openQuickMenu());
-  document.querySelector('#mobileMoreBtn')?.addEventListener('click', () => openMobileMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());
   document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; showAuth(); });
 
@@ -184,18 +181,6 @@ function render() {
   }
 }
 
-function openMobileMenu(){
-  const pages=advancedMode()?['accounts','bank','insights','scheduled','reports','settings']:['reports','settings'];
-  openModal('More',`<div class="mobile-more-grid">${pages.map(page=>`<button class="mobile-more-item" type="button" data-mobile-more="${page}"><span class="mobile-more-icon">${iconFor(page)}</span><strong>${titleFor(page)}</strong><small>${subFor(page)}</small></button>`).join('')}</div>`,null,false);
-  const back=document.querySelector('.modal-backdrop');
-  back?.classList.add('mobile-more-backdrop');
-  back?.querySelectorAll('[data-mobile-more]').forEach(button=>button.addEventListener('click',()=>{
-    const page=button.dataset.mobileMore;
-    closeModal(false);
-    location.hash=`#${page}`;
-  }));
-}
-
 function currencyTotalsMarkup(totals, key, fallback='0') {
   const rows = Object.entries(totals).filter(([,v]) => Math.abs(v[key] || 0) > 0.000001);
   if (!rows.length) return `<span>${fallback}</span>`;
@@ -205,38 +190,46 @@ function currencyTotalsMarkup(totals, key, fallback='0') {
 function renderDashboard(main) {
   const pBalances = personBalances(state.entries, state.people);
   const totals = totalsFromBalances(pBalances);
-  const recent = [...state.entries].filter(e=>PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt)).slice(0,8);
-
-  main.innerHTML = `
+  const recent = recentDebtEntries(state.entries);
+  const overview = peopleOverviewMarkup(state.people, pBalances);
+  const dateLabel = new Intl.DateTimeFormat(undefined, {weekday:'long', month:'long', day:'numeric'}).format(new Date());
+  const actions = [
+    ['paid_for_person','up','They owe me','Record money you lent'],
+    ['received_from_person','check','They paid me','Record a repayment'],
+    ['borrowed_from_person','down','I owe them','Record money you borrowed'],
+    ['paid_to_person','check','I paid them','Settle what you owe'],
+    [SPLIT_ENTRY_TYPE,'people','Split a payment','Share it between people'],
+    ['person','plus','Add a person','Start a new statement']
+  ];
+  main.innerHTML = `<div class="dashboard">
+    <div class="dashboard-intro"><div><div class="eyebrow">YOUR MONEY, AT A GLANCE</div><h2>A clearer picture.</h2><p>Keep track of what’s owed. Make room for what’s next.</p></div><div class="dashboard-date">${icon('scheduled')}<span>${escapeHtml(dateLabel)}</span></div></div>
     <div class="grid stats debt-stats">
-      <div class="card stat good"><div class="stat-top"><div class="stat-label">PEOPLE OWE ME</div><div class="stat-icon">↗</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'owedToMe','0')}</div><div class="stat-note">Money you should receive</div></div>
-      <div class="card stat bad"><div class="stat-top"><div class="stat-label">I OWE PEOPLE</div><div class="stat-icon">↘</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe','0')}</div><div class="stat-note">Money you need to pay</div></div>
-      <div class="card stat net"><div class="stat-top"><div class="stat-label">NET POSITION</div><div class="stat-icon">≈</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net','0')}</div><div class="stat-note">Owed to you minus what you owe</div></div>
+      <section class="card stat good"><div class="stat-top"><h3 class="stat-label">People owe me</h3><div class="stat-icon">${icon('up')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'owedToMe',money(0,state.settings.defaultCurrency))}</div><div class="stat-note"><span class="stat-dot"></span>Money to receive</div></section>
+      <section class="card stat bad"><div class="stat-top"><h3 class="stat-label">I owe people</h3><div class="stat-icon">${icon('down')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe',money(0,state.settings.defaultCurrency))}</div><div class="stat-note"><span class="stat-dot"></span>Money to pay back</div></section>
+      <section class="card stat net"><div class="stat-top"><h3 class="stat-label">Net position</h3><div class="stat-icon">${icon('net')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net',money(0,state.settings.defaultCurrency))}</div><div class="stat-note">Owed to you minus what you owe</div></section>
     </div>
-    ${advancedMode()?'':`<div class="card panel" style="margin-bottom:16px"><div class="panel-head"><div><h3>Simple mode is active</h3><p>Your accounts, Bank Feed, budgets and recurring schedules stay saved but hidden. Advanced mode unlocks the full money system without changing or deleting your debt records.</p></div><button class="btn primary" id="enableAdvanced">Enable Advanced mode</button></div></div>`}
-    <div class="grid section-grid">
-      <section class="card panel">
-        <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest debts and repayments</p></div><button class="btn small" data-go="transactions">View all</button></div>
-        ${recent.length ? transactionTable(recent, {compact:true}) : `<div class="empty"><strong>No debt activity yet</strong>Add a person, then record what they owe you or what you owe them.</div>`}
-      </section>
-      <section class="card panel">
-        <div class="panel-head"><div><h3>Quick actions</h3><p>No bank account needed</p></div></div>
-        <div class="quick-grid">
-          <button class="quick" data-action="paid_for_person"><span class="qicon">↗</span><strong>They owe me</strong><small>I paid for them / lent them money</small></button>
-          <button class="quick" data-action="received_from_person"><span class="qicon">💵</span><strong>They paid me</strong><small>Reduce what they owe me</small></button>
-          <button class="quick" data-action="borrowed_from_person"><span class="qicon">↘</span><strong>I owe them</strong><small>They paid for me / lent me money</small></button>
-          <button class="quick" data-action="paid_to_person"><span class="qicon">✅</span><strong>I paid them</strong><small>Reduce what I owe them</small></button>
-          <button class="quick" data-action="${SPLIT_ENTRY_TYPE}"><span class="qicon">👥</span><strong>Split between people</strong><small>One amount owed by multiple people</small></button>
-          <button class="quick" data-action="person"><span class="qicon">👤</span><strong>Add a person</strong><small>Create a statement</small></button>
-        </div>
-      </section>
-    </div>`;
+    <div class="dashboard-columns">
+      <div class="dashboard-primary">
+        <section class="card panel activity-panel">
+          <div class="panel-head"><div><h3>Recent activity</h3><p>The latest in your money story</p></div><a class="text-link" href="#transactions">View all ${icon('arrow')}</a></div>
+          ${recent.length ? activityMarkup(recent,state.people) : `<div class="dashboard-empty"><span class="empty-icon">${icon('transactions')}</span><h4>A fresh start for your finances</h4><p>Your debts and repayments will show up here.<br>${state.people.length?'Record your first debt or repayment to get started.':'Start with someone you exchange money with.'}</p><button class="btn primary" data-action="${state.people.length?'activity':'person'}">${icon('plus')} ${state.people.length?'Add activity':'Add your first person'}</button></div>`}
+          ${recent.length ? '<a class="activity-footer" href="#transactions">See all transactions '+icon('arrow')+'</a>' : ''}
+        </section>
+        <section class="card panel people-overview"><div class="panel-head"><div><h3>People & balances <span class="count-badge">${overview.count}</span></h3><p>Outstanding balances, by person</p></div><a class="text-link" href="#people">All people ${icon('arrow')}</a></div>${overview.markup || `<div class="people-empty">${icon('check')}<div><strong>${state.people.length?'You’re all settled up.':'Good records start with people.'}</strong><p>${state.people.length?'No outstanding balances right now.':'Add a person to keep every balance in one place.'}</p></div></div>`}</section>
+      </div>
+      <div class="dashboard-secondary">
+        <section class="card panel quick-panel"><div class="panel-head"><div><h3>Make a move</h3><p>A quick update. A clearer balance.</p></div><span class="keyboard-hint" title="Press N to add activity">N</span></div><div class="quick-grid">${actions.map(([type,symbol,title,note])=>`<button class="quick" data-action="${type}"><span class="qicon">${icon(symbol)}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}</div><div class="quick-foot">${icon('check')} No bank account needed</div></section>
+        ${advancedMode()?`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>The bigger picture</h3><p>Explore your spending, categories and monthly budgets.</p><a class="text-link" href="#insights">Open insights ${icon('arrow')}</a></section>`:`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>More clarity. When you’re ready.</h3><p>Bring accounts, budgets and schedules into view with Advanced mode. Your existing records stay just as they are.</p><button class="text-link" id="enableAdvanced">Enable Advanced mode ${icon('arrow')}</button></section>`}
+      </div>
+    </div>
+    <div class="dashboard-caption">${icon('check')} Your balances, all in one place. <span>${advancedMode()?'Advanced':'Simple'} workspace</span></div>
+  </div>`;
   main.querySelector('#enableAdvanced')?.addEventListener('click',async()=>{const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';const saved=await runMutation(version=>updateSettings({defaultCurrency:state.settings.defaultCurrency,appMode:'advanced',timezone},version),'Advanced mode enabled.');if(saved)location.hash='#dashboard';});
-  main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
-    if (a==='person') openPersonModal(); else openTransactionModal(null,{type:a});
+    if (a==='person') openPersonModal(); else if(a==='activity') openQuickMenu(); else openTransactionModal(null,{type:a});
   }));
+  main.querySelectorAll('[data-dashboard-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.dashboardEntry))));
 }
 
 function renderPeople(main) {
@@ -347,13 +340,13 @@ function renderTransactions(main) {
 }
 
 function transactionTable(entries,{compact=false}={}){
-  return `<div class="table-wrap mobile-ledger-table"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
+  return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
     const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
     const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
     const category=state.categories?.find(x=>x.id===e.categoryId);
-    return `<tr><td data-label="Date">${escapeHtml(e.date)}</td><td data-label="Type"><span class="pill">${prettyType(e.type)}</span></td><td data-label="Person / transfer">${personText}</td><td data-label="Notes">${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td data-label="Amount" class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button><button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
+    return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions"><button class="btn small" data-edit-entry="${e.id}">Edit</button> <button class="btn small danger" data-delete-entry="${e.id}">Delete</button></td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
 
 function renderSettings(main) {
@@ -364,7 +357,7 @@ function renderSettings(main) {
       <div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div>
       <div class="field"><label>Timezone</label><input class="input" id="settingTimezone" value="${escapeHtml(state.settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}" readonly><span class="muted tiny">Used by server-side recurring reminders.</span></div>
     </div><div class="warning" style="margin-top:12px"><strong>Simple mode</strong> hides accounts, Bank Feed, budgets and schedules without deleting them. Switch back to Advanced at any time.</div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
-    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Money Tracker keeps its interface available offline, but financial changes are only sent when you are online.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div>${pwa.ios&&!pwa.installed?'<div class="ios-install-card"><strong>Install on iPhone like a real app</strong><div>Add Money Tracker to your Home Screen for full-screen standalone mode and faster access.</div><div class="ios-install-steps"><span>1. Tap the Share button in Safari.</span><span>2. Choose “Add to Home Screen”.</span><span>3. Open Money Tracker from the new Home Screen icon.</span></div></div>':''}</section>
+    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Money Tracker keeps its interface available offline, but financial changes are only sent when you are online.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div></section>
     ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. You can reset or delete secondary sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
     ${user?.isOwner?'<section class="card settings-card"><h3>Operations & integrity</h3><p class="muted">Owner-only database integrity status and server snapshot controls.</p><div id="runtimeStatus" class="muted">Loading diagnostics…</div><div class="page-actions" style="margin-top:14px"><button class="btn" id="refreshRuntime">Refresh diagnostics</button><button class="btn primary" id="serverSnapshot">Create server snapshot</button></div></section>':''}
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Password changes revoke every other session automatically.</p>

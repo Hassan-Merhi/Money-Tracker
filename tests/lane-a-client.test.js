@@ -75,6 +75,39 @@ test('bulk spreadsheet import intentionally keeps compatibility state save',()=>
 
 test('service worker forces Lane A client refresh and caches exact-money dependency',()=>{
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
-  assert.match(sw,/money-tracker-debt-v6/);
+  assert.match(sw,/money-tracker-debt-v7/);
   assert.match(sw,/'\/lib\/money\.js'/);
+});
+
+
+test('backup and account lifecycle browser APIs use protected endpoints',async()=>{
+  await store.exportFullBackup();
+  assert.equal(last().path,'/api/backup/full');
+  assert.equal(last().options.method,undefined);
+
+  await store.restoreFullBackup({backupVersion:2,app:'money-owed-tracker',user:{},data:{}});
+  assert.equal(last().path,'/api/backup/full/restore');
+  assert.equal(last().options.method,'POST');
+  assert.equal(last().options.headers['X-CSRF-Token'],'csrf-lane-a');
+
+  await store.changePassword('old password value','new password value');
+  assert.equal(last().path,'/api/auth/password');
+  assert.equal(last().options.method,'POST');
+  assert.equal(last().options.headers['X-CSRF-Token'],'csrf-lane-a');
+
+  await store.revokeOtherSessions();
+  assert.equal(last().path,'/api/auth/sessions/revoke-others');
+  assert.equal(last().options.method,'POST');
+
+  await store.resetUserPassword('user_other','replacement password');
+  assert.equal(last().path,'/api/users/user_other/password');
+  assert.equal(last().options.method,'POST');
+
+  await store.deleteUserAccount('user_other');
+  assert.equal(last().path,'/api/users/user_other');
+  assert.equal(last().options.method,'DELETE');
+
+  await store.deleteMyAccount('password','DELETE');
+  assert.equal(last().path,'/api/account');
+  assert.equal(last().options.method,'DELETE');
 });

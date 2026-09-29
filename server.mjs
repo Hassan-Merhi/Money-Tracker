@@ -373,7 +373,7 @@ function validateState(input, user) {
     const openingBalance=exactMoney(a.openingBalance??0,currency);
     return {id:a.id,name,type,currency,openingBalance,createdAt:a.createdAt||nowIso()};
   });
-  const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income']);
+  const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income','account_adjustment']);
   const accountById=new Map(cleanAccounts.map(a=>[a.id,a]));
   const cleanEntries=entries.map(e=>{
     if(!idOk(e.id,'entry')||eSeen.has(e.id)||!allowedTypes.has(e.type)) throw new Error('Invalid transaction record.'); eSeen.add(e.id);
@@ -413,6 +413,15 @@ function validateState(input, user) {
       });
       if(splitTotalMinor!==toMinor(base.amount,base.currency)) throw new Error('Split amounts must equal the transaction total.');
       base.personId=null;base.signedAmount=null;base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
+    } else if(e.type==='account_adjustment'){
+      const account=accountById.get(base.accountId);
+      if(!account) throw new Error('Account adjustment needs an account.');
+      if(!(amount>0)||base.signedAmount===null) throw new Error('Invalid account adjustment.');
+      base.currency=account.currency;
+      base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});
+      base.signedAmount=exactMoney(base.signedAmount,base.currency,{allowZero:false});
+      if(Math.abs(toMinor(base.signedAmount,base.currency))!==toMinor(base.amount,base.currency)) throw new Error('Account adjustment amount must match the signed amount.');
+      base.personId=null;base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
     } else if(e.type==='account_expense'||e.type==='account_income'){
       const account=accountById.get(base.accountId);
       if(!account||!(amount>0)) throw new Error('Account-only transaction account is missing.');
@@ -649,7 +658,7 @@ function cleanPersonInput(input,{existing=null}={}){
   if(!name)throw ledgerError('Every person needs a name.');
   return {id,name,note,createdAt:existing?.createdAt||nowIso()};
 }
-function cleanAccountInput(input,{existing=null,defaultCurrency='USD'}={}){
+function cleanAccountInput(input,{existing=null,defaultCurrency='USD',userId=null}={}){
   const id=existing?.id||(idOk(input?.id,'account')?input.id:'account_'+randomUUID());
   if(!idOk(id,'account'))throw ledgerError('Invalid account record.');
   const name=safeStr(input?.name,100),type=String(input?.type||'other');
@@ -657,6 +666,7 @@ function cleanAccountInput(input,{existing=null,defaultCurrency='USD'}={}){
   if(!name||!['bank','cash','card','wallet','other'].includes(type)||!validCurrency(currency))throw ledgerError('Invalid account record.');
   if(existing&&input?.currency&&String(input.currency).toUpperCase()!==existing.currency)throw ledgerError('Account currency cannot be changed after creation.');
   const openingBalance=exactMoney(input?.openingBalance??existing?.openingBalance??0,currency);
+  if(existing&&userId&&toMinor(openingBalance,currency)!==toMinor(existing.openingBalance??0,currency)&&accountUsedByEntry(userId,id))throw ledgerError('This account has transactions. Post an account adjustment instead of changing the opening balance.');
   return {id,name,type,currency,openingBalance,createdAt:existing?.createdAt||nowIso()};
 }
 function ledgerValidationState(userId){
@@ -669,11 +679,13 @@ function ledgerValidationState(userId){
     entries:[]
   };
 }
+const SIMPLE_MODE_DEBT_TYPES=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','split_paid_for_people']);
 function cleanLedgerEntry(user,input,{existing=null}={}){
   const id=existing?.id||(idOk(input?.id,'entry')?input.id:'entry_'+randomUUID());
   if(!idOk(id,'entry'))throw ledgerError('Invalid transaction record.');
   const stamp=nowIso();
   const candidate={...input,id,createdAt:existing?.createdAt||input?.createdAt||stamp,updatedAt:stamp};
+  if(user?.app_mode==='simple'&&SIMPLE_MODE_DEBT_TYPES.has(candidate.type)&&candidate.accountId)throw ledgerError('Simple mode records debt without an account. Switch to Advanced mode to charge an account.',400);
   try{
     const refs=ledgerValidationState(user.user_id);
     return validateState({...refs,entries:[candidate]},user).entries[0];
@@ -928,7 +940,7 @@ export const server=http.createServer(async(req,res)=>{
       const raw=q.accountById.get(a.user_id,id);if(!raw)return fail(res,404,'Account not found.');
       const existing=accountFromStorage(raw);
       if(req.method==='PUT'){
-        const body=await bodyJson(req),expected=expectedLedgerRevision(body),account=cleanAccountInput({...body,id},{existing,defaultCurrency:a.default_currency});
+        const body=await bodyJson(req),expected=expectedLedgerRevision(body),account=cleanAccountInput({...body,id},{existing,defaultCurrency:a.default_currency,userId:a.user_id});
         withLedgerMutation(a.user_id,expected,()=>{
           const storage=accountToStorage(account);
           const changed=q.updateAccount.run(account.name,account.type,storage.openingBalanceMinor,a.user_id,id);

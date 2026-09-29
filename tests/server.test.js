@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { accountBalances, personBalances } from '../lib/ledger.js';
+import { reportingSnapshot, exportRows } from '../lib/reporting.js';
+import { insightsSnapshot } from '../lib/insights.js';
 
 const dir = mkdtempSync(join(tmpdir(),'mot-block-a-'));
 process.env.DB_PATH = join(dir,'test.sqlite');
@@ -403,6 +406,140 @@ test('non-owner can permanently delete their own account with password confirmat
   const deleted=await request('/api/account',{method:'DELETE',cookie:session.cookie,csrf:session.data.csrfToken,body:{password,confirmation:'DELETE'}});
   assert.equal(deleted.res.status,200);
   const gone=await request('/api/state',{cookie:session.cookie});assert.equal(gone.res.status,401);
+});
+
+async function freshState(){const r=await request('/api/state',{cookie});assert.equal(r.res.status,200);return r.data;}
+async function setMode(appMode){const cur=await freshState();const r=await request('/api/settings',{method:'PUT',cookie,csrf,body:{expectedRevision:cur.version,appMode,defaultCurrency:cur.settings.defaultCurrency}});assert.equal(r.res.status,200);return r.data;}
+async function postEntry(entry){const cur=await freshState();return request('/api/entries',{method:'POST',cookie,csrf,body:{expectedRevision:cur.version,...entry}});}
+const ISO=()=>new Date().toISOString();
+
+test('Simple mode rejects account-charged debt entries; Advanced mode accepts them',async()=>{
+  let cur=await freshState();
+  let r=await request('/api/people',{method:'POST',cookie,csrf,body:{expectedRevision:cur.version,id:'person_mode_a',name:'Mode A'}});assert.equal(r.res.status,201);
+  cur=r.data;r=await request('/api/people',{method:'POST',cookie,csrf,body:{expectedRevision:cur.version,id:'person_mode_b',name:'Mode B'}});assert.equal(r.res.status,201);
+  cur=r.data;r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:cur.version,id:'account_mode',name:'Mode Bank',type:'bank',currency:'USD',openingBalance:100}});assert.equal(r.res.status,201);
+
+  await setMode('simple');
+  const debt={type:'paid_for_person',personId:'person_mode_a',amount:10,currency:'USD',date:'2026-09-29',merchant:'',description:'',splits:[]};
+  r=await postEntry({...debt,id:'entry_simple_account',accountId:'account_mode'});
+  assert.equal(r.res.status,400);assert.match(r.data.error,/Simple mode records debt without an account/);
+  r=await postEntry({id:'entry_simple_split_account',type:'split_paid_for_people',accountId:'account_mode',amount:10,currency:'USD',date:'2026-09-29',splits:[{personId:'person_mode_a',amount:4},{personId:'person_mode_b',amount:6}]});
+  assert.equal(r.res.status,400);assert.match(r.data.error,/Simple mode records debt without an account/);
+  for(const type of ['received_from_person','borrowed_from_person','paid_to_person']){
+    r=await postEntry({...debt,type,id:`entry_simple_${type}`,accountId:'account_mode'});assert.equal(r.res.status,400,type);
+  }
+  r=await postEntry({...debt,id:'entry_simple_no_account',accountId:null});
+  assert.equal(r.res.status,201);
+  assert.equal(r.data.entries.find(e=>e.id==='entry_simple_no_account').accountId,null);
+  r=await postEntry({id:'entry_simple_split_none',type:'split_paid_for_people',accountId:null,amount:10,currency:'USD',date:'2026-09-29',splits:[{personId:'person_mode_a',amount:4},{personId:'person_mode_b',amount:6}]});
+  assert.equal(r.res.status,201);
+
+  // editing an existing entry through PUT is guarded the same way
+  cur=await freshState();
+  r=await request('/api/entries/entry_simple_no_account',{method:'PUT',cookie,csrf,body:{expectedRevision:cur.version,...debt,accountId:'account_mode'}});
+  assert.equal(r.res.status,400);
+
+  // bulk paths must keep working on Advanced-mode data even while in Simple mode
+  await setMode('advanced');
+  r=await postEntry({...debt,id:'entry_advanced_account',accountId:'account_mode'});
+  assert.equal(r.res.status,201);
+  assert.equal(r.data.entries.find(e=>e.id==='entry_advanced_account').accountId,'account_mode');
+  await setMode('simple');
+  cur=await freshState();
+  const bulk=await request('/api/state',{method:'PUT',cookie,csrf,body:cur});
+  assert.equal(bulk.res.status,200);
+  assert.equal(bulk.data.entries.find(e=>e.id==='entry_advanced_account').accountId,'account_mode');
+  await setMode('advanced');
+});
+
+test('account adjustments are validated, isolated from spending and persisted with signed minor units',async()=>{
+  await setMode('advanced');
+  let cur=await freshState();
+  let r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:cur.version,id:'account_adj',name:'Adjust Bank',type:'bank',currency:'USD',openingBalance:100}});assert.equal(r.res.status,201);
+  cur=r.data;r=await request('/api/accounts',{method:'POST',cookie,csrf,body:{expectedRevision:cur.version,id:'account_adj_idle',name:'Idle Bank',type:'bank',currency:'USD',openingBalance:10}});assert.equal(r.res.status,201);
+  const category=r.data.categories.find(c=>c.kind==='expense'||c.kind==='both');assert.ok(category);
+  const adj={type:'account_adjustment',accountId:'account_adj',amount:50,signedAmount:50,currency:'USD',date:'2026-09-29',merchant:'',description:'Reconcile',splits:[]};
+
+  for(const [label,patch] of [
+    ['no account',{accountId:null}],
+    ['unknown account',{accountId:'account_missing'}],
+    ['missing signed amount',{signedAmount:undefined}],
+    ['zero signed amount',{signedAmount:0}],
+    ['zero amount',{amount:0,signedAmount:0}],
+    ['signed amount differs from amount',{signedAmount:49.99}],
+    ['negative amount',{amount:-50,signedAmount:-50}],
+    ['too many decimals',{amount:0.001,signedAmount:0.001}]
+  ]){
+    r=await postEntry({...adj,...patch,id:`entry_adj_bad_${label.replaceAll(' ','_')}`});
+    assert.equal(r.res.status,400,label);
+  }
+  cur=await freshState();assert.equal(cur.entries.some(e=>e.id.startsWith('entry_adj_bad_')),false);
+
+  const before=cur;
+  const beforeReport=reportingSnapshot(before);
+  const beforeInsights=insightsSnapshot(before,'2026-09');
+  const beforeBalances=accountBalances(before.entries,before.accounts);
+  const beforePeople=personBalances(before.entries,before.people);
+
+  // person / category / transfer fields and a wrong currency are stripped or coerced
+  r=await postEntry({...adj,id:'entry_adj_up',personId:'person_mode_a',categoryId:category.id,fromAccountId:'account_adj',toAccountId:'account_adj_idle',fromAmount:5,toAmount:5,currency:'EUR'});
+  assert.equal(r.res.status,201);
+  const up=r.data.entries.find(e=>e.id==='entry_adj_up');
+  assert.equal(up.type,'account_adjustment');assert.equal(up.accountId,'account_adj');assert.equal(up.currency,'USD');
+  assert.equal(up.amount,50);assert.equal(up.signedAmount,50);
+  assert.equal(up.personId,null);assert.equal(up.categoryId,null);assert.equal(up.fromAccountId,null);assert.equal(up.toAccountId,null);assert.equal(up.fromAmount,null);assert.equal(up.toAmount,null);
+  r=await postEntry({...adj,id:'entry_adj_down',amount:20.5,signedAmount:-20.5,date:'2026-10-01'});
+  assert.equal(r.res.status,201);
+
+  const after=await freshState();
+  const afterBalances=accountBalances(after.entries,after.accounts);
+  assert.equal(afterBalances.account_adj,beforeBalances.account_adj+50-20.5);
+  assert.equal(afterBalances.account_adj_idle,beforeBalances.account_adj_idle);
+  for(const account of before.accounts.filter(a=>!a.id.startsWith('account_adj')))assert.equal(afterBalances[account.id],beforeBalances[account.id]);
+  assert.deepEqual(personBalances(after.entries,after.people),beforePeople);
+  const afterReport=reportingSnapshot(after);
+  for(const key of ['activity','personalCashFlow','categorySpending','merchants','monthly','outstanding','budgets'])assert.deepEqual(afterReport[key],beforeReport[key],key);
+  assert.deepEqual(insightsSnapshot(after,'2026-09'),beforeInsights);
+
+  // exact signed minor-unit storage and round trip
+  const stored=db.prepare("SELECT amount_minor AS amountMinor,signed_amount_minor AS signedMinor,person_id AS personId,category_id AS categoryId FROM entries WHERE id IN ('entry_adj_up','entry_adj_down') ORDER BY id").all();
+  assert.deepEqual(stored.map(row=>[row.amountMinor,row.signedMinor,row.personId,row.categoryId]),[[2050,-2050,null,null],[5000,5000,null,null]]);
+  const rows=exportRows(after,{type:'account_adjustment'});
+  assert.deepEqual(rows.map(row=>[row['Entry ID'],row.Amount,row['Account ID']]).sort(),[['entry_adj_down',20.5,'account_adj'],['entry_adj_up',50,'account_adj']]);
+
+  // entries can be edited and the direction flips cleanly
+  cur=await freshState();
+  r=await request('/api/entries/entry_adj_down',{method:'PUT',cookie,csrf,body:{expectedRevision:cur.version,...adj,amount:30,signedAmount:30,date:'2026-10-01'}});
+  assert.equal(r.res.status,200);assert.equal(r.data.entries.find(e=>e.id==='entry_adj_down').signedAmount,30);
+});
+
+test('opening balance is locked once an account has transactions',async()=>{
+  const cur=await freshState();
+  const account=cur.accounts.find(a=>a.id==='account_adj');assert.ok(account);
+  let r=await request('/api/accounts/account_adj',{method:'PUT',cookie,csrf,body:{expectedRevision:cur.version,name:account.name,type:account.type,openingBalance:999}});
+  assert.equal(r.res.status,400);assert.match(r.data.error,/Post an account adjustment instead of changing the opening balance/);
+  assert.equal((await freshState()).accounts.find(a=>a.id==='account_adj').openingBalance,100);
+  // unchanged opening balance still allows renames
+  r=await request('/api/accounts/account_adj',{method:'PUT',cookie,csrf,body:{expectedRevision:cur.version,name:'Adjust Bank Renamed',type:'bank',openingBalance:100}});
+  assert.equal(r.res.status,200);assert.equal(r.data.accounts.find(a=>a.id==='account_adj').name,'Adjust Bank Renamed');
+  // an unused account can still have its opening balance corrected
+  const fresh=await freshState();
+  r=await request('/api/accounts/account_adj_idle',{method:'PUT',cookie,csrf,body:{expectedRevision:fresh.version,name:'Idle Bank',type:'bank',openingBalance:25}});
+  assert.equal(r.res.status,200);assert.equal(r.data.accounts.find(a=>a.id==='account_adj_idle').openingBalance,25);
+  // transfers count as transactions for the lock as well
+  r=await postEntry({id:'entry_adj_transfer',type:'account_transfer',fromAccountId:'account_adj_idle',toAccountId:'account_adj',fromAmount:1,toAmount:1,amount:1,date:'2026-09-29',splits:[]});assert.equal(r.res.status,201);
+  const locked=await freshState();
+  r=await request('/api/accounts/account_adj_idle',{method:'PUT',cookie,csrf,body:{expectedRevision:locked.version,name:'Idle Bank',type:'bank',openingBalance:26}});
+  assert.equal(r.res.status,400);
+});
+
+test('bulk state replacement round-trips account adjustments',async()=>{
+  const cur=await freshState();
+  const put=await request('/api/state',{method:'PUT',cookie,csrf,body:cur});
+  assert.equal(put.res.status,200);
+  assert.deepEqual(put.data.entries.filter(e=>e.type==='account_adjustment').map(e=>[e.id,e.signedAmount]).sort(),cur.entries.filter(e=>e.type==='account_adjustment').map(e=>[e.id,e.signedAmount]).sort());
+  const bad=await request('/api/state',{method:'PUT',cookie,csrf,body:{...put.data,entries:[...put.data.entries,{id:'entry_adj_bulk_bad',type:'account_adjustment',accountId:'account_adj',amount:5,signedAmount:6,currency:'USD',date:'2026-09-29',createdAt:ISO(),updatedAt:ISO()}]}});
+  assert.equal(bad.res.status,400);
 });
 
 test('logout invalidates the server-side session',async()=>{

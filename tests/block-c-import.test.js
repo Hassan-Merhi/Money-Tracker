@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildXlsx } from '../lib/xlsx.js';
 import { parseWorkbook } from '../lib/xlsx-import.js';
-import { applyImport, applyQuickPasteImport, dateValue, detectImportMode, guessHeader, parseQuickPaste, parseSplitDetails } from '../lib/importer.js';
+import { applyImport, applyQuickPasteImport, transactionType, dateValue, detectImportMode, guessHeader, parseQuickPaste, parseSplitDetails } from '../lib/importer.js';
 
 const baseState=()=>({version:1,settings:{displayName:'Ledger',defaultCurrency:'USD'},people:[],accounts:[],entries:[]});
 function ids(){let n=0;return prefix=>`${prefix}_${++n}`;}
@@ -243,4 +243,24 @@ test('transaction import reconciles duplicate multiplicity against entries alrea
   assert.equal(out.result.entries,1);
   assert.equal(out.result.skipped,1);
   assert.equal(out.state.entries.length,2);
+});
+
+test('importer recognises the "account adjustment" type alias and builds a signed account entry',()=>{
+  assert.equal(transactionType('Account adjustment'),'account_adjustment');
+  assert.equal(transactionType('account_adjustment'),'account_adjustment');
+  assert.equal(transactionType('Balance adjustment'),'person_adjustment');
+  const out=applyImport({
+    state:baseState(),
+    rows:[
+      {Date:'2026-09-28',Type:'Account adjustment',Account:'Bank',Amount:50,'Signed Amount':-50,Currency:'USD'},
+      {Date:'2026-09-28',Type:'Account adjustment',Amount:5,Currency:'USD'}
+    ],
+    mode:'transactions',
+    mapping:{date:'Date',type:'Type',account:'Account',amount:'Amount',signedAmount:'Signed Amount',currency:'Currency'},
+    uidFactory:ids()
+  });
+  assert.equal(out.result.entries,1);assert.equal(out.result.skipped,1);
+  const entry=out.state.entries[0];
+  assert.equal(entry.type,'account_adjustment');assert.equal(entry.personId,null);
+  assert.equal(entry.accountId,out.state.accounts[0].id);assert.equal(entry.signedAmount,-50);assert.equal(entry.amount,50);
 });

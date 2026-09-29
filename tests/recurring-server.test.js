@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { dateInTimeZone } from '../lib/utils.js';
+import { recurringStatus, shouldRemind } from '../lib/recurring.js';
 
 const dir=mkdtempSync(join(tmpdir(),'mot-block-e-'));
 process.env.DB_PATH=join(dir,'test.sqlite');
@@ -129,6 +132,71 @@ test('recurring rules are isolated per user',async()=>{
   const list=await request('/api/recurring',{cookie:login.cookie});
   assert.equal(list.res.status,200);
   assert.deepEqual(list.data.rules,[]);
+});
+
+function shiftIso(date,days){const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+const newRule=(title,nextDueDate,extra={})=>({title,frequency:'monthly',interval:1,anchorDate:nextDueDate,nextDueDate,endDate:null,remindDaysBefore:0,isActive:true,template:{type:'paid_for_person',personId:'person_alice',accountId:'account_bank',amount:10,merchant:'',description:title},...extra});
+async function freshRevision(){return (await request('/api/state',{cookie})).data.version;}
+
+test('posting a 12-day-overdue occurrence dates the entry on the occurrence date, not today',async()=>{
+  const timezone='Pacific/Auckland',tzToday=dateInTimeZone(timezone);
+  const settings=await request('/api/settings',{method:'PUT',cookie,csrf,body:{expectedRevision:await freshRevision(),timezone}});
+  assert.equal(settings.res.status,200);assert.equal(settings.data.settings.timezone,timezone);
+
+  const occurrence=shiftIso(tzToday,-12);
+  const created=await request('/api/recurring',{method:'POST',cookie,csrf,body:newRule('Overdue 12 days',occurrence)});
+  assert.equal(created.res.status,201);
+  const overdue=created.data.rule;
+  assert.equal(recurringStatus(overdue,tzToday).label,'12 days overdue');
+
+  // same expression block-e-recurring.js postRule uses
+  const transactionDate=overdue.nextDueDate<tzToday?overdue.nextDueDate:tzToday;
+  assert.equal(transactionDate,occurrence);
+  const before=Date.now();
+  const posted=await request(`/api/recurring/${overdue.id}/post`,{method:'POST',cookie,csrf,body:{expectedRevision:await freshRevision(),occurrenceDate:overdue.nextDueDate,transactionDate}});
+  assert.equal(posted.res.status,200);
+  const entry=posted.data.state.entries.find(e=>e.id===posted.data.entryId);
+  assert.equal(entry.date,occurrence);
+  assert.equal(entry.description,'Overdue 12 days');
+  const row=db.prepare('SELECT last_posted_at AS lastPostedAt,last_occurrence_date AS lastOccurrence FROM recurring_rules WHERE id=?').get(overdue.id);
+  assert.equal(row.lastOccurrence,occurrence);
+  assert.ok(Date.parse(row.lastPostedAt)>=before-1000,'last_posted_at records the real posting time');
+  assert.notEqual(row.lastPostedAt.slice(0,10),occurrence);
+
+  // due today (or in the future) still posts on the user's local today
+  const dueToday=(await request('/api/recurring',{method:'POST',cookie,csrf,body:newRule('Due today',tzToday)})).data.rule;
+  const todayDate=dueToday.nextDueDate<tzToday?dueToday.nextDueDate:tzToday;
+  assert.equal(todayDate,tzToday);
+  const postedToday=await request(`/api/recurring/${dueToday.id}/post`,{method:'POST',cookie,csrf,body:{expectedRevision:await freshRevision(),occurrenceDate:dueToday.nextDueDate,transactionDate:todayDate}});
+  assert.equal(postedToday.res.status,200);
+  assert.equal(postedToday.data.state.entries.find(e=>e.id===postedToday.data.entryId).date,tzToday);
+});
+
+test('Scheduled page status agrees with the server reminder inbox in the user timezone',async()=>{
+  const timezone='Pacific/Kiritimati';// UTC+14: its calendar day runs ahead of UTC for part of every day
+  const settings=await request('/api/settings',{method:'PUT',cookie,csrf,body:{expectedRevision:await freshRevision(),timezone}});
+  assert.equal(settings.res.status,200);
+  const tzToday=dateInTimeZone(timezone);
+  const due=(await request('/api/recurring',{method:'POST',cookie,csrf,body:newRule('Kiritimati due today',tzToday)})).data.rule;
+  const later=(await request('/api/recurring',{method:'POST',cookie,csrf,body:newRule('Kiritimati next week',shiftIso(tzToday,7))})).data.rule;
+  const inbox=(await request('/api/recurring/reminders',{cookie})).data.reminders.map(rem=>rem.ruleId);
+  for(const rule of [due,later])assert.equal(inbox.includes(rule.id),shouldRemind(rule,tzToday),rule.title);
+  assert.equal(inbox.includes(due.id),true);
+  assert.equal(recurringStatus(due,tzToday).key,'due');
+  assert.equal(recurringStatus(later,tzToday).key,'upcoming');
+});
+
+test('block-e-recurring computes dates from the ledger timezone, never raw UTC today()',()=>{
+  const source=readFileSync(new URL('../block-e-recurring.js',import.meta.url),'utf8');
+  assert.match(source,/state\.settings\.timezone/);
+  assert.match(source,/dateInTimeZone\(/);
+  assert.equal(/\btoday\(\)/.test(source),false,'no UTC today() left in block-e-recurring.js');
+  assert.match(source,/rule\.nextDueDate<tzToday\?rule\.nextDueDate:tzToday/);
+  assert.match(source,/recurringStatus\(rule,zonedToday\(state\)\)/);
+  assert.match(source,/shouldRemind\(rule,zonedToday\(state\)\)/);
+  const form=readFileSync(new URL('../lib/recurring-rule-form.js',import.meta.url),'utf8');
+  assert.match(form,/dateInTimeZone\(state\.settings\.timezone/);
+  assert.equal(/\btoday\(\)/.test(form),false);
 });
 
 test.after(async()=>{await new Promise(resolve=>server.close(resolve));db.close();rmSync(dir,{recursive:true,force:true});});

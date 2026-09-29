@@ -1,7 +1,7 @@
 import { icon, mobilePages, recentDebtEntries, activityMarkup, peopleOverviewMarkup } from './lib/dashboard-ui.js';
 import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
-import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
+import { CURRENCIES, money, today, dateInTimeZone, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
 import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
@@ -509,7 +509,8 @@ function openAccountDetail(accountId){
   const a=state.accounts.find(x=>x.id===accountId); if(!a)return;
   const balances=accountBalances(state.entries,state.accounts);
   const entries=state.entries.filter(e=>e.accountId===a.id||e.fromAccountId===a.id||e.toAccountId===a.id).sort((x,y)=>new Date(y.date)-new Date(x.date)||new Date(y.createdAt)-new Date(x.createdAt));
-  openModal(`${a.name} · ${money(balances[a.id]||0,a.currency)}`, `${entries.length?transactionTable(entries,{compact:true}):'<div class="empty">No activity yet.</div>'}<div style="margin-top:16px;display:flex;gap:8px"><button class="btn" id="modalEditAccount">Edit account</button><button class="btn danger" id="modalDeleteAccount">Delete account</button></div>`, null, false);
+  openModal(`${a.name} · ${money(balances[a.id]||0,a.currency)}`, `${entries.length?transactionTable(entries,{compact:true}):'<div class="empty">No activity yet.</div>'}<div style="margin-top:16px;display:flex;gap:8px"><button class="btn" id="modalAdjustAccount">Adjust balance</button><button class="btn" id="modalEditAccount">Edit account</button><button class="btn danger" id="modalDeleteAccount">Delete account</button></div>`, null, false);
+  document.querySelector('#modalAdjustAccount')?.addEventListener('click',()=>{closeModal();openTransactionModal(null,{type:'account_adjustment',accountId:a.id})});
   document.querySelector('#modalEditAccount')?.addEventListener('click',()=>{closeModal();openAccountModal(a)});
   document.querySelector('#modalDeleteAccount')?.addEventListener('click',()=>deleteAccount(a.id));
 }
@@ -531,8 +532,8 @@ function transactionTable(entries,{compact=false}={}){
   return `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Person / transfer</th><th>Notes</th><th class="right">Amount</th>${compact?'':'<th></th>'}</tr></thead><tbody>${entries.map(e=>{
     const p=state.people.find(x=>x.id===e.personId); const from=state.accounts.find(x=>x.id===e.fromAccountId); const to=state.accounts.find(x=>x.id===e.toAccountId); const acc=state.accounts.find(x=>x.id===e.accountId);
     const splitNames=e.type===SPLIT_ENTRY_TYPE?(e.splits||[]).map(split=>state.people.find(x=>x.id===split.personId)?.name||'Unknown').join(', '):'';
-    const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
-    const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:money(e.amount,e.currency||acc?.currency||'USD');
+    const personText=e.type==='account_transfer'?`${escapeHtml(from?.name||'Unknown')} → ${escapeHtml(to?.name||'Unknown')}`:e.type===SPLIT_ENTRY_TYPE?escapeHtml(splitNames):(e.type==='account_expense'||e.type==='account_income'||e.type==='account_adjustment')?escapeHtml(acc?.name||'Account only'):escapeHtml(p?.name||'—');
+    const amt=e.type==='account_transfer'?`${money(e.fromAmount||e.amount,from?.currency||e.currency||'USD')}${from?.currency!==to?.currency?` → ${money(e.toAmount||e.amount,to?.currency||e.currency||'USD')}`:''}`:e.type==='account_adjustment'?`${Number(e.signedAmount)<0?'−':'+'}${money(e.amount,e.currency||acc?.currency||'USD')}`:money(e.amount,e.currency||acc?.currency||'USD');
     const category=state.categories?.find(x=>x.id===e.categoryId);
     return `<tr><td>${escapeHtml(e.date)}</td><td><span class="pill">${prettyType(e.type)}</span></td><td>${personText}</td><td>${escapeHtml(e.description||e.merchant||'—')}${category?`<div class="attachment-count">${escapeHtml((category.icon?category.icon+' ':'')+category.name)}</div>`:''}${e.attachmentCount?`<div class="attachment-count">📎 ${e.attachmentCount} attachment${e.attachmentCount===1?'':'s'}</div>`:''}</td><td class="right strong">${amt}</td>${compact?'':`<td class="actions statement-actions-cell">${entryMenuMarkup(e.id)}</td>`}</tr>`}).join('')}</tbody></table></div>`;
 }
@@ -634,7 +635,7 @@ function openPersonModal(existing=null){
       saved=await runMutation(version=>updatePerson(existing.id,{name,note},version),'Person updated.');
     }else{
       const id=uid('person'),openingEntryId=uid('entry');
-      saved=await runMutation(version=>createPerson({id,name,note,openingBalance:Number(fd.get('opening')||0),currency:fd.get('currency'),direction:fd.get('direction'),openingEntryId,openingDate:today()},version),'Person added.');
+      saved=await runMutation(version=>createPerson({id,name,note,openingBalance:Number(fd.get('opening')||0),currency:fd.get('currency'),direction:fd.get('direction'),openingEntryId,openingDate:localToday()},version),'Person added.');
     }
     if(saved)closeModal();
   });
@@ -643,11 +644,12 @@ function openPersonModal(existing=null){
 
 function openAccountModal(existing=null){
   const isEdit=!!existing;
+  const openingLocked=isEdit&&state.entries.some(e=>e.accountId===existing.id||e.fromAccountId===existing.id||e.toAccountId===existing.id);
   openModal(isEdit?'Edit account':'Add account',`<form id="accountForm" class="form-grid">
     <div class="field span-2"><label>Account name</label><input class="input" name="name" required maxlength="80" value="${escapeHtml(existing?.name||'')}" placeholder="e.g. Bank Audi USD / Cash USD"></div>
     <div class="field"><label>Type</label><select class="select" name="type">${[['bank','Bank'],['cash','Cash'],['card','Card'],['wallet','Wallet'],['other','Other']].map(([v,l])=>`<option value="${v}" ${existing?.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
     <div class="field"><label>Currency</label><select class="select" name="currency" ${isEdit?'disabled':''}>${currencyOptions(existing?.currency||state.settings.defaultCurrency)}</select></div>
-    <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="any" value="${existing?.openingBalance??0}"><span class="muted tiny">Use the actual balance at the point you start tracking this account.</span></div>
+    <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="any" value="${existing?.openingBalance??0}" ${openingLocked?'readonly':''}><span class="muted tiny">${openingLocked?'This account has transactions, so the opening balance is locked. Use “Adjust balance” on the account to correct it.':'Use the actual balance at the point you start tracking this account.'}</span></div>
   </form>`,()=>document.querySelector('#accountForm').requestSubmit());
   document.querySelector('#accountForm').addEventListener('submit',async e=>{
     e.preventDefault();
@@ -660,6 +662,7 @@ function openAccountModal(existing=null){
   });
 }
 
+function localToday(){return state?.settings?.timezone?dateInTimeZone(state.settings.timezone):today();}
 function lastUsed() {
   try { return JSON.parse(localStorage.getItem('mot-last-entry') || '{}'); } catch { return {}; }
 }
@@ -714,7 +717,7 @@ function openTransactionModal(existing=null,prefill={}){
     <div class="field" id="txnAccountField"><label>Account / cash</label><select class="select" name="accountId" id="txnAccount"><option value="">Choose account</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
     <div class="field"><label>Total amount</label><input class="input" id="txnAmount" name="amount" type="number" min="0.000001" step="any" required value="${existing?.amount??''}" placeholder="0.00" inputmode="decimal"></div>
     <div class="field" id="currencyField"><label>Currency</label><select class="select" name="currency" id="txnCurrency">${currencyOptions(inferredCurrency)}</select></div>
-    <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||today()}"></div>
+    <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||localToday()}"></div>
     <div class="field"><label>Merchant / source</label><input class="input" name="merchant" maxlength="100" value="${escapeHtml(existing?.merchant||'')}" placeholder="e.g. Amazon" autocomplete="off"></div>
     <div class="field" id="txnCategoryField"><label>Category</label><select class="select" name="categoryId" id="txnCategory"></select></div>
     <div class="field span-2"><label>Notes / details</label><textarea class="textarea compact-textarea" name="description" maxlength="500" placeholder="e.g. Headphones, order #123, delivery details…">${escapeHtml(existing?.description||'')}</textarea></div>
@@ -739,24 +742,40 @@ function openTransactionModal(existing=null,prefill={}){
   amountEl.addEventListener('input',updateSplitTotal);
   bindSplitRows();
 
-  const sync=()=>{const t=typeEl.value,adjust=t==='person_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';form.querySelector('#txnPersonField').style.display=(split||accountOnly)?'none':'grid';personEl.required=!split&&!accountOnly;form.querySelector('#txnAccountField').style.display=(!advancedMode()&&!accountOnly)?'none':(adjust?'none':'grid');form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';form.querySelector('#adjustDirection').style.display=adjust?'grid':'none';splitSection.hidden=!split;if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;if(split)updateSplitTotal();};
+  let heldAccount=accEl.value;
+  const setAdjustLabels=acct=>{const wrap=form.querySelector('#adjustDirection'),[toMe,iOwe]=wrap.querySelectorAll('option');toMe.textContent=acct?'Increase this account':'They owe me more';iOwe.textContent=acct?'Decrease this account':'I owe them more';};
+  const sync=()=>{
+    const t=typeEl.value,adjust=t==='person_adjustment',acctAdjust=t==='account_adjustment',split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income';
+    const needsAccount=accountOnly||acctAdjust,showAccount=!adjust&&(advancedMode()||needsAccount);
+    form.querySelector('#txnPersonField').style.display=(split||needsAccount)?'none':'grid';personEl.required=!split&&!needsAccount;
+    form.querySelector('#txnAccountField').style.display=showAccount?'grid':'none';
+    // A hidden account field must never post: clear + disable it, and restore when it is shown again.
+    if(showAccount){if(accEl.disabled){accEl.disabled=false;if(!accEl.value)accEl.value=heldAccount;}heldAccount=accEl.value;}
+    else if(!accEl.disabled){heldAccount=accEl.value||heldAccount;accEl.disabled=true;accEl.value='';}
+    form.querySelector('#txnCategoryField').style.display=accountOnly?'grid':'none';
+    form.querySelector('#adjustDirection').style.display=(adjust||acctAdjust)?'grid':'none';setAdjustLabels(acctAdjust);
+    splitSection.hidden=!split;
+    if(!adjust&&accEl.value){const a=state.accounts.find(x=>x.id===accEl.value);if(a){curEl.value=a.currency;curEl.disabled=true}}else curEl.disabled=false;
+    if(split)updateSplitTotal();
+  };
   typeEl.addEventListener('change',()=>{fillCategories();sync();});accEl.addEventListener('change',sync);fillCategories();sync();
   const filesEl=form.querySelector('#txnFiles');filesEl.addEventListener('change',()=>{const files=[...(filesEl.files||[])];form.querySelector('#fileSelection').textContent=files.length?files.map(file=>`${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)`).join(' · '):'JPG, PNG, WebP, GIF, PDF or text · max 8 MB each';});
   if(existing) refreshAttachmentPanel(existing.id);
 
   form.addEventListener('submit',async e=>{
     e.preventDefault();
-    const fd=new FormData(form),t=fd.get('type'),split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income',person=fd.get('personId'),amount=Number(fd.get('amount')),files=[...(filesEl.files||[])];
+    const fd=new FormData(form),t=fd.get('type'),split=t===SPLIT_ENTRY_TYPE,accountOnly=t==='account_expense'||t==='account_income',acctAdjust=t==='account_adjustment',needsAccount=accountOnly||acctAdjust,person=fd.get('personId'),amount=Number(fd.get('amount')),files=[...(filesEl.files||[])];
+    const accountId=accEl.disabled?null:(fd.get('accountId')||null);
     if(!(amount>0)){showToast('Enter an amount greater than zero.');return}
-    if(!split&&!accountOnly&&!person){showToast('Choose a person.');return}
-    if((t==='account_expense'||t==='account_income')&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}
+    if(!split&&!needsAccount&&!person){showToast('Choose a person.');return}
+    if(needsAccount&&!accountId){showToast(acctAdjust?'Choose the account to adjust.':'Choose the account or cash used.');return}
     if(files.some(file=>file.size>8*1024*1024)){showToast('Each attachment must be 8 MB or smaller.');return}
     const splits=split?readSplits():[];
-    const acc=state.accounts.find(a=>a.id===fd.get('accountId'));
+    const acc=state.accounts.find(a=>a.id===accountId);
     if(split){const error=validateSplit(splits,amount,acc?.currency||fd.get('currency')||state.settings.defaultCurrency);if(error){showToast(error);return}}
-    const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:(fd.get('accountId')||null),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
-    if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
-    rememberUsed((split||accountOnly)?'':person,item.accountId,t);
+    const item={id:existing?.id||uid('entry'),type:t,personId:(split||needsAccount)?null:person,accountId:t==='person_adjustment'?null:accountId,amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    if(t==='person_adjustment'||acctAdjust) item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
+    rememberUsed((split||needsAccount)?'':person,item.accountId||recent.accountId||'',t);
     const saved=await runMutation(version=>existing?updateEntry(existing.id,item,version):createEntry(item,version),'');
     if(!saved)return;
     try{
@@ -777,7 +796,7 @@ function openTransferModal(existing=null){
     <div class="field"><label>To account</label><select class="select" name="toAccountId" id="toAccount" required><option value="">Choose</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===toId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
     <div class="field"><label>Amount leaving source</label><input class="input" name="fromAmount" type="number" min="0.000001" step="any" required value="${existing?.fromAmount??existing?.amount??''}" placeholder="0.00"></div>
     <div class="field"><label>Amount arriving destination</label><input class="input" name="toAmount" type="number" min="0.000001" step="any" required value="${existing?.toAmount??existing?.amount??''}" placeholder="0.00"></div>
-    <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||today()}"></div>
+    <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||localToday()}"></div>
     <div class="field"><label>Note</label><input class="input" name="description" maxlength="180" value="${escapeHtml(existing?.description||'')}" placeholder="e.g. ATM withdrawal"></div>
     <div class="field span-2"><div class="warning">For same-currency transfers, enter the same amount twice. For currency exchange, enter the actual amount that left and the actual amount that arrived.</div></div>
   </form>`,()=>document.querySelector('#transferForm').requestSubmit());
@@ -836,7 +855,7 @@ async function deleteAccount(id){const linked=state.entries.some(e=>e.accountId=
 function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}" ${selected===c?'selected':''}>${c}</option>`).join('')}
 function entryTypeOptions(selected,includeTransfer=true){
   const debtTypes=[['paid_for_person','They owe me'],['received_from_person','They paid me'],['borrowed_from_person','I owe them'],['paid_to_person','I paid them'],[SPLIT_ENTRY_TYPE,'Split between people'],['person_adjustment','Balance adjustment']];
-  const advanced=[['account_expense','Account expense'],['account_income','Account income']];
+  const advanced=[['account_expense','Account expense'],['account_income','Account income'],['account_adjustment','Account adjustment']];
   let types=advancedMode()?[...debtTypes,...advanced]:[...debtTypes];
   if(advancedMode()&&includeTransfer)types.push(['account_transfer','Account transfer']);
   if(selected&&!types.some(([v])=>v===selected)){

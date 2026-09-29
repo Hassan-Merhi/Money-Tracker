@@ -4,7 +4,7 @@ import { reportingSnapshot, workbookSheets, exportRows } from '../lib/reporting.
 
 const t='2026-09-01T00:00:00Z';
 const state={
-  settings:{displayName:'Family Ledger',defaultCurrency:'USD'},
+  settings:{displayName:'Family Ledger',defaultCurrency:'USD',appMode:'advanced',timezone:'Asia/Beirut'},
   people:[{id:'p1',name:'Alice',note:'Cousin',createdAt:t},{id:'p2',name:'Bob',note:'',createdAt:t}],
   accounts:[{id:'a1',name:'Bank',type:'bank',currency:'USD',openingBalance:1000,createdAt:t}],
   entries:[
@@ -33,9 +33,12 @@ test('date filters affect report activity but not current outstanding balances',
 
 test('workbook contains expected sheets and transaction columns',()=>{
   const sheets=workbookSheets(state);
-  assert.deepEqual(sheets.map(s=>s.name),['Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Transactions']);
+  assert.deepEqual(sheets.map(s=>s.name),['Metadata','Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Monthly','Transactions']);
   assert.ok(sheets.at(-1).rows[0].includes('Merchant'));
   assert.ok(sheets.at(-1).rows[0].includes('Category'));
+  assert.ok(sheets.at(-1).rows[0].includes('Entry ID'));
+  assert.ok(sheets.at(-1).rows[0].includes('Attachment IDs'));
+  assert.ok(sheets.find(s=>s.name==='Metadata').rows.some(row=>row.includes('Asia/Beirut')));
   assert.equal(exportRows(state).length,3);
 });
 
@@ -66,4 +69,28 @@ test('bank-imported account expenses appear in category and merchant reports wit
   assert.equal(s.accounts[0].balance,905);
   const exported=exportRows(withExpense).find(row=>row.Type==='account_expense');assert.equal(exported.Category,'Food');
   const sheets=workbookSheets(withExpense);assert.ok(sheets.find(sheet=>sheet.name==='Budgets').rows.some(row=>row.includes('Food')));
+});
+
+
+test('report v2 filters by category type and currency',()=>{
+  const s={...state,categories:[{id:'cat_food',name:'Food',kind:'expense',icon:'',archived:false}],entries:[
+    ...state.entries,
+    {id:'e4',type:'account_expense',personId:null,accountId:'a1',amount:12,currency:'USD',categoryId:'cat_food',date:'2026-09-20',merchant:'Cafe',description:'Lunch',createdAt:t,updatedAt:t},
+    {id:'e5',type:'account_income',personId:null,accountId:'a1',amount:30,currency:'USD',date:'2026-09-21',merchant:'Work',description:'Refund',createdAt:t,updatedAt:t}
+  ]};
+  const filtered=reportingSnapshot(s,{categoryId:'cat_food',type:'account_expense',currency:'USD'});
+  assert.equal(filtered.transactionCount,1);
+  assert.equal(filtered.transactions[0]['Entry ID'],'e4');
+  assert.equal(filtered.transactions[0]['Category ID'],'cat_food');
+});
+
+test('export rows include stable ids timestamps and attachment references',()=>{
+  const withAttachment={...state,entries:[{...state.entries[0],attachmentCount:1,attachments:[{id:'att_1',name:'receipt.pdf',mimeType:'application/pdf',sizeBytes:100,createdAt:t}]}]};
+  const row=exportRows(withAttachment)[0];
+  assert.equal(row['Entry ID'],'e1');
+  assert.equal(row['Person ID'],'p1');
+  assert.equal(row['Account ID'],'a1');
+  assert.equal(row['Attachment IDs'],'att_1');
+  assert.equal(row['Attachment Names'],'receipt.pdf');
+  assert.equal(row['Created At'],t);
 });

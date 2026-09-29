@@ -648,8 +648,8 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req); let clean;
       try{clean=cleanRecurringRule(body,a.user_id,a.default_currency);}catch(error){return fail(res,400,error.message);}
       const stamp=nowIso();
-      q.insertRecurring.run(a.user_id,clean.id,clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(clean.template),null,null,stamp,stamp);
-      return json(res,201,{rule:recurringRow(q.recurringRuleById.get(a.user_id,clean.id))});
+      q.insertRecurring.run(a.user_id,clean.id,clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(templateToStorage(clean.template,accountCurrencyMap(a.user_id))),null,null,stamp,stamp);
+      return json(res,201,{rule:recurringRow(q.recurringRuleById.get(a.user_id,clean.id),a.user_id)});
     }
     if(url.pathname.startsWith('/api/recurring/')){
       const a=requireAuth(req,res,{csrf:req.method!=='GET'}); if(!a)return;
@@ -660,8 +660,8 @@ export const server=http.createServer(async(req,res)=>{
       if(!action&&req.method==='PUT'){
         const body=await bodyJson(req); let clean;
         try{clean=cleanRecurringRule({...body,id},a.user_id,a.default_currency,{existing:row});}catch(error){return fail(res,400,error.message);}
-        q.updateRecurring.run(clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(clean.template),nowIso(),a.user_id,id);
-        return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id))});
+        q.updateRecurring.run(clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(templateToStorage(clean.template,accountCurrencyMap(a.user_id))),nowIso(),a.user_id,id);
+        return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id)});
       }
       if(!action&&req.method==='DELETE'){
         q.deleteRecurring.run(a.user_id,id); return json(res,200,{ok:true});
@@ -673,14 +673,15 @@ export const server=http.createServer(async(req,res)=>{
         try{
           const current=q.recurringRuleById.get(a.user_id,id);
           if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
-          const template=cleanRecurringTemplate(JSON.parse(current.templateJson||'{}'),a.user_id,a.default_currency);
+          const storedTemplate=JSON.parse(current.templateJson||'{}');
+          const template=cleanRecurringTemplate(templateFromStorage(storedTemplate,accountCurrencyMap(a.user_id)),a.user_id,a.default_currency);
           if(current.nextDueDate!==occurrenceDate)throw Object.assign(new Error('This occurrence was already handled. Refresh and try again.'),{status:409});
           const bumped=q.bumpRevision.run(a.user_id,expected);
           if(Number(bumped.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
           const entry=recurringEntryFromTemplate(template,transactionDate); insertLedgerEntry(a.user_id,entry);
           advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:true});
           db.exec('COMMIT');
-          return json(res,200,{state:loadState(a.user_id),rule:recurringRow(q.recurringRuleById.get(a.user_id,id)),entryId:entry.id});
+          return json(res,200,{state:loadState(a.user_id),rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id),entryId:entry.id});
         }catch(error){db.exec('ROLLBACK');throw error;}
       }
       if(action==='skip'&&req.method==='POST'){
@@ -692,7 +693,7 @@ export const server=http.createServer(async(req,res)=>{
           if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
           advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:false});
           db.exec('COMMIT');
-          return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id))});
+          return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id)});
         }catch(error){db.exec('ROLLBACK');throw error;}
       }
       return fail(res,405,'Recurring schedule action not supported.');
@@ -770,8 +771,9 @@ export const server=http.createServer(async(req,res)=>{
         if(Number(upd.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
         q.deleteEntries.run(a.user_id);q.deletePeople.run(a.user_id);q.deleteAccounts.run(a.user_id);
         for(const p of clean.people)q.insertPerson.run(a.user_id,p.id,p.name,p.note,p.createdAt);
-        for(const account of clean.accounts)q.insertAccount.run(a.user_id,account.id,account.name,account.type,account.currency,account.openingBalance,account.createdAt);
-        for(const e of clean.entries)q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+        const restoreAccountById=new Map(clean.accounts.map(account=>[account.id,account]));
+        for(const account of clean.accounts){const storage=accountToStorage(account);q.insertAccount.run(a.user_id,account.id,account.name,account.type,account.currency,storage.openingBalanceMinor,account.createdAt);}
+        for(const e of clean.entries){const storage=entryToStorage(e,restoreAccountById);q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,storage.amountMinor,e.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,e.date,e.merchant,e.description,e.categoryId||null,storage.splitJson,e.createdAt,e.updatedAt);}
         q.deleteOrphanAttachments.run(a.user_id,a.user_id);
         bankFeed.reopenOrphans(a.user_id);bankFeed.reconcileReferences(a.user_id);
         db.exec('COMMIT');

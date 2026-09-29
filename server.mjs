@@ -213,6 +213,7 @@ const q = {
 const bankFeed = createBankFeedService(db);
 markExactMoneySchema(db);
 console.log('EXACT_MONEY_READY '+JSON.stringify({version:exactMoneySchemaVersion(db),storage:'integer-minor-units'}));
+console.log('LANE_A_READY '+JSON.stringify({waves:[2,3,4,5],ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true}));
 
 if (process.env.WAVE0_BACKUP_ON_START === '1') {
   const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});

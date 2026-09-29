@@ -33,6 +33,17 @@ test('Lane C health exposes runtime diagnostics and hardened headers',async()=>{
   assert.equal(r.data.runtime.foreignKeyViolations,0);
   assert.equal(r.res.headers.get('cross-origin-opener-policy'),'same-origin');
   assert.equal(r.res.headers.get('cross-origin-resource-policy'),'same-origin');
+  assert.match(r.res.headers.get('x-request-id')||'',/^[0-9a-f-]{36}$/i);
+});
+
+test('service worker and manifest are served with update-safe cache policy',async()=>{
+  const sw=await fetch(base+'/service-worker.js');
+  assert.equal(sw.status,200);
+  assert.match(sw.headers.get('cache-control')||'',/no-cache/);
+  assert.equal(sw.headers.get('service-worker-allowed'),'/');
+  const manifest=await fetch(base+'/manifest.webmanifest');
+  assert.equal(manifest.status,200);
+  assert.match(manifest.headers.get('cache-control')||'',/no-cache/);
 });
 
 test('owner registration creates current session and security history',async()=>{
@@ -73,6 +84,15 @@ test('multiple sessions can be inspected and individually revoked',async()=>{
   assert.equal(denied.res.status,401);
   sessions=(await request('/api/auth/sessions',{cookie:ownerCookie})).data.sessions;
   assert.equal(sessions.length,1);
+});
+
+test('complete backup deliberately excludes sessions and security activity',async()=>{
+  const backup=await request('/api/backup/full',{cookie:ownerCookie});
+  assert.equal(backup.res.status,200);
+  assert.equal('sessions' in backup.data.data,false);
+  assert.equal('security_events' in backup.data.data,false);
+  const events=await request('/api/security/events',{cookie:ownerCookie});
+  assert.ok(events.data.events.some(e=>e.eventType==='complete_backup_exported'));
 });
 
 test('owner can run diagnostics and create a verified server snapshot',async()=>{

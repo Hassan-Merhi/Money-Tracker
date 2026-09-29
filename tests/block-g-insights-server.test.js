@@ -114,7 +114,7 @@ test('categories and budgets are isolated by user',async()=>{
 });
 
 test('ledger reset clears custom insight metadata and recurring data, then reseeds defaults',async()=>{
-  const reset=await request('/api/state/reset',{method:'POST',body:{}});
+  const reset=await request('/api/state/reset',{method:'POST',body:{password:'correct horse battery staple'}});
   assert.equal(reset.res.status,200);state=reset.data;
   assert.deepEqual(state.people,[]);assert.deepEqual(state.accounts,[]);assert.deepEqual(state.entries,[]);assert.deepEqual(state.budgets,[]);
   assert.equal(state.categories.some(c=>c.id===customCategoryId),false);

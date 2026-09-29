@@ -24,15 +24,19 @@ Repeated 429 responses should be treated as an abuse signal. Do not disable thro
 
 ## Deployment verification
 
-A healthy Lane A process logs:
+A healthy production process logs the cumulative readiness chain:
 
 EXACT_MONEY_READY {"version":1,"storage":"integer-minor-units"}
 
-and:
-
 LANE_A_READY {"waves":[2,3,4,5],"ledgerApiVersion":1,"fullBackupVersion":2,"durableRateLimits":true}
 
-The public health endpoint must report matching readiness values.
+LANE_B_READY {"waves":[6,8,9,10],"appModes":true,"serverRecurringReminders":true,"bankFeedHistory":true,"reportingVersion":2}
+
+LANE_C_READY {"waves":[7,13,14],"pwaResilience":true,"securityEvents":true,"sessionControl":true,"runtimeDiagnostics":true,"manualSnapshots":true}
+
+The public health endpoint must report the matching versions, a healthy recurring worker, SQLite quick-check `ok`, and zero foreign-key violations.
+
+Before risky releases, the owner can also create a verified server-side snapshot from Settings → Operations & integrity. The response includes both database and schema SHA-256 fingerprints.
 
 ## Incident containment
 

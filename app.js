@@ -161,6 +161,7 @@ function renderDashboard(main) {
       <div class="card stat bad"><div class="stat-top"><div class="stat-label">I OWE PEOPLE</div><div class="stat-icon">↘</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe','0')}</div><div class="stat-note">Money you need to pay</div></div>
       <div class="card stat net"><div class="stat-top"><div class="stat-label">NET POSITION</div><div class="stat-icon">≈</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net','0')}</div><div class="stat-note">Owed to you minus what you owe</div></div>
     </div>
+    ${advancedMode()?'':`<div class="card panel" style="margin-bottom:16px"><div class="panel-head"><div><h3>Simple mode is active</h3><p>Your accounts, Bank Feed, budgets and recurring schedules stay saved but hidden. Advanced mode unlocks the full money system without changing or deleting your debt records.</p></div><button class="btn primary" id="enableAdvanced">Enable Advanced mode</button></div></div>`}
     <div class="grid section-grid">
       <section class="card panel">
         <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest debts and repayments</p></div><button class="btn small" data-go="transactions">View all</button></div>
@@ -178,6 +179,7 @@ function renderDashboard(main) {
         </div>
       </section>
     </div>`;
+  main.querySelector('#enableAdvanced')?.addEventListener('click',async()=>{const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';const saved=await runMutation(version=>updateSettings({defaultCurrency:state.settings.defaultCurrency,appMode:'advanced',timezone},version),'Advanced mode enabled.');if(saved)location.hash='#dashboard';});
   main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;

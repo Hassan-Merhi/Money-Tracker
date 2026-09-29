@@ -322,7 +322,7 @@ test('complete backup exports and transactionally restores every user-owned subs
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items').get().count,0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM bank_import_batches').get().count,0);
 
-  const restored=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:backup});
+  const restored=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:{backup,password:ownerPassword,confirmation:'RESTORE'}});
   assert.equal(restored.res.status,200);state=restored.data.state;
   assert.ok(state.version>beforeVersion);
   assert.ok(state.people.some(p=>p.id==='person_alice'));
@@ -348,7 +348,7 @@ test('complete backup rejects corruption without partially replacing current dat
   const beforeEntries=before.data.entries.map(e=>e.id).sort();
 
   backup.data.people[0].name='Tampered without checksum update';
-  const failed=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:backup});
+  const failed=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:{backup,password:ownerPassword,confirmation:'RESTORE'}});
   assert.equal(failed.res.status,400);assert.match(failed.data.error,/integrity check failed/i);
 
   const after=await request('/api/state',{cookie});assert.equal(after.res.status,200);
@@ -389,13 +389,13 @@ test('owner can reset and delete secondary accounts while data stays isolated',a
   const forbidden=await request('/api/users',{method:'POST',cookie:loginOther.cookie,csrf:loginOther.data.csrfToken,body:{email:`third-${Date.now()}@example.com`,password:'another secure password'}});
   assert.equal(forbidden.res.status,403);
 
-  const resetPassword=await request(`/api/users/${userId}/password`,{method:'POST',cookie,csrf,body:{password:replacementPassword}});
+  const resetPassword=await request(`/api/users/${userId}/password`,{method:'POST',cookie,csrf,body:{password:replacementPassword,currentPassword:ownerPassword}});
   assert.equal(resetPassword.res.status,200);assert.equal(resetPassword.data.sessionsRevoked,true);
   const oldSession=await request('/api/state',{cookie:loginOther.cookie});assert.equal(oldSession.res.status,401);
   const oldPasswordLogin=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:originalPassword}});assert.equal(oldPasswordLogin.res.status,401);
   const replacementLogin=await request('/api/auth/login',{method:'POST',body:{email:secondUserEmail,password:replacementPassword}});assert.equal(replacementLogin.res.status,200);
 
-  const deleted=await request(`/api/users/${userId}`,{method:'DELETE',cookie,csrf,body:{}});
+  const deleted=await request(`/api/users/${userId}`,{method:'DELETE',cookie,csrf,body:{currentPassword:ownerPassword,confirmation:'DELETE'}});
   assert.equal(deleted.res.status,200);
   const deletedSession=await request('/api/state',{cookie:replacementLogin.cookie});assert.equal(deletedSession.res.status,401);
   const after=await request('/api/users',{cookie});assert.equal(after.data.users.length,1);

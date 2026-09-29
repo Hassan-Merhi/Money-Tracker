@@ -347,6 +347,17 @@ function rateLimited(req,scope='auth',{limit=30,windowMs=10*60_000}={}) {
   return Number(row?.count||0)>limit;
 }
 
+function requireCurrentPassword(req,res,userId,password,{scope='sensitive-action',limit=5,windowMs=30*60_000}={}){
+  if(rateLimited(req,scope,{limit,windowMs})){fail(res,429,'Too many verification attempts. Try again later.');return null;}
+  const user=q.userSecret.get(userId);
+  if(!user||!verifyPassword(String(password||''),user.password_hash)){
+    securityOps.event(userId,'destructive_reauth_failed',{detail:{scope}});
+    fail(res,403,'Current password is incorrect.');
+    return null;
+  }
+  return user;
+}
+
 function validateState(input, user) {
   if(!input || typeof input!=='object') throw new Error('Invalid state.');
   const settings=input.settings||{};
@@ -849,7 +860,8 @@ export const server=http.createServer(async(req,res)=>{
       const target=q.userSecret.get(id);if(!target)return fail(res,404,'User account not found.');
       if(target.isOwner)return fail(res,400,'The owner account cannot be changed through secondary-user controls.');
       if(action==='password'&&req.method==='POST'){
-        const body=await bodyJson(req),password=String(body.password||'');
+        const body=await bodyJson(req),password=String(body.password||''),currentPassword=String(body.currentPassword||'');
+        if(!requireCurrentPassword(req,res,a.user_id,currentPassword,{scope:'secondary-user-password-reset'}))return;
         if(password.length<10||password.length>200)return fail(res,400,'Password must be at least 10 characters.');
         db.exec('BEGIN IMMEDIATE');
         try{q.updatePassword.run(hashPassword(password),id);q.deleteUserSessions.run(id);db.exec('COMMIT');}
@@ -858,6 +870,9 @@ export const server=http.createServer(async(req,res)=>{
         return json(res,200,{ok:true,sessionsRevoked:true});
       }
       if(!action&&req.method==='DELETE'){
+        const body=await bodyJson(req),currentPassword=String(body.currentPassword||''),confirmation=String(body.confirmation||'');
+        if(confirmation!=='DELETE')return fail(res,400,'Type DELETE to confirm user deletion.');
+        if(!requireCurrentPassword(req,res,a.user_id,currentPassword,{scope:'secondary-user-delete'}))return;
         securityOps.event(a.user_id,'secondary_user_deleted',{detail:{targetUserId:id}});
         q.deleteUser.run(id);
         return json(res,200,{ok:true});
@@ -1168,7 +1183,8 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/ops/snapshot'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;if(!a.is_owner)return fail(res,403,'Only the owner can create a server snapshot.');
-      const snapshot=runtimeOps.snapshot('lane-c-manual');
+      if(rateLimited(req,'server-snapshot',{limit:6,windowMs:60*60_000}))return fail(res,429,'Too many server snapshots were requested. Try again later.');
+      const snapshot=runtimeOps.snapshot('manual');
       securityOps.event(a.user_id,'server_snapshot_created',{detail:{bytes:snapshot.bytes,sha256:snapshot.sha256,schemaSha256:snapshot.schemaSha256}});
       return json(res,201,{snapshotFile:snapshot.snapshotFile,bytes:snapshot.bytes,sha256:snapshot.sha256,schemaSha256:snapshot.schemaSha256});
     }
@@ -1178,14 +1194,18 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/backup/full/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
-      const body=await bodyJson(req,DATA_LIMITS.fullBackupBodyBytes);
-      restoreFullBackup(db,a.user_id,body);
+      const body=await bodyJson(req,DATA_LIMITS.fullBackupBodyBytes),password=String(body.password||''),confirmation=String(body.confirmation||''),backup=body.backup;
+      if(confirmation!=='RESTORE')return fail(res,400,'Type RESTORE to confirm complete backup restore.');
+      if(!requireCurrentPassword(req,res,a.user_id,password,{scope:'complete-backup-restore'}))return;
+      restoreFullBackup(db,a.user_id,backup);
       bankFeed.reconcileReferences(a.user_id);securityOps.event(a.user_id,'complete_backup_restored');
       return json(res,200,{ok:true,state:loadState(a.user_id)});
     }
     if(url.pathname==='/api/backup/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      const body=await bodyJson(req,12_000_000);
+      const requestBody=await bodyJson(req,12_000_000),password=String(requestBody.password||''),confirmation=String(requestBody.confirmation||''),body=requestBody.backup;
+      if(confirmation!=='RESTORE')return fail(res,400,'Type RESTORE to confirm backup restore.');
+      if(!requireCurrentPassword(req,res,a.user_id,password,{scope:'legacy-backup-restore'}))return;
       if(!body||typeof body!=='object'||!Array.isArray(body.people)||!Array.isArray(body.accounts)||!Array.isArray(body.entries))return fail(res,400,'That file is not a valid ledger backup.');
       db.exec('BEGIN IMMEDIATE');
       try{

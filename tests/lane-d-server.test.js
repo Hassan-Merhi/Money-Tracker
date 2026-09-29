@@ -23,6 +23,7 @@ async function request(path,{method='GET',body,cookie='',csrf='',headers={}}={})
 }
 
 let cookie='',csrf='',userId='';
+const ownerPassword='correct horse battery staple';
 
 test('Lane D health reports release readiness and PWA v16',async()=>{
   const r=await request('/api/health');
@@ -44,7 +45,7 @@ test('static assets support conditional ETag requests',async()=>{
 });
 
 test('registers a Lane D owner',async()=>{
-  const r=await request('/api/auth/register',{method:'POST',body:{email:`lane-d-${Date.now()}@example.com`,password:'correct horse battery staple'}});
+  const r=await request('/api/auth/register',{method:'POST',body:{email:`lane-d-${Date.now()}@example.com`,password:ownerPassword}});
   assert.equal(r.res.status,201);
   cookie=r.cookie;
   csrf=r.data.csrfToken;
@@ -114,6 +115,9 @@ test('future attachment uploads enforce the complete-backup storage quota',async
   const r=await request('/api/attachments',{method:'POST',cookie,csrf,body:{entryId:'entry_quota',name:'next.txt',mimeType:'text/plain',data:Buffer.from('y').toString('base64')}});
   assert.equal(r.res.status,413);
   assert.match(r.data.error,/100 MB/i);
+  // This row deliberately lies about its byte size to exercise quota accounting.
+  // Remove the invalid synthetic row before the complete-backup round-trip gate.
+  db.prepare("DELETE FROM attachments WHERE user_id=? AND id='attachment_quota_seed'").run(userId);
 });
 
 test('complete backup restores data beyond all former Lane A/B history caps',async()=>{
@@ -122,7 +126,7 @@ test('complete backup restores data beyond all former Lane A/B history caps',asy
   assert.ok(exported.data.data.bank_feed_items.length>5000);
   assert.ok(exported.data.data.recurring_notifications.length>2000);
   assert.ok(exported.data.data.bank_import_batches.length>1000);
-  const restored=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:exported.data});
+  const restored=await request('/api/backup/full/restore',{method:'POST',cookie,csrf,body:{backup:exported.data,password:ownerPassword,confirmation:'RESTORE'}});
   assert.equal(restored.res.status,200);
   assert.equal(restored.data.ok,true);
   assert.equal(Number(db.prepare('SELECT COUNT(*) AS count FROM bank_feed_items WHERE user_id=?').get(userId).count),5001);

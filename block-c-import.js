@@ -20,9 +20,6 @@ function downloadTemplate(){downloadBytes('money-tracker-import-template.xlsx',t
 function inject(){
   if(injecting)return;injecting=true;
   try{
-    const exportBtn=document.querySelector('#exportXlsx');
-    const actions=exportBtn?.parentElement;
-    if(actions&&!actions.querySelector('[data-open-import]')){const b=document.createElement('button');b.className='btn';b.type='button';b.dataset.openImport='1';b.textContent='↑ Import data';b.onclick=openImporter;actions.prepend(b);const quick=document.createElement('button');quick.className='btn';quick.type='button';quick.dataset.openQuickImport='1';quick.textContent='⌘ Paste Excel';quick.onclick=openQuickImporter;actions.prepend(quick);}
   }finally{injecting=false;}
 }
 new MutationObserver(inject).observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('DOMContentLoaded',inject);inject();

@@ -94,7 +94,7 @@ test('atomic JSON backup restore preserves category IDs and budgets',async()=>{
   const backup=JSON.parse(JSON.stringify({...state,version:undefined}));
   const edited=await request(`/api/categories/${customCategoryId}`,{method:'PUT',body:{name:'Coffee changed',kind:'expense',icon:'C'}});
   assert.equal(edited.res.status,200);
-  const restored=await request('/api/backup/restore',{method:'POST',body:backup});
+  const restored=await request('/api/backup/restore',{method:'POST',body:{backup,password:'correct horse battery staple',confirmation:'RESTORE'}});
   assert.equal(restored.res.status,200);state=restored.data;
   assert.equal(state.categories.find(c=>c.id===customCategoryId).name,'Coffee');
   assert.ok(state.budgets.some(b=>b.categoryId===customCategoryId&&b.monthlyLimit===150));

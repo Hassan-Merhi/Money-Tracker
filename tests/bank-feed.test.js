@@ -36,3 +36,26 @@ test('parses semicolon-delimited bank CSV exports',()=>{
   assert.equal(parsed.rows[0].Description,'Coffee');
   assert.equal(parsed.rows[0].Amount,'-4.50');
 });
+
+
+test('recognizes common international bank statement header variants',()=>{
+  const m=suggestBankMapping(['Booking Date','Transaction Details','Debit Amount','Credit Amount','Currency Code','Bank ID']);
+  assert.equal(m.date,'Booking Date');
+  assert.equal(m.description,'Transaction Details');
+  assert.equal(m.debit,'Debit Amount');
+  assert.equal(m.credit,'Credit Amount');
+  assert.equal(m.currency,'Currency Code');
+  assert.equal(m.externalId,'Bank ID');
+});
+
+test('normalizes European-formatted statement amounts and withdrawal/deposit columns',()=>{
+  const rows=[
+    {'Value Date':'29.09.2026','Details':'Restaurant','Withdrawal Amount':'1.234,56','Deposit Amount':'','Currency':'EUR'},
+    {'Value Date':'30.09.2026','Details':'Refund','Withdrawal Amount':'','Deposit Amount':'100,25','Currency':'EUR'}
+  ];
+  const mapping=suggestBankMapping(Object.keys(rows[0]));
+  const out=normalizeBankRows(rows,mapping,{dateOrder:'dmy',fallbackCurrency:'EUR'});
+  assert.equal(out.errors.length,0);
+  assert.equal(out.items[0].signedAmount,-1234.56);
+  assert.equal(out.items[1].signedAmount,100.25);
+});

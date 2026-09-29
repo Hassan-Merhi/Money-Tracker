@@ -28,7 +28,7 @@ test('Lane C health exposes runtime diagnostics and hardened headers',async()=>{
   const r=await request('/api/health');
   assert.equal(r.res.status,200);
   assert.equal(r.data.laneCVersion,1);
-  assert.equal(r.data.pwaCacheVersion,9);
+  assert.equal(r.data.pwaCacheVersion,10);
   assert.equal(r.data.runtime.sqliteQuickCheck,'ok');
   assert.equal(r.data.runtime.foreignKeyViolations,0);
   assert.equal(r.res.headers.get('cross-origin-opener-policy'),'same-origin');

@@ -14,7 +14,7 @@ import { exportFullBackup, restoreFullBackup, DATA_LIMITS } from './lib/full-bac
 import { normalizeMoney, toMinor } from './lib/money.js';
 import { createSecurityOps } from './lib/security-ops.js';
 import { createRuntimeOps } from './lib/runtime-ops.js';
-import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
+import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, getMigrationQuarantineStats, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -745,7 +745,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:11,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:11,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -975,8 +975,8 @@ export const server=http.createServer(async(req,res)=>{
       const existing=currentEntry(a.user_id,id);if(!existing)return fail(res,404,'Transaction not found.');
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),entry=cleanLedgerEntry(a,{...body,id},{existing});
-        withLedgerMutation(a.user_id,expected,()=>updateLedgerEntryRow(a.user_id,entry));
-        return json(res,200,loadState(a.user_id));
+        let reopenedFeedItems=[];withLedgerMutation(a.user_id,expected,()=>{updateLedgerEntryRow(a.user_id,entry);reopenedFeedItems=bankFeed.revalidatePosted(a.user_id,id);});
+        return json(res,200,{...loadState(a.user_id),reopenedFeedItems:reopenedFeedItems.length});
       }
       if(req.method==='DELETE'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body);
@@ -1129,7 +1129,7 @@ export const server=http.createServer(async(req,res)=>{
       const id=decodeURIComponent(url.pathname.slice('/api/budgets/'.length)); return json(res,200,{...insights.deleteBudget(a.user_id,id),...insights.list(a.user_id)});
     }
     if(url.pathname==='/api/bank-feed'&&req.method==='GET'){
-      const a=requireAuth(req,res); if(!a)return; return json(res,200,bankFeed.list(a.user_id));
+      const a=requireAuth(req,res); if(!a)return; return json(res,200,bankFeed.list(a.user_id,{status:url.searchParams.get('status')||'',limit:url.searchParams.get('limit')||5000,offset:url.searchParams.get('offset')||0}));
     }
     if(url.pathname==='/api/bank-feed/import'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

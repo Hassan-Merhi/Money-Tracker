@@ -1,4 +1,4 @@
-const CACHE='money-tracker-debt-v15';
+const CACHE='money-tracker-debt-v16';
 const CORE=[
   '/','/index.html','/styles.css','/dashboard.css','/mobile.css?v=activity-v2','/activity.css?v=activity-v2','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=activity-v2',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
@@ -47,5 +47,7 @@ self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
   if(event.request.mode==='navigate'){event.respondWith(networkFirst(event.request));return;}
-  event.respondWith(networkFirst(event.request));
+  const revalidatePromise=fetchAndCache(event.request);
+  event.waitUntil(revalidatePromise.then(()=>undefined));
+  event.respondWith(staleWhileRevalidate(event.request,revalidatePromise));
 });

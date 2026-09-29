@@ -16,7 +16,7 @@ navigation targets (Advanced tools are available from **More**). All totals rema
 currency-separated and use the existing ledger calculations.
 
 No new runtime dependencies, external fonts, or analytics are needed. The PWA
-shell is version 13 and caches the dashboard stylesheet and presentation module.
+shell is version 16 and caches the dashboard stylesheet and presentation module.
 See [dashboard QA notes](docs/DASHBOARD_REFRESH.md) for validation and review steps.
 
 ## Block A — Secure core

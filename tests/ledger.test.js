@@ -171,8 +171,8 @@ test('insightsSnapshot ignores account adjustments',()=>{
 test('reportingSnapshot leaves every spend, income, person and monthly figure untouched',()=>{
   const before=reportingSnapshot(stateOf(baseEntries));
   const after=reportingSnapshot(stateOf([...baseEntries,...adjustments]));
-  for(const key of ['activity','personalCashFlow','categorySpending','merchants','monthly','outstanding','budgets'])assert.deepEqual(after[key],before[key],key);
-  assert.equal(after.monthly.some(row=>row.month==='2026-10'),false,'an adjustment must not create an empty month row');
+  for(const key of ['activity','personalCashFlow','categorySpending','merchants','receivablesMovement','cashFlow','transferFlow','outstanding','budgets'])assert.deepEqual(after[key],before[key],key);
+  for(const key of ['receivablesMovement','cashFlow','transferFlow'])assert.equal(after[key].some(row=>row.month==='2026-10'),false,`an adjustment must not create an empty ${key} month row`);
   const usdBefore=before.accounts.find(a=>a.accountId==='usd').balance;
   assert.equal(after.accounts.find(a=>a.accountId==='usd').balance,usdBefore+50);
   assert.equal(after.accounts.find(a=>a.accountId==='lbp').balance,before.accounts.find(a=>a.accountId==='lbp').balance-25000);

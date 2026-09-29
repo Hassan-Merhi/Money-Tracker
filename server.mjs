@@ -745,7 +745,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:11,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:16,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

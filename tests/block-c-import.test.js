@@ -113,3 +113,30 @@ test('unknown imported categories do not block account expense migration',()=>{
   const out=applyImport({state,rows:[{Date:'2026-09-28',Type:'account_expense',Account:'Bank',Amount:20,Currency:'USD',Category:'Unknown'}],mode:'transactions',mapping:{date:'Date',type:'Type',account:'Account',amount:'Amount',currency:'Currency',category:'Category'},uidFactory:ids()});
   assert.equal(out.result.entries,1);assert.equal(out.state.entries[0].categoryId,null);assert.match(out.result.errors[0],/uncategorized/);
 });
+
+
+test('transaction import compares split allocations in exact currency units',()=>{
+  const out=applyImport({
+    state:baseState(),
+    rows:[{Date:'2026-09-28',Type:'split_paid_for_people',Account:'Bank',Amount:0.3,Currency:'USD','Split Details':'Alice: 0.1 | Bob: 0.2'}],
+    mode:'transactions',
+    mapping:{date:'Date',type:'Type',account:'Account',amount:'Amount',currency:'Currency',splitDetails:'Split Details'},
+    uidFactory:ids()
+  });
+  assert.equal(out.result.entries,1);
+  assert.deepEqual(out.state.entries[0].splits.map(s=>s.amount),[0.1,0.2]);
+  assert.equal(out.result.errors.length,0);
+});
+
+test('transaction import rejects unsupported currency precision before save',()=>{
+  const out=applyImport({
+    state:baseState(),
+    rows:[{Date:'2026-09-28',Type:'paid_for_person',Person:'Alice',Amount:1.001,Currency:'USD'}],
+    mode:'transactions',
+    mapping:{date:'Date',type:'Type',person:'Person',amount:'Amount',currency:'Currency'},
+    uidFactory:ids()
+  });
+  assert.equal(out.result.entries,0);
+  assert.equal(out.result.skipped,1);
+  assert.match(out.result.errors[0],/at most 2 decimal/);
+});

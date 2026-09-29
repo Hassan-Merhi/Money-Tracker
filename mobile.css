@@ -652,64 +652,150 @@ html[data-theme="dark"] .statement-table-wrap.mobile-ledger-table tr{
 }
 
 
-/* Activity page — mobile cards and compact filters */
+/* Activity + auth — mobile-first overrides */
 @media(max-width:760px){
   .activity-toolbar{margin-bottom:12px}
-  .activity-toolbar .activity-filters{grid-template-columns:1fr 1fr;gap:9px;margin-bottom:0;width:100%}
-  .activity-toolbar>#addTxn{display:none}
+  .activity-toolbar .activity-filters{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:9px;
+    width:100%;
+    margin:0;
+  }
+  .activity-toolbar .activity-filters>.select,
+  .activity-toolbar .activity-filters>.field{width:100%;min-width:0}
+  .activity-toolbar>#addTxn{display:none!important}
   .activity-date-field{min-width:0}
   .activity-date-field label{font-size:11px}
-  .activity-list-panel{padding:0;border:0;background:transparent;box-shadow:none}
-  .activity-table-wrap.mobile-ledger-table{margin:0;border:0;background:transparent;overflow:visible}
-  .activity-table-wrap.mobile-ledger-table .activity-table{display:block;min-width:0;width:100%}
-  .activity-table-wrap.mobile-ledger-table tbody{display:grid;gap:10px}
-  .activity-table-wrap.mobile-ledger-table tr{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) auto;
-    gap:7px 12px;
-    padding:14px 15px;
-    border:1px solid var(--line);
-    border-radius:16px;
-    background:var(--panel);
-    box-shadow:0 2px 8px rgba(17,24,39,.04);
-    overflow:visible;
+
+  .activity-list-panel{
+    padding:0!important;
+    border:0!important;
+    background:transparent!important;
+    box-shadow:none!important;
+    overflow:visible!important;
   }
-  .activity-table-wrap.mobile-ledger-table td{display:block;min-width:0;padding:0;border:0;text-align:left!important}
-  .activity-table-wrap.mobile-ledger-table td::before{display:none!important}
-  .activity-table-wrap.mobile-ledger-table .activity-type-cell{grid-column:1/2;order:1;align-self:center;justify-self:start}
-  .activity-table-wrap.mobile-ledger-table .activity-actions-cell{grid-column:2/3;order:2;align-self:start;justify-self:end;margin:-5px -5px 0 0;padding:0;width:auto}
+  .activity-table-wrap.mobile-ledger-table{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    margin:0!important;
+    border:0!important;
+    border-radius:0!important;
+    background:transparent!important;
+    overflow:visible!important;
+  }
+  .activity-table-wrap.mobile-ledger-table .activity-table{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    table-layout:auto!important;
+  }
+  .activity-table-wrap.mobile-ledger-table thead{display:none!important}
+  .activity-table-wrap.mobile-ledger-table tbody{
+    display:grid!important;
+    width:100%!important;
+    gap:10px!important;
+  }
+  .activity-table-wrap.mobile-ledger-table tr.activity-row{
+    display:grid!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    grid-template-columns:minmax(0,1fr) auto!important;
+    gap:7px 12px!important;
+    padding:14px 15px!important;
+    margin:0!important;
+    border:1px solid var(--line)!important;
+    border-radius:16px!important;
+    background:var(--panel)!important;
+    box-shadow:0 2px 8px rgba(17,24,39,.04)!important;
+    overflow:visible!important;
+  }
+  .activity-table-wrap.mobile-ledger-table tr.activity-row>td{
+    display:block!important;
+    width:auto!important;
+    max-width:100%!important;
+    min-width:0!important;
+    padding:0!important;
+    border:0!important;
+    text-align:left!important;
+    white-space:normal!important;
+    overflow:visible!important;
+  }
+  .activity-table-wrap.mobile-ledger-table tr.activity-row>td::before{display:none!important}
+  .activity-table-wrap.mobile-ledger-table .activity-type-cell{grid-column:1/2!important;grid-row:1!important;align-self:center;justify-self:start}
+  .activity-table-wrap.mobile-ledger-table .activity-actions-cell{
+    grid-column:2/3!important;grid-row:1!important;
+    align-self:start;justify-self:end;
+    margin:-5px -5px 0 0!important;
+    width:auto!important;
+  }
   .activity-table-wrap.mobile-ledger-table .entry-menu-trigger{width:36px;height:36px}
-  .activity-table-wrap.mobile-ledger-table .activity-date-cell{grid-column:1/-1;order:3;color:var(--muted);font-size:12px;line-height:1.3}
-  .activity-table-wrap.mobile-ledger-table .activity-person-cell{grid-column:1/-1;order:4;font-size:16px;font-weight:800;line-height:1.35;overflow-wrap:anywhere}
-  .activity-table-wrap.mobile-ledger-table .activity-notes-cell{grid-column:1/-1;order:5;color:var(--text);line-height:1.45;overflow-wrap:anywhere}
-  .activity-table-wrap.mobile-ledger-table .activity-note-text{display:block}
+  .activity-table-wrap.mobile-ledger-table .activity-date-cell{
+    grid-column:1/-1!important;grid-row:2!important;
+    color:var(--muted);font-size:12px;line-height:1.3
+  }
+  .activity-table-wrap.mobile-ledger-table .activity-person-cell{
+    grid-column:1/-1!important;grid-row:3!important;
+    font-size:16px;font-weight:800;line-height:1.35;overflow-wrap:anywhere!important
+  }
+  .activity-table-wrap.mobile-ledger-table .activity-notes-cell{
+    grid-column:1/-1!important;grid-row:4!important;
+    color:var(--text);line-height:1.45;overflow-wrap:anywhere!important
+  }
+  .activity-table-wrap.mobile-ledger-table .activity-note-text{display:block;overflow-wrap:anywhere}
   .activity-table-wrap.mobile-ledger-table .attachment-count{margin-top:5px}
   .activity-table-wrap.mobile-ledger-table .activity-amount-cell{
-    grid-column:1/-1;
-    order:6;
-    display:flex!important;
-    align-items:baseline;
-    justify-content:space-between;
-    gap:12px;
-    padding-top:10px;
-    margin-top:3px;
-    border-top:1px solid var(--line);
-    text-align:right!important;
-    font-size:17px;
+    grid-column:1/-1!important;grid-row:5!important;
+    display:flex!important;align-items:baseline;justify-content:space-between;gap:12px;
+    padding-top:10px!important;margin-top:3px!important;
+    border-top:1px solid var(--line)!important;
+    text-align:right!important;font-size:17px
   }
   .activity-table-wrap.mobile-ledger-table .activity-amount-cell::before{
-    content:'Amount';
-    display:block!important;
-    margin:0;
-    color:var(--muted);
-    font-size:10px;
-    font-weight:800;
-    letter-spacing:.05em;
-    text-transform:uppercase;
+    content:'Amount'!important;display:block!important;margin:0!important;
+    color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase
   }
   .activity-table-wrap.mobile-ledger-table .activity-amount{font-weight:850;overflow-wrap:anywhere}
+
+  .auth-shell{
+    min-height:100dvh!important;
+    display:flex!important;
+    align-items:flex-start!important;
+    justify-content:center!important;
+    padding:calc(18px + env(safe-area-inset-top,0px)) 14px calc(18px + env(safe-area-inset-bottom,0px))!important;
+    overflow:auto;
+  }
+  .auth-card{
+    width:100%!important;
+    max-width:430px!important;
+    margin:0 auto!important;
+    padding:20px!important;
+    border-radius:20px!important;
+  }
+  .auth-brand{gap:12px!important;align-items:center!important;margin-bottom:18px!important}
+  .auth-brand .brand-mark{width:52px!important;height:52px!important;border-radius:15px!important}
+  .auth-brand h1{font-size:24px!important;line-height:1.08!important;letter-spacing:-.025em}
+  .auth-brand p{font-size:13px!important;line-height:1.4!important;margin-top:5px!important}
+  .auth-tabs{margin-bottom:16px!important}
+  .auth-tabs button{min-height:44px;font-size:15px}
+  .auth-form{gap:12px!important}
+  .auth-form .input{min-height:50px}
+  .auth-form .btn{min-height:50px;font-size:16px}
+  .auth-hint{font-size:11px!important;line-height:1.4!important}
 }
 @media(max-width:520px){
-  .activity-toolbar .activity-filters{grid-template-columns:1fr}
+  .activity-toolbar .activity-filters{grid-template-columns:1fr 1fr!important}
+  .activity-toolbar .activity-filters #filterPeriod{grid-column:1/-1}
+  .activity-toolbar .activity-filters .activity-date-field{grid-column:1/-1}
 }
-html[data-theme='dark'] .activity-table-wrap.mobile-ledger-table tr{box-shadow:none}
+@media(max-width:380px){
+  .activity-toolbar .activity-filters{grid-template-columns:1fr!important}
+  .activity-toolbar .activity-filters #filterPeriod{grid-column:auto}
+  .auth-card{padding:17px!important}
+  .auth-brand h1{font-size:22px!important}
+}
+html[data-theme='dark'] .activity-table-wrap.mobile-ledger-table tr.activity-row{box-shadow:none!important}

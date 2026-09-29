@@ -184,6 +184,7 @@ const q = {
   deleteRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=? AND id=?'),
   advanceRecurring: db.prepare('UPDATE recurring_rules SET next_due_date=?,is_active=?,last_posted_at=?,last_occurrence_date=?,updated_at=? WHERE user_id=? AND id=? AND next_due_date=?'),
   updateUserState: db.prepare('UPDATE users SET display_name=?, default_currency=?, revision=revision+1 WHERE id=? AND revision=?'),
+  updateUserSettingsValues: db.prepare('UPDATE users SET display_name=?,default_currency=? WHERE id=?'),
   bumpRevision: db.prepare('UPDATE users SET revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deleteAllRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=?'),
@@ -562,6 +563,91 @@ function saveState(user, input) {
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);
+}
+
+
+function ledgerError(message,status=400){return Object.assign(new Error(message),{status});}
+function expectedLedgerRevision(body){
+  const expected=Number(body?.expectedRevision);
+  if(!Number.isInteger(expected))throw ledgerError('Missing ledger revision.');
+  return expected;
+}
+function withLedgerMutation(userId,expected,mutate){
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const current=Number(q.userById.get(userId)?.revision);
+    if(current!==expected)throw ledgerError('This ledger changed in another tab. Refresh and try again.',409);
+    const result=mutate();
+    const bumped=q.bumpRevision.run(userId,expected);
+    if(Number(bumped.changes)!==1)throw ledgerError('This ledger changed in another tab. Refresh and try again.',409);
+    db.exec('COMMIT');
+    return result;
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+function cleanPersonInput(input,{existing=null}={}){
+  const id=existing?.id||(idOk(input?.id,'person')?input.id:'person_'+randomUUID());
+  if(!idOk(id,'person'))throw ledgerError('Invalid person record.');
+  const name=safeStr(input?.name,100),note=safeStr(input?.note,1000);
+  if(!name)throw ledgerError('Every person needs a name.');
+  return {id,name,note,createdAt:existing?.createdAt||nowIso()};
+}
+function cleanAccountInput(input,{existing=null,defaultCurrency='USD'}={}){
+  const id=existing?.id||(idOk(input?.id,'account')?input.id:'account_'+randomUUID());
+  if(!idOk(id,'account'))throw ledgerError('Invalid account record.');
+  const name=safeStr(input?.name,100),type=String(input?.type||'other');
+  const currency=String(existing?.currency||input?.currency||defaultCurrency).toUpperCase();
+  if(!name||!['bank','cash','card','wallet','other'].includes(type)||!validCurrency(currency))throw ledgerError('Invalid account record.');
+  if(existing&&input?.currency&&String(input.currency).toUpperCase()!==existing.currency)throw ledgerError('Account currency cannot be changed after creation.');
+  const openingBalance=exactMoney(input?.openingBalance??existing?.openingBalance??0,currency);
+  return {id,name,type,currency,openingBalance,createdAt:existing?.createdAt||nowIso()};
+}
+function ledgerValidationState(userId){
+  const u=q.userById.get(userId);if(!u)throw ledgerError('Account not found.',404);
+  return {
+    version:u.revision,
+    settings:{displayName:u.display_name,defaultCurrency:u.default_currency},
+    people:q.people.all(userId),
+    accounts:q.accounts.all(userId).map(accountFromStorage),
+    entries:[]
+  };
+}
+function cleanLedgerEntry(user,input,{existing=null}={}){
+  const id=existing?.id||(idOk(input?.id,'entry')?input.id:'entry_'+randomUUID());
+  if(!idOk(id,'entry'))throw ledgerError('Invalid transaction record.');
+  const stamp=nowIso();
+  const candidate={...input,id,createdAt:existing?.createdAt||input?.createdAt||stamp,updatedAt:stamp};
+  try{
+    const refs=ledgerValidationState(user.user_id);
+    return validateState({...refs,entries:[candidate]},user).entries[0];
+  }catch(error){throw ledgerError(error.message||'Invalid transaction.',400);}
+}
+function updateLedgerEntryRow(userId,entry){
+  const storage=entryToStorage(entry,accountCurrencyMap(userId));
+  const result=q.updateEntry.run(entry.type,entry.personId,entry.accountId,entry.fromAccountId,entry.toAccountId,storage.amountMinor,entry.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,entry.date,entry.merchant,entry.description,entry.categoryId||null,storage.splitJson,entry.updatedAt,userId,entry.id);
+  if(Number(result.changes)!==1)throw ledgerError('Transaction not found.',404);
+}
+function currentEntry(userId,id){return loadState(userId).entries.find(entry=>entry.id===id)||null;}
+function personUsedByEntry(userId,id){
+  return loadState(userId).entries.some(entry=>entry.personId===id||(entry.type==='split_paid_for_people'&&(entry.splits||[]).some(split=>split.personId===id)));
+}
+function accountUsedByEntry(userId,id){
+  return loadState(userId).entries.some(entry=>entry.accountId===id||entry.fromAccountId===id||entry.toAccountId===id);
+}
+function personUsedByRecurring(userId,id){
+  return loadRecurringRules(userId).some(rule=>rule.template?.personId===id||(rule.template?.type==='split_paid_for_people'&&(rule.template?.splits||[]).some(split=>split.personId===id)));
+}
+function accountUsedByRecurring(userId,id){
+  return loadRecurringRules(userId).some(rule=>[rule.template?.accountId,rule.template?.fromAccountId,rule.template?.toAccountId].includes(id));
+}
+function assertPersonDeletable(userId,id){
+  if(personUsedByEntry(userId,id))throw ledgerError('Delete this person’s transactions first.');
+  if(personUsedByRecurring(userId,id))throw ledgerError('A recurring schedule still uses this person. Update or delete that schedule first.');
+  if(db.prepare('SELECT 1 FROM bank_rules WHERE user_id=? AND person_id=? LIMIT 1').get(userId,id)||db.prepare('SELECT 1 FROM bank_feed_items WHERE user_id=? AND suggested_person_id=? LIMIT 1').get(userId,id))throw ledgerError('Bank Feed data still uses this person. Remove or reclassify it first.');
+}
+function assertAccountDeletable(userId,id){
+  if(accountUsedByEntry(userId,id))throw ledgerError('Delete or move this account’s transactions first.');
+  if(accountUsedByRecurring(userId,id))throw ledgerError('A recurring schedule still uses this account. Update or delete that schedule first.');
+  if(db.prepare('SELECT 1 FROM bank_feed_items WHERE user_id=? AND (account_id=? OR suggested_target_account_id=?) LIMIT 1').get(userId,id,id)||db.prepare('SELECT 1 FROM bank_rules WHERE user_id=? AND target_account_id=? LIMIT 1').get(userId,id))throw ledgerError('Bank Feed data still uses this account. Remove or reclassify it first.');
 }
 
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon'};

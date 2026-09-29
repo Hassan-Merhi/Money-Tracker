@@ -311,7 +311,7 @@ function rateLimited(req,scope='auth',{limit=30,windowMs=10*60_000}={}) {
   const now=Date.now(),key=sha256(scope+'|'+requestIp(req)),stamp=nowIso();
   q.rateLimitUpsert.run(key,now,stamp,windowMs,windowMs);
   const row=q.rateLimitRead.get(key);
-  if(Math.random()<0.01)q.cleanupRateLimits.run(new Date(Date.now()-24*60*60_000).toISOString());
+  if(Number(row?.count||0)===1)q.cleanupRateLimits.run(new Date(Date.now()-24*60*60_000).toISOString());
   return Number(row?.count||0)>limit;
 }
 

@@ -563,9 +563,7 @@ function renderSettings(main) {
       <div class="settings-subsection"><h4>Active sessions</h4><div id="activeSessions" class="muted">Loading sessions…</div></div>
       <div class="settings-subsection"><h4>Recent security activity</h4><div id="securityEvents" class="muted">Loading activity…</div></div>
     </section>
-    <section class="card settings-card"><h3>Complete backup & recovery</h3><p class="muted">This backup includes people, accounts, transactions, attachments, recurring schedules, categories, budgets, Bank Feed items/rules, and settings. Passwords and active sessions are never exported.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export complete backup</button><button class="btn" id="importBackup">↑ Restore complete backup</button><button class="btn" id="openReports">Open reports</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
-    <section class="card settings-card"><h3>Balance rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
-    <section class="card settings-card"><h3>Danger zone</h3><p class="muted">Delete all app data keeps your login. Delete account removes this login and all of its data permanently.</p><div class="page-actions"><button class="btn danger" id="resetData">Delete all app data</button><button class="btn danger" id="deleteMyAccount">Delete my account</button></div></section>
+    <section class="card settings-card"><h3>Danger zone</h3><p class="muted">For your protection, both destructive actions require your current password. Delete all app data keeps your login. Delete account removes this login and all of its data permanently.</p><div class="page-actions"><button class="btn danger" id="resetData">Delete all app data</button><button class="btn danger" id="deleteMyAccount">Delete my account</button></div></section>
   </div>`;
   main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value,appMode=main.querySelector('#settingMode').value,timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';saveThemePreference(main.querySelector('#settingTheme').value);const saved=await runMutation(version=>updateSettings({defaultCurrency,appMode,timezone},version),'Settings saved.');if(saved&&appMode==='advanced')showToast('Advanced mode enabled — accounts, Bank Feed, budgets and schedules are now available.');});
   main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
@@ -578,7 +576,7 @@ function renderSettings(main) {
   main.querySelector('#importBackup')?.addEventListener('click',()=>main.querySelector('#backupFile').click());
   main.querySelector('#openReports')?.addEventListener('click',()=>{location.hash='#reports';});
   main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(Number(parsed.backupVersion)!==2||parsed.app!=='money-owed-tracker')throw new Error('That file is not a complete Money Tracker backup.');if(!confirm('Restore this complete backup? Current app data for this login will be replaced.'))return;const result=await restoreFullBackup(parsed);state=result.state;showToast('Complete backup restored.');render();}catch(error){showToast(error.message||'Could not restore that backup.');}finally{e.target.value='';}});
-  main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all Money Tracker app data for this login?')){try{state=await resetState();showToast('App data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset app data.');}}});
+  main.querySelector('#resetData')?.addEventListener('click',()=>openDeleteDataModal());
   main.querySelector('#deleteMyAccount')?.addEventListener('click',()=>openDeleteAccountModal());
   refreshSecurityPanel(main);
   if(user?.isOwner){
@@ -619,13 +617,41 @@ async function refreshManagedUsers(main){
   }catch(error){host.textContent=error.message||'Could not load user accounts.';}
 }
 
+function openDeleteDataModal(){
+  openModal('Delete all app data',`<form id="deleteDataForm" class="form-grid">
+    <div class="span-2 warning">This permanently deletes all Money Tracker data for this login, including people, transactions, accounts, attachments, schedules, budgets and Bank Feed history. Your login stays active.</div>
+    <div class="field span-2"><label>Current password</label><input class="input" type="password" name="password" autocomplete="current-password" required></div>
+  </form>`,()=>document.querySelector('#deleteDataForm').requestSubmit());
+  const saveButton=document.querySelector('#modalSave');
+  if(saveButton){saveButton.textContent='Delete all app data';saveButton.classList.remove('primary');saveButton.classList.add('danger');}
+  document.querySelector('#deleteDataForm').addEventListener('submit',async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,fd=new FormData(form),button=document.querySelector('#modalSave');
+    if(button)button.disabled=true;
+    try{
+      state=await resetState(fd.get('password'));
+      closeModal();
+      showToast('App data deleted.');
+      location.hash='#dashboard';
+      render();
+    }catch(error){
+      showToast(error.message||'Could not reset app data.');
+      form.querySelector('input[name="password"]')?.focus();
+    }finally{
+      if(button?.isConnected)button.disabled=false;
+    }
+  });
+}
+
 function openDeleteAccountModal(){
   openModal('Delete my account',`<form id="deleteAccountForm" class="form-grid">
     <div class="span-2 warning">This permanently deletes this login and all data owned by it. This cannot be undone.</div>
     <div class="field span-2"><label>Current password</label><input class="input" type="password" name="password" autocomplete="current-password" required></div>
     <div class="field span-2"><label>Type DELETE to confirm</label><input class="input" name="confirmation" required autocomplete="off"></div>
   </form>`,()=>document.querySelector('#deleteAccountForm').requestSubmit());
-  document.querySelector('#deleteAccountForm').addEventListener('submit',async event=>{event.preventDefault();const fd=new FormData(event.currentTarget);try{await deleteMyAccount(fd.get('password'),fd.get('confirmation'));user=null;state=null;closeModal();await showAuth('Account deleted.');}catch(error){showToast(error.message||'Could not delete account.');}});
+  const saveButton=document.querySelector('#modalSave');
+  if(saveButton){saveButton.textContent='Delete my account';saveButton.classList.remove('primary');saveButton.classList.add('danger');}
+  document.querySelector('#deleteAccountForm').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,fd=new FormData(form),button=document.querySelector('#modalSave');if(button)button.disabled=true;try{await deleteMyAccount(fd.get('password'),fd.get('confirmation'));user=null;state=null;closeModal();await showAuth('Account deleted.');}catch(error){showToast(error.message||'Could not delete account.');form.querySelector('input[name="password"]')?.focus();}finally{if(button?.isConnected)button.disabled=false;}});
 }
 
 function openPersonModal(existing=null){

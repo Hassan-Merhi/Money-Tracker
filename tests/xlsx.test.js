@@ -11,4 +11,7 @@ test('buildXlsx creates a valid-looking OOXML zip with workbook parts',()=>{
   assert.match(text,/xl\/workbook\.xml/);
   assert.match(text,/worksheets\/sheet2\.xml/);
   assert.match(text,/Alice/);
+  assert.match(text,/autoFilter/);
+  assert.match(text,/state="frozen"/);
+  assert.match(text,/customWidth="1"/);
 });

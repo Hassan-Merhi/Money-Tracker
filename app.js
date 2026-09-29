@@ -1,4 +1,4 @@
-import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
+import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
@@ -7,12 +7,14 @@ import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-re
 import { renderBankFeedPage } from './block-f-bank-feed.js';
 import { renderInsightsPage, mountBudgetDashboardWidget } from './block-g-insights.js';
 import { categoryOptionsForType } from './lib/insights.js';
+import { initPwa, pwaStatus, installPwa, activatePwaUpdate } from './lib/pwa.js';
 
 let state = null;
 let user = null;
 let route = parseRoute();
 let toastTimer;
 let saving = false;
+let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false};
 
 const app = document.querySelector('#app');
 const advancedMode=()=>state?.settings?.appMode==='advanced';
@@ -38,6 +40,7 @@ function saveThemePreference(preference){
 }
 applyTheme();
 themeMedia?.addEventListener?.('change',()=>{if(themePreference()==='system')applyTheme('system');});
+window.addEventListener('moneytracker:pwa',event=>{pwa=event.detail||pwa;if(state)render();});
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -116,7 +119,7 @@ function render() {
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2>${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions">${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
+          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
         </header>
         <main class="main" id="main"></main>
       </section>
@@ -125,6 +128,7 @@ function render() {
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
+  document.querySelector('#applyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#mobileQuickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());

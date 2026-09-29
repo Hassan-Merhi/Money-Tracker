@@ -53,6 +53,13 @@ function parseRoute() {
 }
 
 window.addEventListener('hashchange', () => { route = parseRoute(); routeFocusPending=true; if (state) render(); });
+document.querySelector('.skip-link')?.addEventListener('click',event=>{
+  event.preventDefault();
+  const main=document.querySelector('#main');
+  if(!main)return;
+  main.focus({preventScroll:true});
+  main.scrollIntoView({block:'start'});
+});
 
 async function runMutation(action,message='') {
   if (saving) { showToast('Saving the previous change…'); return false; }

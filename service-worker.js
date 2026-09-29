@@ -1,6 +1,6 @@
 const CACHE='money-tracker-debt-v9';
 const CORE=[
-  '/','/index.html','/styles.css','/app.js',
+  '/','/index.html','/styles.css','/theme-init.js','/app.js',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg',

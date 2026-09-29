@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 test('current PWA cache includes the Lane C resilience controller and core finance modules',()=>{
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
-  assert.match(sw,/money-tracker-debt-v10/);
+  assert.match(sw,/money-tracker-debt-v11/);
   assert.match(sw,/\/lib\/pwa\.js/);
   assert.match(sw,/SKIP_WAITING/);
   assert.match(sw,/networkFirst/);
@@ -48,4 +48,13 @@ test('theme bootstrap is external so script CSP does not block it',()=>{
   assert.equal(/<script>/.test(html),false);
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
   assert.match(sw,/theme-init\.js/);
+});
+
+
+test('quick paste importer is exposed in Settings and uses the statement-safe parser',()=>{
+  const source=readFileSync(new URL('../block-c-import.js',import.meta.url),'utf8');
+  assert.match(source,/Paste from Excel/);
+  assert.match(source,/applyQuickPasteImport/);
+  assert.match(source,/They owe me/);
+  assert.match(source,/Took from them/);
 });

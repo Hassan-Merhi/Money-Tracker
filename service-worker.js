@@ -1,4 +1,4 @@
-const CACHE='money-tracker-debt-v10';
+const CACHE='money-tracker-debt-v11';
 const CORE=[
   '/','/index.html','/styles.css','/theme-init.js','/app.js',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',

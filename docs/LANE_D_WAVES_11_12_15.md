@@ -55,7 +55,7 @@ This closes the class of defects where the server could create a valid backup th
 - acknowledged recurring reminder history is pruned by age and per-user retained count;
 - the 90-day security-event policy is enforced during continued server operation and security-history reads;
 - static files emit ETags and answer matching conditional requests with HTTP 304;
-- PWA cache contract advances to `money-tracker-debt-v10`;
+- PWA cache contract advances to `money-tracker-debt-v11`;
 - stale-while-revalidate work is attached to the service-worker fetch event lifetime with `event.waitUntil()`.
 
 ## Wave 15 — Release / QA Closure
@@ -70,7 +70,7 @@ The release suite reproduces the historical recovery thresholds by verifying one
 
 It also verifies:
 
-- Lane D health readiness and PWA v10;
+- Lane D health readiness and PWA v11;
 - conditional ETag requests;
 - continuous security-event retention;
 - full-table Bank Feed reconciliation totals;
@@ -82,7 +82,7 @@ Startup emits:
 
 `LANE_D_READY {"waves":[11,12,15],"accessibility":true,"scaleHardening":true,"coherentRecoveryLimits":true,"releaseQa":true}`
 
-Health reports `laneDVersion: 1` and `pwaCacheVersion: 10`.
+Health reports `laneDVersion: 1` and `pwaCacheVersion: 11`.
 
 ## Release gates
 
@@ -94,9 +94,9 @@ Lane D is complete only when:
 - no unresolved automated P1/P2 review finding from Lanes A–C remains applicable;
 - the exact Lane D branch head passes CI;
 - staging boots with EXACT_MONEY_READY, LANE_A_READY, LANE_B_READY, LANE_C_READY, and LANE_D_READY;
-- staging health reports Lane D v1 / PWA v10 and healthy SQLite diagnostics;
+- staging health reports Lane D v1 / PWA v11 and healthy SQLite diagnostics;
 - staging shows no continuing application errors;
 - a fresh production SQLite snapshot is verified immediately before merge;
 - main CI passes after merge;
-- production reports Lane D v1 / PWA v10, healthy runtime diagnostics, healthy recurring worker, and registration locked;
+- production reports Lane D v1 / PWA v11, healthy runtime diagnostics, healthy recurring worker, and registration locked;
 - there are no continuing post-cutover errors.

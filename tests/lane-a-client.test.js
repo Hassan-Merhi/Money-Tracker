@@ -75,7 +75,7 @@ test('bulk spreadsheet import intentionally keeps compatibility state save',()=>
 
 test('service worker forces Lane A client refresh and caches exact-money dependency',()=>{
   const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
-  assert.match(sw,/money-tracker-debt-v10/);
+  assert.match(sw,/money-tracker-debt-v11/);
   assert.match(sw,/'\/lib\/money\.js'/);
 });
 

@@ -193,7 +193,7 @@ Highlights:
 - coherent storage and complete-backup limits from one shared contract;
 - Bank Feed full-table reconciliation totals and transactional scale limits;
 - bounded recurring/import history and continuously enforced security-event retention;
-- PWA cache v10 with reliable stale-while-revalidate updates;
+- PWA cache v11 with reliable stale-while-revalidate updates;
 - ETag/304 static delivery;
 - dedicated Lane D regression and release gates in CI.
 

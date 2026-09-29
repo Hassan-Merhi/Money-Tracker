@@ -200,7 +200,7 @@ test('entries API creates updates and deletes only the target transaction and cl
   const removed=await request('/api/entries/entry_api_atomic',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
   assert.equal(removed.res.status,200);state=removed.data;
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM attachments WHERE entry_id='entry_api_atomic'").get().count,0);
-  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all(),[{kind:'entry_delete'}]);
+  assert.deepEqual(db.prepare('SELECT kind FROM lane_a_mutation_probe').all().map(row=>row.kind),['entry_delete']);
 
   const personRemoved=await request('/api/people/person_charlie',{method:'DELETE',cookie,csrf,body:{expectedRevision:state.version}});
   assert.equal(personRemoved.res.status,200);state=personRemoved.data;

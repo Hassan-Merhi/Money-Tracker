@@ -47,7 +47,7 @@ async function readFile(file){
   }catch(e){area.innerHTML=`<div class="imp-error">${escapeHtml(e.message||'Could not read this file.')}</div>`;}
 }
 
-function moneyText(value,currency='USD'){const n=Number(value||0);try{return new Intl.NumberFormat(undefined,{style:'currency',currency}).format(n);}catch{return `${currency} ${n.toFixed(2)}`;}}
+function moneyText(value,currency='USD'){const n=Number(value||0);try{return new Intl.NumberFormat(undefined,{style:'currency',currency,minimumFractionDigits:currencyExponent(currency),maximumFractionDigits:currencyExponent(currency)}).format(n);}catch{return `${currency} ${n.toFixed(currencyExponent(currency))}`;}}
 function legacyEffect(record){
   const currency=state?.settings?.defaultCurrency||'USD',amount=moneyText(record.amount,currency);
   if(record.kind==='person_adjustment')return record.signedAmount>=0?`+${amount} they owe you`:`-${amount} they paid / you owe`;

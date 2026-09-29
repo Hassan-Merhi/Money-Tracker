@@ -9,6 +9,8 @@ import { nextRecurringDate } from './lib/recurring.js';
 import { createBankFeedService } from './lib/bank-server.js';
 import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
+import { normalizeMoney, toMinor } from './lib/money.js';
+import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
@@ -55,7 +57,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   name TEXT NOT NULL,
   type TEXT NOT NULL,
   currency TEXT NOT NULL,
-  opening_balance REAL NOT NULL DEFAULT 0,
+  opening_balance_minor INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   PRIMARY KEY (user_id, id)
 );
@@ -67,11 +69,11 @@ CREATE TABLE IF NOT EXISTS entries (
   account_id TEXT,
   from_account_id TEXT,
   to_account_id TEXT,
-  amount REAL NOT NULL DEFAULT 0,
+  amount_minor INTEGER NOT NULL DEFAULT 0,
   currency TEXT,
-  from_amount REAL,
-  to_amount REAL,
-  signed_amount REAL,
+  from_amount_minor INTEGER,
+  to_amount_minor INTEGER,
+  signed_amount_minor INTEGER,
   date TEXT NOT NULL,
   merchant TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
@@ -127,6 +129,7 @@ if (!ownerCount) db.prepare("UPDATE users SET is_owner=1 WHERE id=(SELECT id FRO
 const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
 if (!entryColumns.has('split_json')) db.exec("ALTER TABLE entries ADD COLUMN split_json TEXT NOT NULL DEFAULT '[]'");
 if (!entryColumns.has('category_id')) db.exec("ALTER TABLE entries ADD COLUMN category_id TEXT");
+ensureCoreExactMoneySchema(db);
 
 const insights = createInsightsService(db);
 
@@ -142,16 +145,16 @@ const q = {
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
   cleanupSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   people: db.prepare('SELECT id,name,note,created_at AS createdAt FROM people WHERE user_id=? ORDER BY name COLLATE NOCASE'),
-  accounts: db.prepare('SELECT id,name,type,currency,opening_balance AS openingBalance,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
+  accounts: db.prepare('SELECT id,name,type,currency,opening_balance_minor AS openingBalanceMinor,created_at AS createdAt FROM accounts WHERE user_id=? ORDER BY created_at'),
   entries: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
-    amount,currency,from_amount AS fromAmount,to_amount AS toAmount,signed_amount AS signedAmount,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
+    amount_minor AS amountMinor,currency,from_amount_minor AS fromAmountMinor,to_amount_minor AS toAmountMinor,signed_amount_minor AS signedAmountMinor,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
     FROM entries WHERE user_id=? ORDER BY date, created_at`),
   deleteEntries: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deletePeople: db.prepare('DELETE FROM people WHERE user_id=?'),
   deleteAccounts: db.prepare('DELETE FROM accounts WHERE user_id=?'),
   insertPerson: db.prepare('INSERT INTO people(user_id,id,name,note,created_at) VALUES(?,?,?,?,?)'),
-  insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance,created_at) VALUES(?,?,?,?,?,?,?)'),
-  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount,currency,from_amount,to_amount,signed_amount,date,merchant,description,category_id,split_json,created_at,updated_at)
+  insertAccount: db.prepare('INSERT INTO accounts(user_id,id,name,type,currency,opening_balance_minor,created_at) VALUES(?,?,?,?,?,?,?)'),
+  insertEntry: db.prepare(`INSERT INTO entries(user_id,id,type,person_id,account_id,from_account_id,to_account_id,amount_minor,currency,from_amount_minor,to_amount_minor,signed_amount_minor,date,merchant,description,category_id,split_json,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
@@ -175,6 +178,8 @@ const q = {
 };
 
 const bankFeed = createBankFeedService(db);
+markExactMoneySchema(db);
+console.log('EXACT_MONEY_READY '+JSON.stringify({version:exactMoneySchemaVersion(db),storage:'integer-minor-units'}));
 
 if (process.env.WAVE0_BACKUP_ON_START === '1') {
   const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});
@@ -192,6 +197,10 @@ function safeStr(value, max=180) { return String(value ?? '').trim().slice(0,max
 function validCurrency(v) { return /^[A-Z]{3,5}$/.test(String(v || '')); }
 function validDate(v) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)); }
 function finite(v) { const n=Number(v); return Number.isFinite(n) ? n : null; }
+function exactMoney(v,currency,options={}) {
+  try{return normalizeMoney(v,currency,options);}
+  catch(error){throw new Error(error.message||'Invalid money amount.');}
+}
 function idOk(v, prefix) { return typeof v === 'string' && v.startsWith(`${prefix}_`) && v.length <= 80 && /^[a-zA-Z0-9_-]+$/.test(v); }
 
 function hashPassword(password) {
@@ -289,144 +298,160 @@ function validateState(input, user) {
   const allowedAccountTypes=new Set(['bank','cash','card','wallet','other']);
   const cleanAccounts=accounts.map(a=>{
     if(!idOk(a.id,'account')||aSeen.has(a.id)) throw new Error('Invalid account record.'); aSeen.add(a.id);
-    const name=safeStr(a.name,100), type=String(a.type||'other'), currency=String(a.currency||defaultCurrency).toUpperCase(), opening=finite(a.openingBalance);
-    if(!name||!allowedAccountTypes.has(type)||!validCurrency(currency)||opening===null||Math.abs(opening)>1e15) throw new Error('Invalid account record.');
-    return {id:a.id,name,type,currency,openingBalance:opening,createdAt:a.createdAt||nowIso()};
+    const name=safeStr(a.name,100), type=String(a.type||'other'), currency=String(a.currency||defaultCurrency).toUpperCase();
+    if(!name||!allowedAccountTypes.has(type)||!validCurrency(currency)) throw new Error('Invalid account record.');
+    const openingBalance=exactMoney(a.openingBalance??0,currency);
+    return {id:a.id,name,type,currency,openingBalance,createdAt:a.createdAt||nowIso()};
   });
   const allowedTypes=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income']);
   const accountById=new Map(cleanAccounts.map(a=>[a.id,a]));
   const cleanEntries=entries.map(e=>{
     if(!idOk(e.id,'entry')||eSeen.has(e.id)||!allowedTypes.has(e.type)) throw new Error('Invalid transaction record.'); eSeen.add(e.id);
-    const amount=finite(e.amount); if(amount===null||amount<0||amount>1e15) throw new Error('Invalid transaction amount.');
-    const base={id:e.id,type:e.type,personId:e.personId||null,accountId:e.accountId||null,fromAccountId:e.fromAccountId||null,toAccountId:e.toAccountId||null,amount,currency:e.currency?String(e.currency).toUpperCase():null,fromAmount:e.fromAmount==null?null:finite(e.fromAmount),toAmount:e.toAmount==null?null:finite(e.toAmount),signedAmount:e.signedAmount==null?null:finite(e.signedAmount),date:String(e.date||''),merchant:safeStr(e.merchant,100),description:safeStr(e.description,500),categoryId:e.categoryId||null,splits:[],createdAt:e.createdAt||nowIso(),updatedAt:e.updatedAt||nowIso()};
+    const amount=finite(e.amount);
+    if(amount===null||amount<0) throw new Error('Invalid transaction amount.');
+    const base={
+      id:e.id,type:e.type,personId:e.personId||null,accountId:e.accountId||null,fromAccountId:e.fromAccountId||null,toAccountId:e.toAccountId||null,
+      amount,currency:e.currency?String(e.currency).toUpperCase():null,
+      fromAmount:e.fromAmount==null?null:finite(e.fromAmount),toAmount:e.toAmount==null?null:finite(e.toAmount),signedAmount:e.signedAmount==null?null:finite(e.signedAmount),
+      date:String(e.date||''),merchant:safeStr(e.merchant,100),description:safeStr(e.description,500),categoryId:e.categoryId||null,splits:[],
+      createdAt:e.createdAt||nowIso(),updatedAt:e.updatedAt||nowIso()
+    };
     if(!validDate(base.date)) throw new Error('Invalid transaction date.');
     if(e.type==='account_transfer'){
-      if(!aSeen.has(base.fromAccountId)||!aSeen.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
+      const from=accountById.get(base.fromAccountId),to=accountById.get(base.toAccountId);
+      if(!from||!to||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
+      base.fromAmount=exactMoney(base.fromAmount,from.currency,{allowNegative:false,allowZero:false});
+      base.toAmount=exactMoney(base.toAmount,to.currency,{allowNegative:false,allowZero:false});
       base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
     } else if(e.type==='split_paid_for_people'){
       if(!(amount>0)) throw new Error('Split transaction amount is missing.');
       if(base.accountId&&!aSeen.has(base.accountId)) throw new Error('Split transaction account is invalid.');
-      const source=Array.isArray(e.splits)?e.splits:[];
-      if(source.length<2||source.length>100) throw new Error('A split needs at least two people.');
-      const seenPeople=new Set(); let splitTotal=0;
-      base.splits=source.map(split=>{
-        const personId=String(split?.personId||''), splitAmount=finite(split?.amount);
-        if(!pSeen.has(personId)||seenPeople.has(personId)||!(splitAmount>0)||splitAmount>1e15) throw new Error('Invalid split allocation.');
-        seenPeople.add(personId); splitTotal+=splitAmount;
-        return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
-      });
-      if(Math.abs(splitTotal-amount)>0.005) throw new Error('Split amounts must equal the transaction total.');
-      base.personId=null;
       if(base.accountId)base.currency=accountById.get(base.accountId).currency;
       else if(!validCurrency(base.currency))throw new Error('Split transaction currency is missing.');
-      base.signedAmount=null;
-      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
+      base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});
+      const source=Array.isArray(e.splits)?e.splits:[];
+      if(source.length<2||source.length>100) throw new Error('A split needs at least two people.');
+      const seenPeople=new Set(); let splitTotalMinor=0;
+      base.splits=source.map(split=>{
+        const personId=String(split?.personId||'');
+        if(!pSeen.has(personId)||seenPeople.has(personId)) throw new Error('Invalid split allocation.');
+        seenPeople.add(personId);
+        const splitAmount=exactMoney(split?.amount,base.currency,{allowNegative:false,allowZero:false});
+        splitTotalMinor+=toMinor(splitAmount,base.currency);
+        if(!Number.isSafeInteger(splitTotalMinor))throw new Error('Split total is too large to store safely.');
+        return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
+      });
+      if(splitTotalMinor!==toMinor(base.amount,base.currency)) throw new Error('Split amounts must equal the transaction total.');
+      base.personId=null;base.signedAmount=null;base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
     } else if(e.type==='account_expense'||e.type==='account_income'){
-      if(!aSeen.has(base.accountId)||!(amount>0)) throw new Error('Account-only transaction account is missing.');
+      const account=accountById.get(base.accountId);
+      if(!account||!(amount>0)) throw new Error('Account-only transaction account is missing.');
       if(base.categoryId) insights.validateCategory(user.user_id,base.categoryId,{kind:e.type==='account_income'?'income':'expense'});
-      base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+      base.personId=null;base.currency=account.currency;base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});base.signedAmount=null;
       base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
     } else {
       if(!pSeen.has(base.personId)) throw new Error('Transaction person is missing.');
       if(e.type==='person_adjustment'){
         base.accountId=null;
-        if(!(amount>0)||base.signedAmount===null||Math.abs(base.signedAmount)!==amount||!validCurrency(base.currency)) throw new Error('Invalid balance adjustment.');
+        if(!(amount>0)||base.signedAmount===null||!validCurrency(base.currency)) throw new Error('Invalid balance adjustment.');
+        base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});
+        base.signedAmount=exactMoney(base.signedAmount,base.currency,{allowZero:false});
+        if(Math.abs(toMinor(base.signedAmount,base.currency))!==toMinor(base.amount,base.currency))throw new Error('Invalid balance adjustment.');
       } else {
         if(!(amount>0)) throw new Error('Transaction amount is missing.');
         if(base.accountId){
-          if(!aSeen.has(base.accountId)) throw new Error('Transaction account is invalid.');
-          base.currency=accountById.get(base.accountId).currency;
+          const account=accountById.get(base.accountId);if(!account)throw new Error('Transaction account is invalid.');
+          base.currency=account.currency;
         } else if(!validCurrency(base.currency)) throw new Error('Transaction currency is missing.');
+        base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});
         base.signedAmount=null;
       }
-      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
-      base.categoryId=null;
+      base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
     }
     return base;
   });
   return {settings:{displayName,defaultCurrency},people:cleanPeople,accounts:cleanAccounts,entries:cleanEntries};
 }
 
-
 const RECURRING_TYPES = new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person','person_adjustment','account_transfer','split_paid_for_people','account_expense','account_income']);
 const RECURRING_FREQUENCIES = new Set(['daily','weekly','monthly','yearly']);
 
-function recurringRow(row) {
+function accountCurrencyMap(userId) {
+  return new Map(q.accounts.all(userId).map(row=>[row.id,row]));
+}
+
+function recurringRow(row,userId) {
   if(!row) return null;
-  let template={}; try{template=JSON.parse(row.templateJson||'{}');}catch{}
+  let stored={}; try{stored=JSON.parse(row.templateJson||'{}');}catch{}
+  const template=templateFromStorage(stored,accountCurrencyMap(userId));
   const {templateJson,...rest}=row;
   return {...rest,isActive:!!row.isActive,template};
 }
 
 function loadRecurringRules(userId) {
-  return q.recurringRules.all(userId).map(recurringRow);
+  return q.recurringRules.all(userId).map(row=>recurringRow(row,userId));
 }
 
 function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
   if(!raw || typeof raw!=='object' || !RECURRING_TYPES.has(raw.type)) throw new Error('Choose a valid recurring transaction type.');
   const people=new Set(q.people.all(userId).map(row=>row.id));
-  const accounts=q.accounts.all(userId);
-  const accountById=new Map(accounts.map(row=>[row.id,row]));
+  const accountById=accountCurrencyMap(userId);
   const amount=finite(raw.amount);
   const base={
-    type:raw.type,
-    personId:raw.personId||null,
-    accountId:raw.accountId||null,
-    fromAccountId:raw.fromAccountId||null,
-    toAccountId:raw.toAccountId||null,
-    amount,
-    currency:raw.currency?String(raw.currency).toUpperCase():null,
-    fromAmount:raw.fromAmount==null?null:finite(raw.fromAmount),
-    toAmount:raw.toAmount==null?null:finite(raw.toAmount),
-    signedAmount:raw.signedAmount==null?null:finite(raw.signedAmount),
-    merchant:safeStr(raw.merchant,100),
-    description:safeStr(raw.description,500),
-    categoryId:raw.categoryId||null,
-    splits:[]
+    type:raw.type,personId:raw.personId||null,accountId:raw.accountId||null,fromAccountId:raw.fromAccountId||null,toAccountId:raw.toAccountId||null,
+    amount,currency:raw.currency?String(raw.currency).toUpperCase():null,
+    fromAmount:raw.fromAmount==null?null:finite(raw.fromAmount),toAmount:raw.toAmount==null?null:finite(raw.toAmount),signedAmount:raw.signedAmount==null?null:finite(raw.signedAmount),
+    merchant:safeStr(raw.merchant,100),description:safeStr(raw.description,500),categoryId:raw.categoryId||null,splits:[]
   };
-  if(amount===null || amount<0 || amount>1e15) throw new Error('Invalid recurring amount.');
+  if(amount===null || amount<0) throw new Error('Invalid recurring amount.');
   if(raw.type==='account_transfer'){
-    if(!accountById.has(base.fromAccountId)||!accountById.has(base.toAccountId)||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Choose two different accounts and valid transfer amounts.');
+    const from=accountById.get(base.fromAccountId),to=accountById.get(base.toAccountId);
+    if(!from||!to||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Choose two different accounts and valid transfer amounts.');
+    base.fromAmount=exactMoney(base.fromAmount,from.currency,{allowNegative:false,allowZero:false});
+    base.toAmount=exactMoney(base.toAmount,to.currency,{allowNegative:false,allowZero:false});
     base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
   } else if(raw.type==='split_paid_for_people'){
     if(!(amount>0)) throw new Error('Choose an amount for the recurring split.');
     if(base.accountId&&!accountById.has(base.accountId)) throw new Error('Choose a valid account or leave it blank.');
-    const source=Array.isArray(raw.splits)?raw.splits:[];
-    if(source.length<2||source.length>100) throw new Error('A recurring split needs at least two people.');
-    const seen=new Set(); let total=0;
-    base.splits=source.map(split=>{
-      const personId=String(split?.personId||''), splitAmount=finite(split?.amount);
-      if(!people.has(personId)||seen.has(personId)||!(splitAmount>0)||splitAmount>1e15) throw new Error('Invalid recurring split allocation.');
-      seen.add(personId); total+=splitAmount;
-      return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
-    });
-    if(Math.abs(total-amount)>0.005) throw new Error('Recurring split amounts must equal the total.');
-    base.personId=null;
     base.currency=base.accountId?accountById.get(base.accountId).currency:String(base.currency||defaultCurrency).toUpperCase();
     if(!validCurrency(base.currency))throw new Error('Choose a valid currency.');
-    base.signedAmount=null;
-    base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
+    base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});
+    const source=Array.isArray(raw.splits)?raw.splits:[];
+    if(source.length<2||source.length>100) throw new Error('A recurring split needs at least two people.');
+    const seen=new Set();let totalMinor=0;
+    base.splits=source.map(split=>{
+      const personId=String(split?.personId||'');
+      if(!people.has(personId)||seen.has(personId)) throw new Error('Invalid recurring split allocation.');
+      seen.add(personId);
+      const splitAmount=exactMoney(split?.amount,base.currency,{allowNegative:false,allowZero:false});
+      totalMinor+=toMinor(splitAmount,base.currency);if(!Number.isSafeInteger(totalMinor))throw new Error('Recurring split total is too large.');
+      return {personId,amount:splitAmount,note:safeStr(split?.note,180)};
+    });
+    if(totalMinor!==toMinor(base.amount,base.currency)) throw new Error('Recurring split amounts must equal the total.');
+    base.personId=null;base.signedAmount=null;base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
   } else if(raw.type==='account_expense'||raw.type==='account_income'){
-    if(!accountById.has(base.accountId)||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
+    const account=accountById.get(base.accountId);
+    if(!account||!(amount>0)) throw new Error('Choose an account and amount for the recurring transaction.');
     if(base.categoryId) insights.validateCategory(userId,base.categoryId,{kind:raw.type==='account_income'?'income':'expense',active:true});
-    base.personId=null;base.currency=accountById.get(base.accountId).currency;base.signedAmount=null;
+    base.personId=null;base.currency=account.currency;base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});base.signedAmount=null;
     base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;
   } else {
     if(!people.has(base.personId)) throw new Error('Choose a person for the recurring transaction.');
     if(raw.type==='person_adjustment'){
-      base.accountId=null;
-      base.currency=String(base.currency||defaultCurrency).toUpperCase();
-      if(!(amount>0)||base.signedAmount===null||Math.abs(base.signedAmount)!==amount||!validCurrency(base.currency)) throw new Error('Invalid recurring balance adjustment.');
+      base.accountId=null;base.currency=String(base.currency||defaultCurrency).toUpperCase();
+      if(!(amount>0)||base.signedAmount===null||!validCurrency(base.currency)) throw new Error('Invalid recurring balance adjustment.');
+      base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});
+      base.signedAmount=exactMoney(base.signedAmount,base.currency,{allowZero:false});
+      if(Math.abs(toMinor(base.signedAmount,base.currency))!==toMinor(base.amount,base.currency))throw new Error('Invalid recurring balance adjustment.');
     } else {
       if(!(amount>0)) throw new Error('Choose an amount for the recurring transaction.');
       if(base.accountId){
-        if(!accountById.has(base.accountId)) throw new Error('Choose a valid account or leave it blank.');
-        base.currency=accountById.get(base.accountId).currency;
+        const account=accountById.get(base.accountId);if(!account) throw new Error('Choose a valid account or leave it blank.');
+        base.currency=account.currency;
       }else{
-        base.currency=String(base.currency||defaultCurrency).toUpperCase();
-        if(!validCurrency(base.currency))throw new Error('Choose a valid currency.');
+        base.currency=String(base.currency||defaultCurrency).toUpperCase();if(!validCurrency(base.currency))throw new Error('Choose a valid currency.');
       }
-      base.signedAmount=null;
+      base.amount=exactMoney(amount,base.currency,{allowNegative:false,allowZero:false});base.signedAmount=null;
     }
     base.fromAccountId=null;base.toAccountId=null;base.fromAmount=null;base.toAmount=null;base.categoryId=null;
   }
@@ -475,7 +500,8 @@ function recurringEntryFromTemplate(template,date) {
 }
 
 function insertLedgerEntry(userId,e) {
-  q.insertEntry.run(userId,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+  const storage=entryToStorage(e,accountCurrencyMap(userId));
+  q.insertEntry.run(userId,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,storage.amountMinor,e.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,e.date,e.merchant,e.description,e.categoryId||null,storage.splitJson,e.createdAt,e.updatedAt);
 }
 
 function advanceRecurringRule(userId,row,occurrenceDate,{posted=false}={}) {
@@ -491,14 +517,17 @@ function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
   insights.ensureDefaults(userId);
   const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
+  const accounts=q.accounts.all(userId).map(accountFromStorage);
+  const accountById=new Map(accounts.map(row=>[row.id,row]));
   const entries=q.entries.all(userId).map(row=>{
-    let splits=[]; try{splits=JSON.parse(row.splitJson||'[]');}catch{}
-    const {splitJson,...entry}=row;
-    return {...entry,splits:Array.isArray(splits)?splits:[],attachmentCount:counts.get(row.id)||0};
+    const api=entryFromStorage(row,accountById);
+    const {splitJson,amountMinor,fromAmountMinor,toAmountMinor,signedAmountMinor,...entry}=api;
+    return {...entry,attachmentCount:counts.get(row.id)||0};
   });
   const meta=insights.list(userId);
-  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts:q.accounts.all(userId),entries,categories:meta.categories,budgets:meta.budgets};
+  return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};
 }
+
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
   let clean; try{clean=validateState(input,user);assertRecurringReferences(user.user_id,clean);}catch(error){throw Object.assign(error,{status:400});}
@@ -508,11 +537,16 @@ function saveState(user, input) {
     if(Number(upd.changes)!==1) throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
     q.deleteEntries.run(user.user_id); q.deletePeople.run(user.user_id); q.deleteAccounts.run(user.user_id);
     for(const p of clean.people) q.insertPerson.run(user.user_id,p.id,p.name,p.note,p.createdAt);
-    for(const a of clean.accounts) q.insertAccount.run(user.user_id,a.id,a.name,a.type,a.currency,a.openingBalance,a.createdAt);
-    for(const e of clean.entries) q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+    const accountById=new Map(clean.accounts.map(a=>[a.id,a]));
+    for(const a of clean.accounts){
+      const storage=accountToStorage(a);q.insertAccount.run(user.user_id,a.id,a.name,a.type,a.currency,storage.openingBalanceMinor,a.createdAt);
+    }
+    for(const e of clean.entries){
+      const storage=entryToStorage(e,accountById);
+      q.insertEntry.run(user.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,storage.amountMinor,e.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,e.date,e.merchant,e.description,e.categoryId||null,storage.splitJson,e.createdAt,e.updatedAt);
+    }
     q.deleteOrphanAttachments.run(user.user_id,user.user_id);
-    bankFeed.reopenOrphans(user.user_id);
-    bankFeed.reconcileReferences(user.user_id);
+    bankFeed.reopenOrphans(user.user_id);bankFeed.reconcileReferences(user.user_id);
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);
@@ -529,7 +563,7 @@ function staticFile(req,res,url){
 export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){return json(res,200,{ok:true});}
+    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units'});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -616,8 +650,8 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req); let clean;
       try{clean=cleanRecurringRule(body,a.user_id,a.default_currency);}catch(error){return fail(res,400,error.message);}
       const stamp=nowIso();
-      q.insertRecurring.run(a.user_id,clean.id,clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(clean.template),null,null,stamp,stamp);
-      return json(res,201,{rule:recurringRow(q.recurringRuleById.get(a.user_id,clean.id))});
+      q.insertRecurring.run(a.user_id,clean.id,clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(templateToStorage(clean.template,accountCurrencyMap(a.user_id))),null,null,stamp,stamp);
+      return json(res,201,{rule:recurringRow(q.recurringRuleById.get(a.user_id,clean.id),a.user_id)});
     }
     if(url.pathname.startsWith('/api/recurring/')){
       const a=requireAuth(req,res,{csrf:req.method!=='GET'}); if(!a)return;
@@ -628,8 +662,8 @@ export const server=http.createServer(async(req,res)=>{
       if(!action&&req.method==='PUT'){
         const body=await bodyJson(req); let clean;
         try{clean=cleanRecurringRule({...body,id},a.user_id,a.default_currency,{existing:row});}catch(error){return fail(res,400,error.message);}
-        q.updateRecurring.run(clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(clean.template),nowIso(),a.user_id,id);
-        return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id))});
+        q.updateRecurring.run(clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(templateToStorage(clean.template,accountCurrencyMap(a.user_id))),nowIso(),a.user_id,id);
+        return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id)});
       }
       if(!action&&req.method==='DELETE'){
         q.deleteRecurring.run(a.user_id,id); return json(res,200,{ok:true});
@@ -641,14 +675,15 @@ export const server=http.createServer(async(req,res)=>{
         try{
           const current=q.recurringRuleById.get(a.user_id,id);
           if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
-          const template=cleanRecurringTemplate(JSON.parse(current.templateJson||'{}'),a.user_id,a.default_currency);
+          const storedTemplate=JSON.parse(current.templateJson||'{}');
+          const template=cleanRecurringTemplate(templateFromStorage(storedTemplate,accountCurrencyMap(a.user_id)),a.user_id,a.default_currency);
           if(current.nextDueDate!==occurrenceDate)throw Object.assign(new Error('This occurrence was already handled. Refresh and try again.'),{status:409});
           const bumped=q.bumpRevision.run(a.user_id,expected);
           if(Number(bumped.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
           const entry=recurringEntryFromTemplate(template,transactionDate); insertLedgerEntry(a.user_id,entry);
           advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:true});
           db.exec('COMMIT');
-          return json(res,200,{state:loadState(a.user_id),rule:recurringRow(q.recurringRuleById.get(a.user_id,id)),entryId:entry.id});
+          return json(res,200,{state:loadState(a.user_id),rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id),entryId:entry.id});
         }catch(error){db.exec('ROLLBACK');throw error;}
       }
       if(action==='skip'&&req.method==='POST'){
@@ -660,7 +695,7 @@ export const server=http.createServer(async(req,res)=>{
           if(!current||!current.isActive)throw Object.assign(new Error('This recurring schedule is paused or complete.'),{status:400});
           advanceRecurringRule(a.user_id,current,occurrenceDate,{posted:false});
           db.exec('COMMIT');
-          return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id))});
+          return json(res,200,{rule:recurringRow(q.recurringRuleById.get(a.user_id,id),a.user_id)});
         }catch(error){db.exec('ROLLBACK');throw error;}
       }
       return fail(res,405,'Recurring schedule action not supported.');
@@ -738,8 +773,9 @@ export const server=http.createServer(async(req,res)=>{
         if(Number(upd.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
         q.deleteEntries.run(a.user_id);q.deletePeople.run(a.user_id);q.deleteAccounts.run(a.user_id);
         for(const p of clean.people)q.insertPerson.run(a.user_id,p.id,p.name,p.note,p.createdAt);
-        for(const account of clean.accounts)q.insertAccount.run(a.user_id,account.id,account.name,account.type,account.currency,account.openingBalance,account.createdAt);
-        for(const e of clean.entries)q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,e.amount,e.currency,e.fromAmount,e.toAmount,e.signedAmount,e.date,e.merchant,e.description,e.categoryId||null,JSON.stringify(e.splits||[]),e.createdAt,e.updatedAt);
+        const restoreAccountById=new Map(clean.accounts.map(account=>[account.id,account]));
+        for(const account of clean.accounts){const storage=accountToStorage(account);q.insertAccount.run(a.user_id,account.id,account.name,account.type,account.currency,storage.openingBalanceMinor,account.createdAt);}
+        for(const e of clean.entries){const storage=entryToStorage(e,restoreAccountById);q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,storage.amountMinor,e.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,e.date,e.merchant,e.description,e.categoryId||null,storage.splitJson,e.createdAt,e.updatedAt);}
         q.deleteOrphanAttachments.run(a.user_id,a.user_id);
         bankFeed.reopenOrphans(a.user_id);bankFeed.reconcileReferences(a.user_id);
         db.exec('COMMIT');

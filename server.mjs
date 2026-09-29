@@ -133,6 +133,9 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is_active, next_due_date);
 `);
+const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(row=>row.name));
+if (!sessionColumns.has('last_seen_at')) db.exec("ALTER TABLE sessions ADD COLUMN last_seen_at TEXT");
+if (!sessionColumns.has('user_agent_hash')) db.exec("ALTER TABLE sessions ADD COLUMN user_agent_hash TEXT NOT NULL DEFAULT ''");
 const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(row => row.name));
 if (!userColumns.has('is_owner')) db.exec("ALTER TABLE users ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0");
 if (!userColumns.has('app_mode')) db.exec("ALTER TABLE users ADD COLUMN app_mode TEXT NOT NULL DEFAULT 'simple'");

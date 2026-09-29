@@ -32,7 +32,7 @@ Current limits include:
 - 1,000 accounts
 - 50,000 ledger entries
 - 10,000 attachments
-- 96 MB total attachment storage per account
+- 100 MB total attachment storage per account
 - 500 recurring rules
 - 6,000 recurring notification rows, with acknowledged history retained to 5,000 per user
 - 500 Bank Feed rules

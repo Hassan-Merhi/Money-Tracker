@@ -196,14 +196,6 @@ function renderDashboard(main) {
   const recent = recentDebtEntries(state.entries);
   const overview = peopleOverviewMarkup(state.people, pBalances);
   const dateLabel = new Intl.DateTimeFormat(undefined, {weekday:'long', month:'long', day:'numeric'}).format(new Date());
-  const actions = [
-    ['paid_for_person','up','They owe me','Record money you lent'],
-    ['received_from_person','check','They paid me','Record a repayment'],
-    ['borrowed_from_person','down','I owe them','Record money you borrowed'],
-    ['paid_to_person','check','I paid them','Settle what you owe'],
-    [SPLIT_ENTRY_TYPE,'people','Split a payment','Share it between people'],
-    ['person','plus','Add a person','Start a new statement']
-  ];
   main.innerHTML = `<div class="dashboard">
     <div class="dashboard-intro"><div><div class="eyebrow">YOUR MONEY, AT A GLANCE</div><h2>A clearer picture.</h2><p>Keep track of what’s owed. Make room for what’s next.</p></div><div class="dashboard-date">${icon('scheduled')}<span>${escapeHtml(dateLabel)}</span></div></div>
     <div class="grid stats debt-stats">
@@ -211,7 +203,7 @@ function renderDashboard(main) {
       <section class="card stat bad"><div class="stat-top"><h3 class="stat-label">I owe people</h3><div class="stat-icon">${icon('down')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe',money(0,state.settings.defaultCurrency))}</div><div class="stat-note"><span class="stat-dot"></span>Money to pay back</div></section>
       <section class="card stat net"><div class="stat-top"><h3 class="stat-label">Net position</h3><div class="stat-icon">${icon('net')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net',money(0,state.settings.defaultCurrency))}</div><div class="stat-note">Owed to you minus what you owe</div></section>
     </div>
-    <div class="dashboard-columns">
+    <div class="dashboard-columns${advancedMode()?'':' single-column'}">
       <div class="dashboard-primary">
         <section class="card panel activity-panel">
           <div class="panel-head"><div><h3>Recent activity</h3><p>The latest in your money story</p></div><a class="text-link" href="#transactions">View all ${icon('arrow')}</a></div>
@@ -220,11 +212,11 @@ function renderDashboard(main) {
         </section>
         <section class="card panel people-overview"><div class="panel-head"><div><h3>People & balances <span class="count-badge">${overview.count}</span></h3><p>Outstanding balances, by person</p></div><a class="text-link" href="#people">All people ${icon('arrow')}</a></div>${overview.markup || `<div class="people-empty">${icon('check')}<div><strong>${state.people.length?'You’re all settled up.':'Good records start with people.'}</strong><p>${state.people.length?'No outstanding balances right now.':'Add a person to keep every balance in one place.'}</p></div></div>`}</section>
       </div>
-      <div class="dashboard-secondary">
-        <section class="card panel quick-panel"><div class="panel-head"><div><h3>Make a move</h3><p>A quick update. A clearer balance.</p></div><span class="keyboard-hint" title="Press N to add activity">N</span></div><div class="quick-grid">${actions.map(([type,symbol,title,note])=>`<button class="quick" data-action="${type}"><span class="qicon">${icon(symbol)}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}</div><div class="quick-foot">${icon('check')} No bank account needed</div></section>
-        ${advancedMode()?`<section class="card panel" id="dashboardRecurring"></section><section class="card panel" id="dashboardBudgets"></section>`:''}
-        ${advancedMode()?`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>The bigger picture</h3><p>Explore your spending, categories and monthly budgets.</p><a class="text-link" href="#insights">Open insights ${icon('arrow')}</a></section>`:`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>More clarity. When you’re ready.</h3><p>Bring accounts, budgets and schedules into view with Advanced mode. Your existing records stay just as they are.</p><button class="text-link" id="enableAdvanced">Enable Advanced mode ${icon('arrow')}</button></section>`}
-      </div>
+      ${advancedMode()?`<div class="dashboard-secondary">
+        <section class="card panel" id="dashboardRecurring"></section>
+        <section class="card panel" id="dashboardBudgets"></section>
+        <section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>The bigger picture</h3><p>Explore your spending, categories and monthly budgets.</p><a class="text-link" href="#insights">Open insights ${icon('arrow')}</a></section>
+      </div>`:''}
     </div>
     <div class="dashboard-caption">${icon('check')} Your balances, all in one place. <span>${advancedMode()?'Advanced':'Simple'} workspace</span></div>
   </div>`;
@@ -233,7 +225,6 @@ function renderDashboard(main) {
     mountRecurringDashboardWidget(main.querySelector('#dashboardRecurring'),state,ctx);
     mountBudgetDashboardWidget(main.querySelector('#dashboardBudgets'),state);
   }
-  main.querySelector('#enableAdvanced')?.addEventListener('click',async()=>{const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';const saved=await runMutation(version=>updateSettings({defaultCurrency:state.settings.defaultCurrency,appMode:'advanced',timezone},version),'Advanced mode enabled.');if(saved)location.hash='#dashboard';});
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
     if (a==='person') openPersonModal(); else if(a==='activity') openQuickMenu(); else openTransactionModal(null,{type:a});

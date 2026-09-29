@@ -282,9 +282,13 @@ function renderSettings(main) {
       <div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div>
       <div class="field"><label>Timezone</label><input class="input" id="settingTimezone" value="${escapeHtml(state.settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}" readonly><span class="muted tiny">Used by server-side recurring reminders.</span></div>
     </div><div class="warning" style="margin-top:12px"><strong>Simple mode</strong> hides accounts, Bank Feed, budgets and schedules without deleting them. Switch back to Advanced at any time.</div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
+    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Money Tracker keeps its interface available offline, but financial changes are only sent when you are online.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div></section>
     ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. You can reset or delete secondary sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
+    ${user?.isOwner?'<section class="card settings-card"><h3>Operations & integrity</h3><p class="muted">Owner-only database integrity status and server snapshot controls.</p><div id="runtimeStatus" class="muted">Loading diagnostics…</div><div class="page-actions" style="margin-top:14px"><button class="btn" id="refreshRuntime">Refresh diagnostics</button><button class="btn primary" id="serverSnapshot">Create server snapshot</button></div></section>':''}
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Password changes revoke every other session automatically.</p>
       <form id="passwordForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Current password</label><input class="input" name="currentPassword" type="password" autocomplete="current-password" required></div><div class="field"><label>New password</label><input class="input" name="newPassword" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2 page-actions"><button class="btn primary" type="submit">Change password</button><button class="btn" type="button" id="revokeSessions">Sign out other devices</button><button class="btn" type="button" id="settingsLogout">Sign out this device</button></div></form>
+      <div class="settings-subsection"><h4>Active sessions</h4><div id="activeSessions" class="muted">Loading sessions…</div></div>
+      <div class="settings-subsection"><h4>Recent security activity</h4><div id="securityEvents" class="muted">Loading activity…</div></div>
     </section>
     <section class="card settings-card"><h3>Complete backup & recovery</h3><p class="muted">This backup includes people, accounts, transactions, attachments, recurring schedules, categories, budgets, Bank Feed items/rules, and settings. Passwords and active sessions are never exported.</p><div class="page-actions"><button class="btn" id="exportBackup">↓ Export complete backup</button><button class="btn" id="importBackup">↑ Restore complete backup</button><button class="btn" id="openReports">Open reports</button><input type="file" id="backupFile" accept="application/json" hidden></div></section>
     <section class="card settings-card"><h3>Balance rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
@@ -292,6 +296,8 @@ function renderSettings(main) {
   </div>`;
   main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value,appMode=main.querySelector('#settingMode').value,timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';saveThemePreference(main.querySelector('#settingTheme').value);const saved=await runMutation(version=>updateSettings({defaultCurrency,appMode,timezone},version),'Settings saved.');if(saved&&appMode==='advanced')showToast('Advanced mode enabled — accounts, Bank Feed, budgets and schedules are now available.');});
   main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
+  main.querySelector('#installApp')?.addEventListener('click',async()=>{const accepted=await installPwa();showToast(accepted?'Money Tracker installation started.':'Installation was not completed.');});
+  main.querySelector('#settingsApplyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
   main.querySelector('#revokeSessions')?.addEventListener('click',async()=>{try{const result=await revokeOtherSessions();showToast(`${result.revoked||0} other session${result.revoked===1?'':'s'} signed out.`);}catch(error){showToast(error.message||'Could not revoke sessions.');}});
   main.querySelector('#passwordForm')?.addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;try{await changePassword(fd.get('currentPassword'),fd.get('newPassword'));form.reset();showToast('Password changed. Other devices were signed out.');}catch(error){showToast(error.message||'Could not change password.');}finally{button.disabled=false;}});
@@ -301,10 +307,33 @@ function renderSettings(main) {
   main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(Number(parsed.backupVersion)!==2||parsed.app!=='money-owed-tracker')throw new Error('That file is not a complete Money Tracker backup.');if(!confirm('Restore this complete backup? Current app data for this login will be replaced.'))return;const result=await restoreFullBackup(parsed);state=result.state;showToast('Complete backup restored.');render();}catch(error){showToast(error.message||'Could not restore that backup.');}finally{e.target.value='';}});
   main.querySelector('#resetData')?.addEventListener('click',async()=>{if(confirm('Permanently delete all Money Tracker app data for this login?')){try{state=await resetState();showToast('App data deleted.');location.hash='#dashboard';render();}catch(error){showToast(error.message||'Could not reset app data.');}}});
   main.querySelector('#deleteMyAccount')?.addEventListener('click',()=>openDeleteAccountModal());
+  refreshSecurityPanel(main);
   if(user?.isOwner){
     refreshManagedUsers(main);
+    refreshRuntimePanel(main);
+    main.querySelector('#refreshRuntime')?.addEventListener('click',()=>refreshRuntimePanel(main));
+    main.querySelector('#serverSnapshot')?.addEventListener('click',async()=>{const button=main.querySelector('#serverSnapshot');button.disabled=true;try{const result=await createServerSnapshot();showToast('Server snapshot created · '+result.snapshotFile);await refreshRuntimePanel(main);}catch(error){showToast(error.message||'Could not create server snapshot.');}finally{button.disabled=false;}});
     main.querySelector('#addUserForm')?.addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,fd=new FormData(form),button=form.querySelector('button[type=submit]');button.disabled=true;try{await createUserAccount(fd.get('email'),fd.get('password'));form.reset();showToast('Account created.');await refreshManagedUsers(main);}catch(error){showToast(error.message||'Could not create account.');}finally{button.disabled=false;}});
   }
+}
+
+async function refreshSecurityPanel(main){
+  const sessionsHost=main.querySelector('#activeSessions'),eventsHost=main.querySelector('#securityEvents');
+  try{
+    const [sessionData,eventData]=await Promise.all([listSessions(),listSecurityEvents()]);
+    if(sessionsHost)sessionsHost.innerHTML=sessionData.sessions.length?sessionData.sessions.map(item=>`<div class="security-row"><div><strong>${item.current?'This device':'Signed-in device'}</strong><div class="muted tiny">Last seen ${escapeHtml(String(item.lastSeenAt||'').replace('T',' ').slice(0,16))} · expires ${escapeHtml(String(item.expiresAt||'').slice(0,10))}</div></div>${item.current?'<span class="pill green">Current</span>':`<button class="btn small danger" data-revoke-session="${item.id}">Sign out</button>`}</div>`).join(''):'<div class="muted">No active sessions.</div>';
+    sessionsHost?.querySelectorAll('[data-revoke-session]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;try{await revokeSession(button.dataset.revokeSession);showToast('Session signed out.');await refreshSecurityPanel(main);}catch(error){showToast(error.message||'Could not revoke session.');}finally{button.disabled=false;}}));
+    if(eventsHost)eventsHost.innerHTML=eventData.events.length?eventData.events.slice(0,20).map(event=>`<div class="security-event"><strong>${escapeHtml(event.eventType.replaceAll('_',' '))}</strong><span class="muted tiny">${escapeHtml(String(event.createdAt||'').replace('T',' ').slice(0,16))}</span></div>`).join(''):'<div class="muted">No security activity yet.</div>';
+  }catch(error){if(sessionsHost)sessionsHost.textContent=error.message||'Could not load sessions.';if(eventsHost)eventsHost.textContent='Could not load security activity.';}
+}
+
+async function refreshRuntimePanel(main){
+  const host=main.querySelector('#runtimeStatus');if(!host)return;
+  host.textContent='Checking database…';
+  try{
+    const data=await runtimeStatus(),r=data.runtime||{};
+    host.innerHTML=`<div class="runtime-grid"><div><strong>${r.sqliteQuickCheck==='ok'?'Healthy':'Needs attention'}</strong><span>SQLite quick check</span></div><div><strong>${Number(r.foreignKeyViolations||0)}</strong><span>Foreign-key violations</span></div><div><strong>${Math.round(Number(r.dbBytes||0)/1024).toLocaleString()} KB</strong><span>Database size</span></div><div><strong>${r.diskFreeBytes==null?'—':(Number(r.diskFreeBytes)/1073741824).toFixed(2)+' GB'}</strong><span>Disk free</span></div></div><div class="muted tiny" style="margin-top:8px">Checked ${escapeHtml(String(r.checkedAt||'').replace('T',' ').slice(0,19))}</div>`;
+  }catch(error){host.textContent=error.message||'Could not load diagnostics.';}
 }
 
 async function refreshManagedUsers(main){
@@ -549,5 +578,5 @@ document.addEventListener('keydown',event=>{
   if(advancedMode()&&event.key.toLowerCase()==='t'){event.preventDefault();openTransferModal();}
 });
 
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}
+initPwa().then(status=>{pwa=status;if(state)render();}).catch(()=>{});
 boot();

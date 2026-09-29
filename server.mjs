@@ -194,6 +194,7 @@ const q = {
   entryCount: db.prepare('SELECT COUNT(*) AS count FROM entries WHERE user_id=?'),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
   attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
+  attachmentRefs: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? ORDER BY created_at'),
   attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
   attachmentById: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,data,created_at AS createdAt FROM attachments WHERE user_id=? AND id=?'),
   insertAttachment: db.prepare('INSERT INTO attachments(user_id,id,entry_id,name,mime_type,size_bytes,data,created_at) VALUES(?,?,?,?,?,?,?,?)'),
@@ -563,12 +564,13 @@ function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
   insights.ensureDefaults(userId);
   const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
+  const attachmentMap=new Map();for(const row of q.attachmentRefs.all(userId)){if(!attachmentMap.has(row.entryId))attachmentMap.set(row.entryId,[]);attachmentMap.get(row.entryId).push({id:row.id,name:row.name,mimeType:row.mimeType,sizeBytes:Number(row.sizeBytes||0),createdAt:row.createdAt});}
   const accounts=q.accounts.all(userId).map(accountFromStorage);
   const accountById=new Map(accounts.map(row=>[row.id,row]));
   const entries=q.entries.all(userId).map(row=>{
     const api=entryFromStorage(row,accountById);
     const {splitJson,amountMinor,fromAmountMinor,toAmountMinor,signedAmountMinor,...entry}=api;
-    return {...entry,attachmentCount:counts.get(row.id)||0};
+    return {...entry,attachmentCount:counts.get(row.id)||0,attachments:attachmentMap.get(row.id)||[]};
   });
   const meta=insights.list(userId);
   return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency,appMode:u.app_mode||'simple',timezone:u.timezone||'UTC'},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};

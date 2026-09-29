@@ -57,5 +57,5 @@ test('quick paste importer stays available without exposing an import card in Se
   assert.match(source,/applyQuickPasteImport/);
   assert.match(source,/They owe me/);
   assert.match(source,/Took from them/);
-  assert.match(source,/data-open-quick-import/);
+  assert.match(source,/dataset\.openQuickImport/);
 });

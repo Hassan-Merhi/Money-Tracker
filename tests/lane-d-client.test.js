@@ -82,3 +82,14 @@ test('settings keeps advanced utilities out of the main settings page and passwo
   assert.match(app,/function openDeleteAccountModal\(\)[\s\S]*Current password/);
   assert.match(store,/resetState\(password\)/);
 });
+
+
+test('activity and sign-in layouts have hard mobile containment overrides',()=>{
+  const mobileCss=read('mobile.css');
+  assert.match(mobileCss,/activity-table-wrap\.mobile-ledger-table tr\.activity-row/);
+  assert.match(mobileCss,/activity-table-wrap\.mobile-ledger-table thead\{display:none!important\}/);
+  assert.match(mobileCss,/activity-toolbar>#addTxn\{display:none!important\}/);
+  assert.match(mobileCss,/\.auth-shell\{[\s\S]*?min-height:100dvh!important/);
+  assert.match(mobileCss,/\.auth-card\{[\s\S]*?max-width:430px!important/);
+  assert.match(mobileCss,/#filterPeriod\{grid-column:1\/-1\}/);
+});

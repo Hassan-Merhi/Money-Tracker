@@ -1084,6 +1084,10 @@ export const server=http.createServer(async(req,res)=>{
         const body=await bodyJson(req),result=bankFeed.post(a.user_id,id,body);
         return json(res,200,{...result,state:loadState(a.user_id)});
       }
+      if(action==='undo'&&req.method==='POST'){
+        const body=await bodyJson(req),result=bankFeed.undo(a.user_id,id,body);
+        return json(res,200,{...result,state:loadState(a.user_id)});
+      }
       if(action==='ignore'&&req.method==='POST')return json(res,200,{item:bankFeed.ignore(a.user_id,id)});
       if(action==='reopen'&&req.method==='POST')return json(res,200,{item:bankFeed.reopen(a.user_id,id)});
       if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));

@@ -302,7 +302,7 @@ function openPersonModal(existing=null){
   openModal(isEdit?'Edit person':'Add person',`<form id="personForm" class="form-grid">
     <div class="field span-2"><label>Name</label><input class="input" name="name" required maxlength="80" value="${escapeHtml(existing?.name||'')}" placeholder="e.g. Ahmad"></div>
     <div class="field span-2"><label>Note</label><input class="input" name="note" maxlength="120" value="${escapeHtml(existing?.note||'')}" placeholder="e.g. Cousin / Amazon purchases"></div>
-    ${isEdit?'':`<div class="field"><label>Opening balance</label><input class="input" name="opening" type="number" step="0.01" min="0" placeholder="0"></div><div class="field"><label>Currency</label><select class="select" name="currency">${currencyOptions(state.settings.defaultCurrency)}</select></div><div class="field span-2"><label>Opening balance means</label><select class="select" name="direction"><option value="to_me">They already owe me</option><option value="i_owe">I already owe them</option></select></div>`}
+    ${isEdit?'':`<div class="field"><label>Opening balance</label><input class="input" name="opening" type="number" step="any" min="0" placeholder="0"></div><div class="field"><label>Currency</label><select class="select" name="currency">${currencyOptions(state.settings.defaultCurrency)}</select></div><div class="field span-2"><label>Opening balance means</label><select class="select" name="direction"><option value="to_me">They already owe me</option><option value="i_owe">I already owe them</option></select></div>`}
   </form>`,()=>document.querySelector('#personForm').requestSubmit());
   document.querySelector('#personForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const name=fd.get('name').trim();if(!name)return;if(existing){existing.name=name;existing.note=fd.get('note').trim();persist('Person updated.');}else{const id=uid('person');state.people.push({id,name,note:fd.get('note').trim(),createdAt:new Date().toISOString()});const opening=Number(fd.get('opening')||0);if(opening>0){const sign=fd.get('direction')==='i_owe'?-1:1;state.entries.push({id:uid('entry'),type:'person_adjustment',personId:id,amount:opening,signedAmount:sign*opening,currency:fd.get('currency'),date:today(),description:'Opening balance',createdAt:new Date().toISOString()});}persist('Person added.');}closeModal();});
   if(existing){const foot=document.querySelector('.modal-foot');const del=document.createElement('button');del.type='button';del.className='btn danger';del.textContent='Delete person';del.style.marginRight='auto';del.onclick=()=>deletePerson(existing.id);foot.prepend(del);}
@@ -314,7 +314,7 @@ function openAccountModal(existing=null){
     <div class="field span-2"><label>Account name</label><input class="input" name="name" required maxlength="80" value="${escapeHtml(existing?.name||'')}" placeholder="e.g. Bank Audi USD / Cash USD"></div>
     <div class="field"><label>Type</label><select class="select" name="type">${[['bank','Bank'],['cash','Cash'],['card','Card'],['wallet','Wallet'],['other','Other']].map(([v,l])=>`<option value="${v}" ${existing?.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
     <div class="field"><label>Currency</label><select class="select" name="currency" ${isEdit?'disabled':''}>${currencyOptions(existing?.currency||state.settings.defaultCurrency)}</select></div>
-    <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="0.01" value="${existing?.openingBalance??0}"><span class="muted tiny">Use the actual balance at the point you start tracking this account.</span></div>
+    <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="any" value="${existing?.openingBalance??0}"><span class="muted tiny">Use the actual balance at the point you start tracking this account.</span></div>
   </form>`,()=>document.querySelector('#accountForm').requestSubmit());
   document.querySelector('#accountForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const name=fd.get('name').trim();if(!name)return;if(existing){existing.name=name;existing.type=fd.get('type');existing.openingBalance=Number(fd.get('openingBalance')||0);persist('Account updated.');}else{state.accounts.push({id:uid('account'),name,type:fd.get('type'),currency:fd.get('currency'),openingBalance:Number(fd.get('openingBalance')||0),createdAt:new Date().toISOString()});persist('Account added.');}closeModal();});
 }
@@ -343,7 +343,7 @@ function openQuickMenu(){
 function splitRowMarkup(split,index){
   return `<div class="split-row" data-split-row>
     <select class="select" data-split-person aria-label="Split person"><option value="">Choose person</option>${state.people.map(p=>`<option value="${p.id}" ${split.personId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select>
-    <input class="input" data-split-amount type="number" min="0.01" step="0.01" value="${split.amount??''}" placeholder="Amount" aria-label="Split amount">
+    <input class="input" data-split-amount type="number" min="0.01" step="any" value="${split.amount??''}" placeholder="Amount" aria-label="Split amount">
     <input class="input split-note" data-split-note maxlength="180" value="${escapeHtml(split.note||'')}" placeholder="Note (optional)" aria-label="Split note">
     <button class="icon-btn" type="button" data-remove-split="${index}" aria-label="Remove split">×</button>
   </div>`;
@@ -371,7 +371,7 @@ function openTransactionModal(existing=null,prefill={}){
     <div class="field span-2"><label>Transaction type</label><select class="select" name="type" id="txnType">${entryTypeOptions(type,false)}</select></div>
     <div class="field" id="txnPersonField"><label>Person</label><select class="select" name="personId" id="txnPerson"><option value="">Choose person</option>${state.people.map(p=>`<option value="${p.id}" ${p.id===personId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div>
     <div class="field" id="txnAccountField"><label>Account / cash</label><select class="select" name="accountId" id="txnAccount"><option value="">Choose account</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===accountId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
-    <div class="field"><label>Total amount</label><input class="input" id="txnAmount" name="amount" type="number" min="0.000001" step="0.01" required value="${existing?.amount??''}" placeholder="0.00" inputmode="decimal"></div>
+    <div class="field"><label>Total amount</label><input class="input" id="txnAmount" name="amount" type="number" min="0.000001" step="any" required value="${existing?.amount??''}" placeholder="0.00" inputmode="decimal"></div>
     <div class="field" id="currencyField"><label>Currency</label><select class="select" name="currency" id="txnCurrency">${currencyOptions(inferredCurrency)}</select></div>
     <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||today()}"></div>
     <div class="field"><label>Merchant / source</label><input class="input" name="merchant" maxlength="100" value="${escapeHtml(existing?.merchant||'')}" placeholder="e.g. Amazon" autocomplete="off"></div>
@@ -410,8 +410,8 @@ function openTransactionModal(existing=null,prefill={}){
     if((t==='account_expense'||t==='account_income')&&!fd.get('accountId')){showToast('Choose the account or cash used.');return}
     if(files.some(file=>file.size>8*1024*1024)){showToast('Each attachment must be 8 MB or smaller.');return}
     const splits=split?readSplits():[];
-    if(split){const error=validateSplit(splits,amount);if(error){showToast(error);return}}
     const acc=state.accounts.find(a=>a.id===fd.get('accountId'));
+    if(split){const error=validateSplit(splits,amount,acc?.currency||fd.get('currency')||state.settings.defaultCurrency);if(error){showToast(error);return}}
     const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:(fd.get('accountId')||null),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
     if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
     if(existing)Object.assign(existing,item);else state.entries.push(item);
@@ -434,8 +434,8 @@ function openTransferModal(existing=null){
   openModal(existing?'Edit transfer':'Transfer money',`<form id="transferForm" class="form-grid">
     <div class="field"><label>From account</label><select class="select" name="fromAccountId" id="fromAccount" required><option value="">Choose</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===fromId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
     <div class="field"><label>To account</label><select class="select" name="toAccountId" id="toAccount" required><option value="">Choose</option>${state.accounts.map(a=>`<option value="${a.id}" ${a.id===toId?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
-    <div class="field"><label>Amount leaving source</label><input class="input" name="fromAmount" type="number" min="0.000001" step="0.01" required value="${existing?.fromAmount??existing?.amount??''}" placeholder="0.00"></div>
-    <div class="field"><label>Amount arriving destination</label><input class="input" name="toAmount" type="number" min="0.000001" step="0.01" required value="${existing?.toAmount??existing?.amount??''}" placeholder="0.00"></div>
+    <div class="field"><label>Amount leaving source</label><input class="input" name="fromAmount" type="number" min="0.000001" step="any" required value="${existing?.fromAmount??existing?.amount??''}" placeholder="0.00"></div>
+    <div class="field"><label>Amount arriving destination</label><input class="input" name="toAmount" type="number" min="0.000001" step="any" required value="${existing?.toAmount??existing?.amount??''}" placeholder="0.00"></div>
     <div class="field"><label>Date</label><input class="input" name="date" type="date" required value="${existing?.date||today()}"></div>
     <div class="field"><label>Note</label><input class="input" name="description" maxlength="180" value="${escapeHtml(existing?.description||'')}" placeholder="e.g. ATM withdrawal"></div>
     <div class="field span-2"><div class="warning">For same-currency transfers, enter the same amount twice. For currency exchange, enter the actual amount that left and the actual amount that arrived.</div></div>

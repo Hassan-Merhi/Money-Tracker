@@ -25,6 +25,7 @@ process.env.NODE_ENV = 'test';
 const { server, db } = await import(`../server.mjs?accounting=${Date.now()}`);
 const { reconcileFeed } = await import('../lib/bank-feed.js');
 const { accountBalances } = await import('../lib/ledger.js');
+const { fromMinor, toMinor } = await import('../lib/money.js');
 
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -126,7 +127,34 @@ try {
   });
 
   const feedSnapshot = async () => (await request('/api/bank-feed')).data;
-  const reconcile = async () => reconcileFeed((await feedSnapshot()).reconciliation, state.entries, state.accounts);
+  const reconcile = async () => {
+    const feed = await feedSnapshot();
+    const aggregateByAccount = new Map((feed.accountStats || []).map(row => [row.accountId, row]));
+    return reconcileFeed(feed.items, state.entries, state.accounts).map(row => {
+      const aggregate = aggregateByAccount.get(row.accountId) || {};
+      const feedMinor = Number(aggregate.postedMinor || 0);
+      const ledgerMinor = toMinor(row.ledgerAmount || 0, row.currency);
+      const differenceMinor = feedMinor - ledgerMinor;
+      const imported = Number(aggregate.imported || 0);
+      const posted = Number(aggregate.posted || 0);
+      const ignored = Number(aggregate.ignored || 0);
+      const pending = Number(aggregate.pending || 0);
+      const rowsBalanced = imported === posted + ignored + pending;
+      return {
+        ...row,
+        imported,
+        posted,
+        ignored,
+        pending,
+        feedMinor,
+        ledgerMinor,
+        differenceMinor,
+        difference: fromMinor(differenceMinor, row.currency),
+        rowsBalanced,
+        balanced: differenceMinor === 0 && rowsBalanced
+      };
+    });
+  };
   await check('feed posted totals equal ledger movements per account', async () => {
     const out = await reconcile();
     for (const row of out) {
@@ -170,7 +198,7 @@ try {
     assert.equal(item.postedEntryId, null);
     assert.equal(feed.stats.posted, 3);
     assert.equal(feed.stats.pending, 1);
-    const out = reconcileFeed(feed.reconciliation, state.entries, state.accounts);
+    const out = await reconcile();
     const bank = out.find(row => row.accountId === 'account_bank');
     assert.equal(bank.feedMinor, 40000, 'the feed still says $45 left the account');
     assert.equal(bank.ledgerMinor, 34000, 'the ledger now says $60 left the account');

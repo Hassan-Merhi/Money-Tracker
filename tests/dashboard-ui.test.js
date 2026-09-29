@@ -70,7 +70,7 @@ test('people overview is bounded, alphabetized, escaped, and has an honest total
 test('dashboard assets are local, loaded last, and included in the upgraded offline shell', () => {
   const html = read('index.html'), sw = read('service-worker.js');
   assert.ok(html.indexOf('dashboard.css') > html.indexOf('block-g-insights.css'));
-  assert.match(sw, /money-tracker-debt-v16/);
+  assert.match(sw, /money-tracker-debt-v17/);
   for (const path of ['/dashboard.css', '/lib/dashboard-ui.js']) assert.ok(sw.includes(`'${path}'`));
   assert.match(icon('people'), /aria-hidden="true"/);
   assert.doesNotMatch(icon('<script>'), /<script>/);

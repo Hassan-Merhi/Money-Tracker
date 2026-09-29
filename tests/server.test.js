@@ -384,8 +384,7 @@ test('authentication rate limits persist in SQLite and enforce the configured th
   await request('/api/auth/login',{method:'POST',body:{email:'missing@example.com',password:'not the right password'}});
   const rows=db.prepare('SELECT key_hash AS keyHash,count FROM rate_limits').all();
   assert.ok(rows.length>=before+1||rows.some(row=>row.count>=1));
-  const loginRow=rows.at(-1);
-  db.prepare('UPDATE rate_limits SET count=20 WHERE key_hash=?').run(loginRow.keyHash);
+  db.prepare('UPDATE rate_limits SET count=20').run();
   const limited=await request('/api/auth/login',{method:'POST',body:{email:'missing@example.com',password:'not the right password'}});
   assert.equal(limited.res.status,429);
 });

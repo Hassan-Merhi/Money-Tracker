@@ -239,3 +239,50 @@ html[data-theme="dark"] .entry-menu-trigger:hover,html[data-theme="dark"] .entry
 html[data-theme="dark"] .entry-menu-popover{background:#0f172a;border-color:#334155;box-shadow:0 16px 36px rgba(0,0,0,.5)}
 html[data-theme="dark"] .entry-menu-item:hover{background:#1e293b}
 html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,.16)}
+
+
+/* People page — compact, touch-friendly mobile layout */
+.people-page{min-width:0}
+.people-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.people-search-wrap{flex:1 1 360px;max-width:520px;min-width:0}
+.people-search{width:100%}
+.people-add-btn{flex:0 0 auto}
+.people-add-btn .ui-icon{width:18px;height:18px}
+.person-card{display:flex;flex-direction:column;gap:18px;text-decoration:none;color:inherit;min-width:0}
+.person-card-main{display:flex;align-items:center;gap:11px;min-width:0}
+.person-card-copy{flex:1;min-width:0}
+.person-card-copy h3,.person-card-copy p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person-card-balance{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;min-width:0}
+.person-card .balance{margin-top:0;min-width:0;overflow-wrap:anywhere}
+.person-card-arrow{display:flex;align-items:center;justify-content:center;color:var(--muted);flex:0 0 auto}
+.person-card-arrow .ui-icon{width:17px;height:17px}
+
+@media(max-width:760px){
+  .people-page .people-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:8px;margin-bottom:10px}
+  .people-page .people-search-wrap{max-width:none}
+  .people-page .people-search{min-width:0;height:48px;border-radius:14px;padding:0 14px;font-size:16px}
+  .people-page .people-add-btn{width:48px;min-width:48px;height:48px;min-height:48px;padding:0;border-radius:14px}
+  .people-page .people-add-btn span{display:none}
+  .people-page .people-add-btn .ui-icon{width:21px;height:21px}
+  .people-page .people-grid{gap:8px}
+  .people-page .person-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;min-height:74px;padding:11px 13px;border-radius:16px;box-shadow:none;transform:none}
+  .people-page .person-card:hover{transform:none}
+  .people-page .person-card-main{gap:10px;min-width:0}
+  .people-page .avatar{width:42px;height:42px;flex:0 0 42px;font-size:14px}
+  .people-page .person-card h3{font-size:15px;line-height:1.2}
+  .people-page .person-card p{font-size:11px;line-height:1.25;margin-top:3px}
+  .people-page .person-default-note{display:none}
+  .people-page .person-card-balance{align-items:center;justify-content:flex-end;gap:7px;max-width:44vw}
+  .people-page .balance{margin:0;font-size:16px;line-height:1.2;text-align:right}
+  .people-page .balance .currency-lines{gap:2px;justify-items:end}
+  .people-page .person-card-arrow{width:22px;height:22px}
+  .people-page .person-card-arrow .ui-icon{width:16px;height:16px}
+  .people-page .hero-empty{padding:34px 18px}
+}
+
+@media(max-width:370px){
+  .people-page .person-card{padding-inline:11px}
+  .people-page .avatar{width:40px;height:40px;flex-basis:40px}
+  .people-page .person-card-balance{max-width:42vw}
+  .people-page .balance{font-size:15px}
+}

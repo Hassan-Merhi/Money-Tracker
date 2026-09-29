@@ -246,8 +246,13 @@ function renderPeople(main) {
   const query = (route.params.get('q')||'').toLowerCase();
   const people = [...state.people].filter(p => !query || `${p.name} ${p.note||''}`.toLowerCase().includes(query)).sort((a,b)=>a.name.localeCompare(b.name));
   main.innerHTML = `
-    <div class="panel-head"><div class="filters"><input id="peopleSearch" class="input search" placeholder="Search people…" value="${escapeHtml(route.params.get('q')||'')}"></div><div class="page-actions"><button class="btn primary" id="addPerson">＋ Add person</button></div></div>
-    ${people.length ? `<div class="people-grid">${people.map(p=>personCard(p,balances[p.id]||{})).join('')}</div>` : `<div class="card hero-empty empty"><div class="big">👥</div><h3>${query?'No matching people':'Add the people you exchange money with'}</h3><p>Each person gets a separate running statement. Positive means they owe you. Negative means you owe them.</p><button class="btn primary" id="emptyAddPerson">＋ Add person</button></div>`}`;
+    <section class="people-page" aria-label="People">
+      <div class="people-toolbar">
+        <div class="people-search-wrap"><input id="peopleSearch" class="input search people-search" type="search" inputmode="search" autocomplete="off" aria-label="Search people" placeholder="Search people…" value="${escapeHtml(route.params.get('q')||'')}"></div>
+        <button class="btn primary people-add-btn" id="addPerson" type="button" aria-label="Add person">${icon('plus')}<span>Add person</span></button>
+      </div>
+      ${people.length ? `<div class="people-grid">${people.map(p=>personCard(p,balances[p.id]||{})).join('')}</div>` : `<div class="card hero-empty empty"><div class="big">👥</div><h3>${query?'No matching people':'Add the people you exchange money with'}</h3><p>Each person gets a separate running statement. Positive means they owe you. Negative means you owe them.</p><button class="btn primary" id="emptyAddPerson">＋ Add person</button></div>`}
+    </section>`;
   main.querySelector('#addPerson')?.addEventListener('click',()=>openPersonModal());
   main.querySelector('#emptyAddPerson')?.addEventListener('click',()=>openPersonModal());
   main.querySelector('#peopleSearch')?.addEventListener('input', e => {
@@ -259,7 +264,9 @@ function renderPeople(main) {
 function personCard(p,balance) {
   const values=Object.values(balance);
   const netSign=values.reduce((a,b)=>a+b,0);
-  return `<a class="card person-card" data-person="${p.id}" href="#person?id=${encodeURIComponent(p.id)}"><div class="person-top"><div style="display:flex;gap:11px;align-items:center"><div class="avatar">${escapeHtml(p.name.slice(0,2).toUpperCase())}</div><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.note||'Personal statement')}</p></div></div><span class="pill">View</span></div><div class="balance ${netSign>0?'positive':netSign<0?'negative':''}">${balancesText(balance)}</div></a>`;
+  const note=p.note||'Personal statement';
+  const noteClass=p.note?'person-card-note':'person-card-note person-default-note';
+  return `<a class="card person-card" data-person="${p.id}" href="#person?id=${encodeURIComponent(p.id)}" aria-label="View statement for ${escapeHtml(p.name)}"><div class="person-card-main"><div class="avatar">${escapeHtml(p.name.slice(0,2).toUpperCase())}</div><div class="person-card-copy"><h3>${escapeHtml(p.name)}</h3><p class="${noteClass}">${escapeHtml(note)}</p></div></div><div class="person-card-balance"><div class="balance ${netSign>0?'positive':netSign<0?'negative':''}">${balancesText(balance)}</div><span class="person-card-arrow" aria-hidden="true">${icon('arrow')}</span></div></a>`;
 }
 
 function statementDate(value){

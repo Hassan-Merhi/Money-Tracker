@@ -29,8 +29,8 @@ test('Lane D makes dashboard cards keyboard reachable',()=>{
 test('Lane D PWA v10 keeps stale-while-revalidate work alive',()=>{
   const sw=read('service-worker.js');
   assert.match(sw,/money-tracker-debt-v10/);
-  assert.match(sw,/event\.waitUntil\(fetchPromise/);
-  assert.match(sw,/staleWhileRevalidate\(event\.request,event\)/);
+  assert.match(sw,/event\.waitUntil\(revalidatePromise/);
+  assert.match(sw,/staleWhileRevalidate\(event\.request,revalidatePromise\)/);
 });
 
 test('Lane D preserves an explicit Bank Feed rule priority of zero',()=>{

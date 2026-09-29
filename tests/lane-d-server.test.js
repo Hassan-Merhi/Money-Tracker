@@ -30,7 +30,7 @@ test('Lane D health reports release readiness and PWA v10',async()=>{
   assert.equal(r.data.laneDVersion,1);
   assert.equal(r.data.pwaCacheVersion,10);
   assert.equal(r.data.dataLimits.bankFeedItems,50000);
-  assert.equal(r.data.dataLimits.attachmentBytes,96*1024*1024);
+  assert.equal(r.data.dataLimits.attachmentBytes,100*1024*1024);
 });
 
 test('static assets support conditional ETag requests',async()=>{
@@ -109,10 +109,10 @@ test('future attachment uploads enforce the complete-backup storage quota',async
   db.prepare("INSERT INTO entries(user_id,id,type,amount_minor,currency,date,merchant,description,split_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
     .run(userId,'entry_quota','person_adjustment',0,'USD','2026-09-29','','Quota test','[]',stamp,stamp);
   db.prepare('INSERT INTO attachments(user_id,id,entry_id,name,mime_type,size_bytes,data,created_at) VALUES(?,?,?,?,?,?,?,?)')
-    .run(userId,'attachment_quota_seed','entry_quota','seed.txt','text/plain',96*1024*1024,Buffer.from('x'),stamp);
+    .run(userId,'attachment_quota_seed','entry_quota','seed.txt','text/plain',100*1024*1024,Buffer.from('x'),stamp);
   const r=await request('/api/attachments',{method:'POST',cookie,csrf,body:{entryId:'entry_quota',name:'next.txt',mimeType:'text/plain',data:Buffer.from('y').toString('base64')}});
   assert.equal(r.res.status,413);
-  assert.match(r.data.error,/96 MB/i);
+  assert.match(r.data.error,/100 MB/i);
 });
 
 test('complete backup restores data beyond all former Lane A/B history caps',async()=>{

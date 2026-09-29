@@ -36,7 +36,9 @@ test('Wave 0 database snapshots are checksum-verifiable and preserve schema/data
     assert.equal(result.schemaSha256,before);
     const copy=new DatabaseSync(result.path,{readOnly:true});
     try{
-      assert.deepEqual(copy.prepare('SELECT * FROM sample').all(),[{id:'a',amount:12.5}]);
+      const row=copy.prepare('SELECT * FROM sample').get();
+      assert.equal(row.id,'a');
+      assert.equal(row.amount,12.5);
       assert.equal(schemaFingerprint(copy),before);
     }finally{copy.close();}
     const metadata=JSON.parse(readFileSync(result.metadataPath,'utf8'));

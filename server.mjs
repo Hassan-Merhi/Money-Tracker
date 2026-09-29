@@ -287,7 +287,7 @@ function securityHeaders(res) {
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
   if (isProd) res.setHeader('Strict-Transport-Security','max-age=31536000; includeSubDomains; preload');
 }
 function json(res, status, value, extra={}) {
@@ -711,7 +711,10 @@ function staticFile(req,res,url){
   let p=decodeURIComponent(url.pathname); if(p==='/'||!extname(p))p='/index.html';
   const safe=normalize(p).replace(/^(\.\.[/\\])+/, ''); const file=join(ROOT,safe);
   if(!file.startsWith(ROOT)||!existsSync(file)||file.includes(`${join(ROOT,'data')}`)){fail(res,404,'Not found.');return;}
-  securityHeaders(res); res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream'); res.setHeader('Cache-Control',extname(file)==='.html'?'no-cache':'public, max-age=300'); res.writeHead(200);res.end(readFileSync(file));
+  securityHeaders(res);res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');
+  const base=String(file).split(/[\\/]/).at(-1);res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
+  if(base==='service-worker.js')res.setHeader('Service-Worker-Allowed','/');
+  res.writeHead(200);res.end(readFileSync(file));
 }
 
 let recurringTimer=null;
@@ -722,6 +725,7 @@ if(process.env.NODE_ENV!=='test'){
 }
 
 export const server=http.createServer(async(req,res)=>{
+  const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
     if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,pwaCacheVersion:9,recurringWorker:recurringReminders.status(),runtime});}
@@ -1147,14 +1151,14 @@ export const server=http.createServer(async(req,res)=>{
       return json(res,201,{snapshotFile:snapshot.snapshotFile,bytes:snapshot.bytes,sha256:snapshot.sha256,schemaSha256:snapshot.schemaSha256});
     }
     if(url.pathname==='/api/backup/full'&&req.method==='GET'){
-      const a=requireAuth(req,res);if(!a)return;
+      const a=requireAuth(req,res);if(!a)return;securityOps.event(a.user_id,'complete_backup_exported');
       return json(res,200,exportFullBackup(db,a.user_id));
     }
     if(url.pathname==='/api/backup/full/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req,140_000_000);
       restoreFullBackup(db,a.user_id,body);
-      bankFeed.reconcileReferences(a.user_id);
+      bankFeed.reconcileReferences(a.user_id);securityOps.event(a.user_id,'complete_backup_restored');
       return json(res,200,{ok:true,state:loadState(a.user_id)});
     }
     if(url.pathname==='/api/backup/restore'&&req.method==='POST'){
@@ -1186,7 +1190,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      q.deleteAllRecurring.run(a.user_id); recurringReminders.reset(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id); return json(res,200,loadState(a.user_id));
+      q.deleteAllRecurring.run(a.user_id); recurringReminders.reset(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id);securityOps.event(a.user_id,'app_data_reset');return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
@@ -1200,7 +1204,7 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname.startsWith('/api/')) return fail(res,404,'API route not found.');
     return staticFile(req,res,url);
   }catch(err){
-    const status=err.status||500; if(status>=500)console.error(err); return fail(res,status,status>=500?'Server error.':err.message);
+    const status=err.status||500;if(status>=500)console.error('REQUEST_ERROR '+JSON.stringify({requestId,path:req.url,status,message:String(err?.message||err)}));return fail(res,status,status>=500?'Server error.':err.message);
   }
 });
 

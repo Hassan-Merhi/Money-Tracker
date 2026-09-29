@@ -1112,7 +1112,7 @@ export const server=http.createServer(async(req,res)=>{
       try{
         insights.replace(a.user_id,Array.isArray(body.categories)?body.categories:[],Array.isArray(body.budgets)?body.budgets:[]);
         const clean=validateState({...body,version:a.revision},a);assertRecurringReferences(a.user_id,clean);
-        const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,a.user_id,a.revision);
+        const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,a.user_id,a.revision);
         if(Number(upd.changes)!==1)throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
         q.deleteEntries.run(a.user_id);q.deletePeople.run(a.user_id);q.deleteAccounts.run(a.user_id);
         for(const p of clean.people)q.insertPerson.run(a.user_id,p.id,p.name,p.note,p.createdAt);

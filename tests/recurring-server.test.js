@@ -62,6 +62,15 @@ test('creates and lists a validated recurring transaction schedule',async()=>{
   assert.equal(list.data.rules[0].id,rule.id);
 });
 
+test('server reminder inbox creates one durable reminder and posting acknowledges it',async()=>{
+  const first=await request('/api/recurring/reminders',{cookie});
+  assert.equal(first.res.status,200);
+  assert.equal(first.data.reminders.length,1);
+  assert.equal(first.data.reminders[0].ruleId,rule.id);
+  const second=await request('/api/recurring/reminders',{cookie});
+  assert.equal(second.data.reminders.length,1);
+});
+
 test('posting an occurrence atomically adds one entry and advances month-end correctly',async()=>{
   const posted=await request(`/api/recurring/${rule.id}/post`,{method:'POST',cookie,csrf,body:{expectedRevision:state.version,occurrenceDate:'2026-01-31',transactionDate:'2026-01-31'}});
   assert.equal(posted.res.status,200);
@@ -72,6 +81,8 @@ test('posting an occurrence atomically adds one entry and advances month-end cor
   assert.equal(posted.data.state.entries[0].amount,25);
   assert.equal(posted.data.rule.nextDueDate,'2026-02-28');
   state=posted.data.state;rule=posted.data.rule;
+  const reminders=await request('/api/recurring/reminders',{cookie});
+  assert.equal(reminders.data.reminders.length,0);
 });
 
 test('replaying the same occurrence is rejected without a duplicate ledger entry',async()=>{

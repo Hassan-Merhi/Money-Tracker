@@ -309,7 +309,11 @@ test('complete backup exports and transactionally restores every user-owned subs
   assert.equal(Buffer.from(attachmentBackup.data.data,'base64').toString(),'receipt');
 
   const beforeVersion=state.version;
-  const reset=await request('/api/state/reset',{method:'POST',cookie,csrf,body:{}});
+  const blockedReset=await request('/api/state/reset',{method:'POST',cookie,csrf,body:{password:'definitely wrong password'}});
+  assert.equal(blockedReset.res.status,403);assert.match(blockedReset.data.error,/password is incorrect/i);
+  const untouched=await request('/api/state',{cookie});
+  assert.ok(untouched.data.people.length>0);assert.ok(untouched.data.entries.length>0);
+  const reset=await request('/api/state/reset',{method:'POST',cookie,csrf,body:{password:ownerPassword}});
   assert.equal(reset.res.status,200);state=reset.data;
   assert.equal(state.people.length,0);assert.equal(state.entries.length,0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM attachments').get().count,0);

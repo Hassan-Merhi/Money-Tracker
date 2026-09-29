@@ -37,6 +37,9 @@ jobs:
           node --check lib/recurring-rule-form.js
           node --check lib/recurring.js
           node --check lib/recurring-worker.js
+          node --check lib/pwa.js
+          node --check lib/security-ops.js
+          node --check lib/runtime-ops.js
           node --check block-f-bank-feed.js
           node --check lib/bank-feed.js
           node --check lib/bank-server.js

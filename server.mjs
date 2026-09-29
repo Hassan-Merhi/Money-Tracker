@@ -12,6 +12,8 @@ import { createInsightsService } from './lib/insights-server.js';
 import { createDatabaseSnapshot } from './lib/db-snapshot.js';
 import { exportFullBackup, restoreFullBackup } from './lib/full-backup.js';
 import { normalizeMoney, toMinor } from './lib/money.js';
+import { createSecurityOps } from './lib/security-ops.js';
+import { createRuntimeOps } from './lib/runtime-ops.js';
 import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -131,6 +133,9 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is_active, next_due_date);
 `);
+const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(row=>row.name));
+if (!sessionColumns.has('last_seen_at')) db.exec("ALTER TABLE sessions ADD COLUMN last_seen_at TEXT");
+if (!sessionColumns.has('user_agent_hash')) db.exec("ALTER TABLE sessions ADD COLUMN user_agent_hash TEXT NOT NULL DEFAULT ''");
 const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(row => row.name));
 if (!userColumns.has('is_owner')) db.exec("ALTER TABLE users ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0");
 if (!userColumns.has('app_mode')) db.exec("ALTER TABLE users ADD COLUMN app_mode TEXT NOT NULL DEFAULT 'simple'");
@@ -153,7 +158,7 @@ const q = {
   createUser: db.prepare('INSERT INTO users(id,email,display_name,password_hash,default_currency,is_owner,revision,created_at) VALUES(?,?,?,?,?,?,1,?)'),
   sessionByHash: db.prepare(`SELECT s.token_hash,s.csrf_token,s.expires_at,u.id AS user_id,u.email,u.display_name,u.default_currency,u.app_mode,u.timezone,u.is_owner,u.revision
     FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?`),
-  insertSession: db.prepare('INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)'),
+  insertSession: db.prepare('INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at,last_seen_at,user_agent_hash) VALUES(?,?,?,?,?,?,?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash=?'),
   cleanupSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id=? AND token_hash<>?'),
@@ -218,10 +223,13 @@ const q = {
 
 const bankFeed = createBankFeedService(db);
 const recurringReminders = createRecurringReminderService(db);
+const securityOps=createSecurityOps(db);
+const runtimeOps=createRuntimeOps(db,{dataDir:DATA_DIR,dbPath:DB_PATH});
 markExactMoneySchema(db);
 console.log('EXACT_MONEY_READY '+JSON.stringify({version:exactMoneySchemaVersion(db),storage:'integer-minor-units'}));
 console.log('LANE_A_READY '+JSON.stringify({waves:[2,3,4,5],ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true}));
 console.log('LANE_B_READY '+JSON.stringify({waves:[6,8,9,10],appModes:true,serverRecurringReminders:true,bankFeedHistory:true,reportingVersion:2}));
+console.log('LANE_C_READY '+JSON.stringify({waves:[7,13,14],pwaResilience:true,securityEvents:true,sessionControl:true,runtimeDiagnostics:true,manualSnapshots:true}));
 
 if (process.env.WAVE0_BACKUP_ON_START === '1') {
   const snapshot=createDatabaseSnapshot(db,{dataDir:DATA_DIR,dbPath:DB_PATH,label:'wave0-pre-exact-money'});
@@ -274,11 +282,13 @@ function cookie(token, maxAge=SESSION_DAYS*86400) {
 function clearCookie() { return `mot_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isProd ? '; Secure' : ''}`; }
 function securityHeaders(res) {
   res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('Cross-Origin-Opener-Policy','same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy','same-origin');
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
-  if (isProd) res.setHeader('Strict-Transport-Security','max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+  if (isProd) res.setHeader('Strict-Transport-Security','max-age=31536000; includeSubDomains; preload');
 }
 function json(res, status, value, extra={}) {
   securityHeaders(res); Object.entries(extra).forEach(([k,v])=>res.setHeader(k,v));
@@ -293,23 +303,34 @@ async function bodyJson(req, limit=BODY_LIMIT) {
     req.on('error',reject);
   });
 }
-function createSession(userId) {
+function createSession(userId,req) {
   q.cleanupSessions.run(nowIso());
   const token=randomBytes(32).toString('base64url');
   const csrf=randomBytes(24).toString('base64url');
-  const expires=new Date(Date.now()+SESSION_DAYS*86400_000).toISOString();
-  q.insertSession.run(sha256(token),userId,csrf,expires,nowIso());
+  const created=nowIso(),expires=new Date(Date.now()+SESSION_DAYS*86400_000).toISOString();
+  const userAgentHash=sha256(String(req?.headers?.['user-agent']||'')).slice(0,32);
+  q.insertSession.run(sha256(token),userId,csrf,expires,created,created,userAgentHash);
   return {token,csrf,expires};
 }
 function auth(req) {
   const token=parseCookies(req).mot_session; if(!token) return null;
   const row=q.sessionByHash.get(sha256(token)); if(!row) return null;
   if(row.expires_at < nowIso()){ q.deleteSession.run(row.token_hash); return null; }
+  securityOps.touch(row.token_hash);
   return row;
+}
+function sameOriginMutation(req){
+  if(['GET','HEAD','OPTIONS'].includes(req.method||'GET'))return true;
+  const site=String(req.headers['sec-fetch-site']||'');
+  if(site&&site!=='same-origin'&&site!=='none')return false;
+  const origin=String(req.headers.origin||'');
+  if(origin){const host=String(req.headers.host||'');try{if(new URL(origin).host!==host)return false;}catch{return false;}}
+  return true;
 }
 function requireAuth(req,res,{csrf=false}={}) {
   const a=auth(req); if(!a){fail(res,401,'Sign in required.'); return null;}
-  if(csrf && req.headers['x-csrf-token'] !== a.csrf_token){fail(res,403,'Security token mismatch. Refresh and try again.'); return null;}
+  if(csrf&&!sameOriginMutation(req)){securityOps.event(a.user_id,'blocked_cross_site_mutation',{detail:{method:req.method,path:req.url}});fail(res,403,'Cross-site request blocked.');return null;}
+  if(csrf && req.headers['x-csrf-token'] !== a.csrf_token){securityOps.event(a.user_id,'csrf_rejected',{detail:{method:req.method,path:req.url}});fail(res,403,'Security token mismatch. Refresh and try again.'); return null;}
   return a;
 }
 
@@ -690,19 +711,24 @@ function staticFile(req,res,url){
   let p=decodeURIComponent(url.pathname); if(p==='/'||!extname(p))p='/index.html';
   const safe=normalize(p).replace(/^(\.\.[/\\])+/, ''); const file=join(ROOT,safe);
   if(!file.startsWith(ROOT)||!existsSync(file)||file.includes(`${join(ROOT,'data')}`)){fail(res,404,'Not found.');return;}
-  securityHeaders(res); res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream'); res.setHeader('Cache-Control',extname(file)==='.html'?'no-cache':'public, max-age=300'); res.writeHead(200);res.end(readFileSync(file));
+  securityHeaders(res);res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');
+  const base=String(file).split(/[\\/]/).at(-1);res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
+  if(base==='service-worker.js')res.setHeader('Service-Worker-Allowed','/');
+  res.writeHead(200);res.end(readFileSync(file));
 }
 
+let recurringTimer=null;
 if(process.env.NODE_ENV!=='test'){
   try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}
-  const recurringTimer=setInterval(()=>{try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}},60*60*1000);
+  recurringTimer=setInterval(()=>{try{recurringReminders.process();}catch(error){console.error('RECURRING_REMINDER_WORKER_ERROR',error);}},60*60*1000);
   recurringTimer.unref?.();
 }
 
 export const server=http.createServer(async(req,res)=>{
+  const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){return json(res,200,{ok:true,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,recurringWorker:recurringReminders.status()});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,pwaCacheVersion:9,recurringWorker:recurringReminders.status(),runtime});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -719,19 +745,33 @@ export const server=http.createServer(async(req,res)=>{
         q.createUser.run(id,email,display,passwordHash,'USD',1,created);
         db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
-      const session=createSession(id); return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:session.csrf}, {'Set-Cookie':cookie(session.token)});
+      const session=createSession(id,req);securityOps.event(id,'owner_registered',{subject:email});return json(res,201,{user:{id,email,displayName:display,defaultCurrency:'USD',isOwner:true},csrfToken:session.csrf}, {'Set-Cookie':cookie(session.token)});
     }
     if(url.pathname==='/api/auth/login'&&req.method==='POST'){
       if(rateLimited(req,'login',{limit:20,windowMs:10*60_000}))return fail(res,429,'Too many attempts. Try again later.');
       const b=await bodyJson(req), email=safeStr(b.email,254).toLowerCase(), password=String(b.password||''), u=q.userByEmail.get(email);
-      if(!u||!verifyPassword(password,u.password_hash))return fail(res,401,'Email or password is incorrect.');
-      const s=createSession(u.id); return json(res,200,{user:{id:u.id,email:u.email,displayName:u.display_name,defaultCurrency:u.default_currency,isOwner:Boolean(u.is_owner)},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
+      if(!u||!verifyPassword(password,u.password_hash)){if(u)securityOps.event(u.id,'login_failed',{subject:email});return fail(res,401,'Email or password is incorrect.');}
+      const s=createSession(u.id,req);securityOps.event(u.id,'login_succeeded',{subject:email});return json(res,200,{user:{id:u.id,email:u.email,displayName:u.display_name,defaultCurrency:u.default_currency,isOwner:Boolean(u.is_owner)},csrfToken:s.csrf}, {'Set-Cookie':cookie(s.token)});
     }
     if(url.pathname==='/api/auth/me'&&req.method==='GET'){
       const a=requireAuth(req,res); if(!a)return; return json(res,200,{user:{id:a.user_id,email:a.email,displayName:a.display_name,defaultCurrency:a.default_currency,isOwner:Boolean(a.is_owner)},csrfToken:a.csrf_token});
     }
+    if(url.pathname==='/api/auth/sessions'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;return json(res,200,{sessions:securityOps.listSessions(a.user_id,a.token_hash)});
+    }
+    if(url.pathname.startsWith('/api/auth/sessions/')&&req.method==='DELETE'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const id=decodeURIComponent(url.pathname.slice('/api/auth/sessions/'.length));
+      const revoked=securityOps.revoke(a.user_id,id,a.token_hash);
+      if(revoked)securityOps.event(a.user_id,'session_revoked',{detail:{sessionId:id}});
+      return json(res,200,{ok:revoked,sessions:securityOps.listSessions(a.user_id,a.token_hash)});
+    }
+    if(url.pathname==='/api/security/events'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;return json(res,200,{events:securityOps.listEvents(a.user_id,100)});
+    }
+
     if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
-      const a=requireAuth(req,res,{csrf:true}); if(!a)return; q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return; securityOps.event(a.user_id,'logout');q.deleteSession.run(a.token_hash); return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
     if(url.pathname==='/api/auth/password'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
@@ -746,11 +786,12 @@ export const server=http.createServer(async(req,res)=>{
         q.deleteOtherSessions.run(a.user_id,a.token_hash);
         db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
+      securityOps.event(a.user_id,'password_changed');
       return json(res,200,{ok:true,otherSessionsRevoked:true});
     }
     if(url.pathname==='/api/auth/sessions/revoke-others'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
-      const result=q.deleteOtherSessions.run(a.user_id,a.token_hash);
+      const result=q.deleteOtherSessions.run(a.user_id,a.token_hash);securityOps.event(a.user_id,'other_sessions_revoked',{detail:{count:Number(result.changes||0)}});
       return json(res,200,{ok:true,revoked:Number(result.changes||0)});
     }
     if(url.pathname==='/api/account'&&req.method==='DELETE'){
@@ -760,6 +801,7 @@ export const server=http.createServer(async(req,res)=>{
       if(confirmation!=='DELETE')return fail(res,400,'Type DELETE to confirm account deletion.');
       if(!u||!verifyPassword(password,u.password_hash))return fail(res,403,'Password is incorrect.');
       if(u.isOwner&&Number(q.otherUserCount.get(a.user_id)?.count||0)>0)return fail(res,400,'Delete the additional user accounts before deleting the owner account.');
+      securityOps.event(a.user_id,'account_deleted');
       q.deleteUser.run(a.user_id);
       return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
     }
@@ -777,6 +819,7 @@ export const server=http.createServer(async(req,res)=>{
       if(q.userByEmail.get(email))return fail(res,409,'An account with that email already exists.');
       const id=`user_${randomUUID()}`, createdAt=nowIso(), display='Money Tracker';
       q.createUser.run(id,email,display,hashPassword(password),a.default_currency,0,createdAt);
+      securityOps.event(a.user_id,'secondary_user_created',{subject:email,detail:{createdUserId:id}});
       return json(res,201,{user:{id,email,isOwner:false,createdAt}});
     }
     if(url.pathname.startsWith('/api/users/')){
@@ -792,9 +835,11 @@ export const server=http.createServer(async(req,res)=>{
         db.exec('BEGIN IMMEDIATE');
         try{q.updatePassword.run(hashPassword(password),id);q.deleteUserSessions.run(id);db.exec('COMMIT');}
         catch(error){db.exec('ROLLBACK');throw error;}
+        securityOps.event(a.user_id,'secondary_user_password_reset',{detail:{targetUserId:id}});
         return json(res,200,{ok:true,sessionsRevoked:true});
       }
       if(!action&&req.method==='DELETE'){
+        securityOps.event(a.user_id,'secondary_user_deleted',{detail:{targetUserId:id}});
         q.deleteUser.run(id);
         return json(res,200,{ok:true});
       }
@@ -1095,15 +1140,25 @@ export const server=http.createServer(async(req,res)=>{
       if(!action&&req.method==='DELETE')return json(res,200,bankFeed.remove(a.user_id,id));
       return fail(res,405,'Bank feed action not supported.');
     }
+    if(url.pathname==='/api/ops/status'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;if(!a.is_owner)return fail(res,403,'Only the owner can view operational diagnostics.');
+      return json(res,200,{runtime:runtimeOps.diagnostics({force:true}),recurringWorker:recurringReminders.status(),laneCVersion:1});
+    }
+    if(url.pathname==='/api/ops/snapshot'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;if(!a.is_owner)return fail(res,403,'Only the owner can create a server snapshot.');
+      const snapshot=runtimeOps.snapshot('lane-c-manual');
+      securityOps.event(a.user_id,'server_snapshot_created',{detail:{bytes:snapshot.bytes,sha256:snapshot.sha256,schemaSha256:snapshot.schemaSha256}});
+      return json(res,201,{snapshotFile:snapshot.snapshotFile,bytes:snapshot.bytes,sha256:snapshot.sha256,schemaSha256:snapshot.schemaSha256});
+    }
     if(url.pathname==='/api/backup/full'&&req.method==='GET'){
-      const a=requireAuth(req,res);if(!a)return;
+      const a=requireAuth(req,res);if(!a)return;securityOps.event(a.user_id,'complete_backup_exported');
       return json(res,200,exportFullBackup(db,a.user_id));
     }
     if(url.pathname==='/api/backup/full/restore'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req,140_000_000);
       restoreFullBackup(db,a.user_id,body);
-      bankFeed.reconcileReferences(a.user_id);
+      bankFeed.reconcileReferences(a.user_id);securityOps.event(a.user_id,'complete_backup_restored');
       return json(res,200,{ok:true,state:loadState(a.user_id)});
     }
     if(url.pathname==='/api/backup/restore'&&req.method==='POST'){
@@ -1135,7 +1190,7 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
-      q.deleteAllRecurring.run(a.user_id); recurringReminders.reset(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id); return json(res,200,loadState(a.user_id));
+      q.deleteAllRecurring.run(a.user_id); recurringReminders.reset(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id);securityOps.event(a.user_id,'app_data_reset');return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
@@ -1149,10 +1204,21 @@ export const server=http.createServer(async(req,res)=>{
     if(url.pathname.startsWith('/api/')) return fail(res,404,'API route not found.');
     return staticFile(req,res,url);
   }catch(err){
-    const status=err.status||500; if(status>=500)console.error(err); return fail(res,status,status>=500?'Server error.':err.message);
+    const status=err.status||500;if(status>=500)console.error('REQUEST_ERROR '+JSON.stringify({requestId,path:req.url,status,message:String(err?.message||err)}));return fail(res,status,status>=500?'Server error.':err.message);
   }
 });
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port=Number(process.env.PORT||4173); server.listen(port,'0.0.0.0',()=>console.log(`Money Owed Tracker listening on http://0.0.0.0:${port}`));
+  const port=Number(process.env.PORT||4173);
+  server.listen(port,'0.0.0.0',()=>console.log(`Money Owed Tracker listening on http://0.0.0.0:${port}`));
+  let shuttingDown=false;
+  const shutdown=signal=>{
+    if(shuttingDown)return;shuttingDown=true;
+    console.log('LANE_C_SHUTDOWN '+JSON.stringify({signal}));
+    if(recurringTimer)clearInterval(recurringTimer);
+    const hard=setTimeout(()=>process.exit(1),10_000);hard.unref?.();
+    server.close(()=>{try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}try{db.close();}catch{}clearTimeout(hard);process.exit(0);});
+  };
+  process.once('SIGTERM',()=>shutdown('SIGTERM'));
+  process.once('SIGINT',()=>shutdown('SIGINT'));
 }

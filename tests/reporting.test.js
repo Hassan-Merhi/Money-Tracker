@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reportingSnapshot, workbookSheets, exportRows } from '../lib/reporting.js';
+import { reportingSnapshot, workbookSheets, exportRows, filterTransactionList } from '../lib/reporting.js';
+import { readFileSync } from 'node:fs';
+import { renderReports } from '../lib/reports-ui.js';
+import { buildPdfReport } from '../lib/pdf.js';
+import { escapeHtml } from '../lib/utils.js';
+import { currencyExponent } from '../lib/money.js';
 
 const t='2026-09-01T00:00:00Z';
 const state={
@@ -93,4 +98,125 @@ test('export rows include stable ids timestamps and attachment references',()=>{
   assert.equal(row['Attachment IDs'],'att_1');
   assert.equal(row['Attachment Names'],'receipt.pdf');
   assert.equal(row['Created At'],t);
+});
+
+const wave0=JSON.parse(readFileSync(new URL('./fixtures/wave0-ledger-baseline.json',import.meta.url),'utf8'));
+const waveSnap=reportingSnapshot(wave0);
+const seriesValue=(rows,currency,month='2026-09')=>rows.find(r=>r.month===month)?.currencies[currency];
+
+test('receivables movement contains only person deltas (including split allocations)',()=>{
+  assert.equal(seriesValue(waveSnap.receivablesMovement,'USD'),75);
+  assert.equal(seriesValue(waveSnap.receivablesMovement,'EUR'),30);
+  assert.equal(seriesValue(waveSnap.receivablesMovement,'LBP'),undefined);
+  assert.deepEqual(reportingSnapshot(wave0,{type:'account_income'}).receivablesMovement,[]);
+  assert.equal(seriesValue(reportingSnapshot(wave0,{personId:'person_alice',type:'split_paid_for_people'}).receivablesMovement,'USD'),40);
+});
+
+test('personal cash flow contains only account income less expenses, never person or transfer effects',()=>{
+  assert.deepEqual(waveSnap.cashFlow,[{month:'2026-09',currencies:{USD:45}}]);
+  assert.equal(waveSnap.cashFlow[0].currencies.USD,waveSnap.personalCashFlow.USD.net);
+  assert.deepEqual(reportingSnapshot(wave0,{type:'paid_for_person'}).cashFlow,[]);
+  assert.deepEqual(reportingSnapshot(wave0,{type:'account_transfer'}).cashFlow,[]);
+  assert.equal(seriesValue(reportingSnapshot(wave0,{type:'account_expense'}).cashFlow,'USD'),-25);
+});
+
+test('transfer flow includes both legs, cancels same-currency transfers, excludes income and receivables',()=>{
+  // The USD->LBP outgoing leg stays in USD; only the USD->USD transfer cancels.
+  assert.deepEqual(waveSnap.transferFlow,[{month:'2026-09',currencies:{USD:-10,LBP:900000}}]);
+  assert.deepEqual(reportingSnapshot(wave0,{type:'account_income'}).transferFlow,[]);
+  assert.deepEqual(reportingSnapshot(wave0,{type:'paid_for_person'}).transferFlow,[]);
+  assert.deepEqual(reportingSnapshot(wave0,{from:'2026-09-18',to:'2026-09-18'}).transferFlow,[{month:'2026-09',currencies:{USD:0}}]);
+  assert.deepEqual(reportingSnapshot(wave0,{from:'2026-09-21',to:'2026-09-21'}).transferFlow,[{month:'2026-09',currencies:{USD:-10,LBP:900000}}]);
+  assert.equal(Object.hasOwn(waveSnap,'monthly'),false);
+});
+
+test('Monthly workbook labels each measure without changing the sheet list',()=>{
+  const sheets=workbookSheets(wave0);
+  assert.deepEqual(sheets.map(s=>s.name),['Metadata','Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Monthly','Transactions']);
+  assert.deepEqual(sheets.find(s=>s.name==='Monthly').rows,[
+    ['Measure','Month','Currency','Net Movement'],
+    ['Receivables movement','2026-09','USD',75],['Receivables movement','2026-09','EUR',30],
+    ['Personal cash flow','2026-09','USD',45],
+    ['Transfer flow','2026-09','USD',-10],['Transfer flow','2026-09','LBP',900000]
+  ]);
+});
+
+const drillEntries=[
+  {id:'food',type:'account_expense',categoryId:'food'},
+  {id:'archived',type:'account_expense',categoryId:'old'},
+  {id:'uncat',type:'account_expense',categoryId:null},
+  {id:'missing',type:'account_income'},
+  {id:'alice',type:'paid_for_person',personId:'alice',categoryId:'food'},
+  {id:'split',type:'split_paid_for_people',splits:[{personId:'alice',amount:10},{personId:'bob',amount:20}],categoryId:'old'},
+  {id:'bob',type:'paid_to_person',personId:'bob'}
+];
+const drillPeople=[{id:'alice',name:'Alice'},{id:'bob',name:'Bob'}];
+const drillCategories=[{id:'food',name:'Food',archived:false},{id:'old',name:'Former category',archived:true}];
+const drill=(filters={})=>filterTransactionList(drillEntries,{...filters,people:drillPeople}).map(e=>e.id);
+
+test('transaction drill-down filters type and person, including split participants',()=>{
+  assert.deepEqual(drill({type:'account_expense'}),['food','archived','uncat']);
+  assert.deepEqual(drill({personId:'alice'}),['alice','split']);
+  assert.deepEqual(drill({personId:'bob'}),['split','bob']);
+  assert.deepEqual(drill({personId:'nobody'}),[]);
+  assert.deepEqual(drill(),drillEntries.map(e=>e.id));
+});
+
+test('transaction drill-down filters active, archived and uncategorized categories by ID',()=>{
+  assert.deepEqual(drill({categoryId:'food'}),['food','alice']);
+  // Archived categories retain their IDs; filtering must not depend on current status.
+  assert.deepEqual(drill({categoryId:drillCategories.find(c=>c.archived).id}),['archived','split']);
+  assert.deepEqual(drill({categoryId:'uncategorized'}),['uncat','missing','bob']);
+  assert.deepEqual(drill({categoryId:'other'}),[]);
+  assert.deepEqual(filterTransactionList([{id:'empty',categoryId:''},{id:'tagged',categoryId:'food'}],{categoryId:'uncategorized'}).map(e=>e.id),['empty']);
+});
+
+test('transaction drill-down intersects type, person and category without mutating entries',()=>{
+  const before=structuredClone(drillEntries);
+  assert.deepEqual(drill({type:'split_paid_for_people',personId:'bob',categoryId:'old'}),['split']);
+  assert.deepEqual(drill({type:'account_expense',categoryId:'uncategorized'}),['uncat']);
+  assert.deepEqual(drill({type:'account_expense',personId:'alice',categoryId:'old'}),[]);
+  assert.deepEqual(drillEntries,before);
+});
+
+
+test('monthly series are sorted, exact and disjoint even when months have different entry types',()=>{
+  const s=reportingSnapshot({...state,entries:[
+    {type:'account_income',amount:0.1,currency:'USD',date:'2026-10-02'},
+    {type:'account_income',amount:0.2,currency:'USD',date:'2026-10-01'},
+    {type:'paid_for_person',personId:'p1',amount:0.3,currency:'USD',date:'2026-09-01'},
+    {type:'account_expense',amount:0.1,currency:'USD',date:'2026-08-01'}
+  ]});
+  assert.deepEqual(s.cashFlow,[{month:'2026-08',currencies:{USD:-0.1}},{month:'2026-10',currencies:{USD:0.3}}]);
+  assert.deepEqual(s.receivablesMovement,[{month:'2026-09',currencies:{USD:0.3}}]);
+  assert.deepEqual(s.transferFlow,[]);
+});
+
+test('every entry contributes to only its own monthly measure',()=>{
+  for(const entry of wave0.entries){
+    const s=reportingSnapshot({...wave0,entries:[entry]});
+    const expected=entry.type==='account_transfer'?'transferFlow':['account_expense','account_income'].includes(entry.type)?'cashFlow':'receivablesMovement';
+    for(const key of ['receivablesMovement','cashFlow','transferFlow'])assert.equal(s[key].length,key===expected?1:0,`${entry.id}: ${key}`);
+  }
+});
+
+test('Reports and PDF publish three labelled measures with exact fixture values',()=>{
+  const main={innerHTML:'',querySelector:()=>null};
+  renderReports(main,wave0,{params:new URLSearchParams()},{money:(v,c)=>`${c} ${v}`,escapeHtml,today:()=> '2026-09-29'});
+  const pdf=new TextDecoder().decode(buildPdfReport(wave0,waveSnap));
+  const expected=[['Receivables movement',{USD:75,EUR:30}],['Personal cash flow',{USD:45}],['Transfer flow',{USD:-10,LBP:900000}]];
+  for(let i=0;i<expected.length;i++){
+    const [label,values]=expected[i];
+    const panel=main.innerHTML.split(`<h3>${label}</h3>`)[1]?.split('</section>')[0];
+    assert.ok(panel,`${label} panel exists`);
+    const pdfSection=pdf.split(`(${label})`)[1]?.split(`(${expected[i+1]?.[0]||'Transactions'})`)[0];
+    assert.ok(pdfSection,`${label} PDF section exists`);
+    for(const [currency,value] of Object.entries(values)){
+      assert.ok(panel.includes(`${currency} ${value}`));
+      assert.ok(pdfSection.includes(`2026-09: ${currency} ${value.toLocaleString('en-US',{minimumFractionDigits:currencyExponent(currency),maximumFractionDigits:currencyExponent(currency)})}`));
+    }
+    assert.equal((panel.match(/<tr><td>/g)||[]).length,Object.keys(values).length);
+  }
+  assert.doesNotMatch(main.innerHTML,/Monthly movement/);
+  assert.doesNotMatch(pdf,/Monthly movement/);
 });

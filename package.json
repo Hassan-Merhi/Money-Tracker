@@ -12,6 +12,6 @@
     "snapshot:db": "node scripts/create-db-snapshot.mjs",
     "restore:db": "node scripts/restore-db-snapshot.mjs",
     "test:lane-d": "node --test tests/lane-d-*.test.js",
-    "accounting:check": "node --test tests/wave0-baseline.test.js tests/ledger.test.js tests/reporting.test.js tests/insights.test.js tests/exact-money-migration.test.js tests/accounting-*.test.js tests/lane-b-mode-server.test.js"
+    "accounting:check": "node scripts/accounting-check.mjs && node --test tests/wave0-baseline.test.js tests/ledger.test.js tests/reporting.test.js tests/insights.test.js tests/exact-money-migration.test.js tests/accounting-*.test.js tests/lane-b-mode-server.test.js"
   }
 }

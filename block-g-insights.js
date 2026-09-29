@@ -42,7 +42,7 @@ function openBudgetModal(existing,state,ctx){
   ctx.openModal(existing?'Edit monthly budget':'Add monthly budget',`<form id="gBudgetForm" class="form-grid">
     <div class="field span-2"><label>Expense category</label><select class="select" name="categoryId" required>${categories.map(c=>`<option value="${c.id}" ${c.id===existing?.categoryId?'selected':''}>${escapeHtml(categoryLabel(c))}</option>`).join('')}</select></div>
     <div class="field"><label>Currency</label><select class="select" name="currency">${CURRENCIES.map(c=>`<option value="${c}" ${c===(existing?.currency||state.settings.defaultCurrency)?'selected':''}>${c}</option>`).join('')}</select></div>
-    <div class="field"><label>Monthly limit</label><input class="input" name="monthlyLimit" type="number" min="0.01" step="any" required value="${existing?.monthlyLimit??''}" placeholder="0.00"></div>
+    <div class="field"><label>Monthly limit</label><input class="input" name="monthlyLimit" type="number" min="0" step="any" required value="${existing?.monthlyLimit??''}" placeholder="0.00"></div>
   </form>`,()=>document.querySelector('#gBudgetForm')?.requestSubmit());
   document.querySelector('#gBudgetForm')?.addEventListener('submit',async event=>{
     event.preventDefault();const fd=new FormData(event.currentTarget);

@@ -278,7 +278,7 @@ function openAccountDetail(accountId){
   const a=state.accounts.find(x=>x.id===accountId); if(!a)return;
   const balances=accountBalances(state.entries,state.accounts);
   const entries=state.entries.filter(e=>e.accountId===a.id||e.fromAccountId===a.id||e.toAccountId===a.id).sort((x,y)=>new Date(y.date)-new Date(x.date)||new Date(y.createdAt)-new Date(x.createdAt));
-  openModal(`${escapeHtml(a.name)} · ${money(balances[a.id]||0,a.currency)}`, `${entries.length?transactionTable(entries,{compact:true}):'<div class="empty">No activity yet.</div>'}<div style="margin-top:16px;display:flex;gap:8px"><button class="btn" id="modalEditAccount">Edit account</button><button class="btn danger" id="modalDeleteAccount">Delete account</button></div>`, null, false);
+  openModal(`${a.name} · ${money(balances[a.id]||0,a.currency)}`, `${entries.length?transactionTable(entries,{compact:true}):'<div class="empty">No activity yet.</div>'}<div style="margin-top:16px;display:flex;gap:8px"><button class="btn" id="modalEditAccount">Edit account</button><button class="btn danger" id="modalDeleteAccount">Delete account</button></div>`, null, false);
   document.querySelector('#modalEditAccount')?.addEventListener('click',()=>{closeModal();openAccountModal(a)});
   document.querySelector('#modalDeleteAccount')?.addEventListener('click',()=>deleteAccount(a.id));
 }

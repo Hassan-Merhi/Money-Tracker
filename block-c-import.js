@@ -5,7 +5,7 @@ import { applyImport, applyQuickPasteImport, detectImportMode, guessHeader, pars
 import { analyzeLegacyWorkbook, applyLegacyWorkbook } from './lib/legacy-excel.js';
 import { currencyExponent } from './lib/money.js';
 
-let state=null,preview=null,sheetIndex=0,injecting=false,legacyAnalysis=null,manualMode=false;
+let state=null,preview=null,sheetIndex=0,legacyAnalysis=null,manualMode=false;
 const q=s=>document.querySelector(s);
 
 function downloadBytes(filename,bytes,type){const blob=new Blob([bytes],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),0);}
@@ -16,13 +16,6 @@ function templateWorkbook(){return buildXlsx([
   {name:'Transactions',rows:[['Date','Type','Person','Account','Amount','Currency','Merchant','Category','Description','From Account','To Account','From Amount','To Amount','Signed Amount','Direction','Split Details']]}
 ],{title:'Money Tracker Import Template'});}
 function downloadTemplate(){downloadBytes('money-tracker-import-template.xlsx',templateWorkbook(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');}
-
-function inject(){
-  if(injecting)return;injecting=true;
-  try{
-  }finally{injecting=false;}
-}
-new MutationObserver(inject).observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('DOMContentLoaded',inject);inject();
 
 function quickPasteEffect(row){
   const amount=moneyText(row.Amount,row.Currency||state?.settings?.defaultCurrency||'USD');

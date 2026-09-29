@@ -1,3 +1,4 @@
+import { icon, mobilePages, recentDebtEntries, activityMarkup, peopleOverviewMarkup } from './lib/dashboard-ui.js';
 import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
@@ -35,7 +36,7 @@ function applyTheme(preference=themePreference()){
   const effective=preference==='system'?(themeMedia?.matches?'dark':'light'):preference;
   document.documentElement.dataset.theme=effective;
   document.documentElement.style.colorScheme=effective;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',effective==='dark'?'#0b1120':'#111827');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',effective==='dark'?'#0e191d':'#f5f7f8');
 }
 function saveThemePreference(preference){
   const value=['system','light','dark'].includes(preference)?preference:'system';
@@ -104,7 +105,7 @@ function wireFieldLabels(root=document){
 }
 
 function iconFor(page) {
-  return ({dashboard:'⌂',people:'◉',accounts:'▣',transactions:'↕',bank:'🏦',insights:'◫',scheduled:'⏰',reports:'▤',settings:'⚙'})[page] || '•';
+  return icon(page);
 }
 
 function titleFor(page) {
@@ -132,28 +133,32 @@ function render() {
   if(!advanced && hiddenInSimpleMode.includes(route.page)){location.hash='#dashboard';return;}
   const navPage = route.page === 'person' ? 'people' : route.page;
   const visiblePages=advanced?['dashboard','people','accounts','transactions','bank','insights','scheduled','reports','settings']:['dashboard','people','transactions','reports','settings'];
+  const mobileNavPages=mobilePages(advanced);
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">M</div><div><h1>Money Tracker</h1><small>Who owes who</small></div></div>
-        <nav class="nav" aria-label="Primary navigation">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
-        <div class="sidebar-foot"><strong>${escapeHtml(user?.email || '')}</strong><br>${advanced?'Advanced money mode · accounts, bank feed & schedules':'Simple mode · focused debt tracking'}<br><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
+        <div class="brand"><div class="brand-mark">${icon('insights')}</div><div><h1>Money Tracker</h1><small>A little more clarity.</small></div></div>
+        <div class="nav-caption">WORKSPACE</div><nav class="nav" aria-label="Primary navigation">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span class="nav-icon">${iconFor(p)}</span>${titleFor(p)}</button>`).join('')}</nav>
+        <div class="sidebar-foot"><span class="mode-label">${advanced?'Advanced workspace':'Simple workspace'}</span><strong>${escapeHtml(user?.email || '')}</strong><button class="sidebar-logout" id="logoutBtn">Sign out</button></div>
       </aside>
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2 id="pageHeading" tabindex="-1">${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">＋ Add</button></div>
+          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">${icon('plus')} Add activity</button></div>
         </header>
         <main class="main" id="main" aria-labelledby="pageHeading" tabindex="-1"></main>
       </section>
-      <button class="mobile-fab" id="mobileQuickEntry" aria-label="Add debt transaction">＋</button>
-      <nav class="mobile-nav" aria-label="Mobile navigation" style="grid-template-columns:repeat(${visiblePages.length},1fr)">${visiblePages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span>${iconFor(p)}</span>${p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}</nav>
+      <nav class="mobile-nav" aria-label="Mobile navigation">${mobileNavPages.map(p => `<button data-nav="${p}" class="${navPage===p?'active':''}"${navPage===p?' aria-current="page"':''}><span>${iconFor(p)}</span>${p==='dashboard'?'Home':p==='transactions'?'Activity':p==='reports'?'Reports':titleFor(p).split(' ')[0]}</button>`).join('')}${advanced?`<button id="mobileMore" class="${!mobileNavPages.includes(navPage)?'active':''}" aria-label="More navigation" aria-haspopup="dialog"><span>${icon('more')}</span>More</button>`:''}</nav>
     </div>`;
 
   document.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => location.hash = `#${btn.dataset.nav}`));
+  document.querySelector('#mobileMore')?.addEventListener('click',()=>{
+    const pages=visiblePages.filter(p=>!mobileNavPages.includes(p));
+    openModal('Your workspace',`<nav class="more-nav" aria-label="More navigation">${pages.map(p=>`<button class="btn ${navPage===p?'selected':''}" data-more-nav="${p}"${navPage===p?' aria-current="page"':''}>${iconFor(p)}${titleFor(p)}${icon('arrow')}</button>`).join('')}</nav>`,null,false);
+    document.querySelectorAll('[data-more-nav]').forEach(button=>button.addEventListener('click',()=>{closeModal();location.hash=`#${button.dataset.moreNav}`;}));
+  });
   document.querySelector('#applyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
-  document.querySelector('#mobileQuickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());
   document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; showAuth(); });
 
@@ -185,38 +190,46 @@ function currencyTotalsMarkup(totals, key, fallback='0') {
 function renderDashboard(main) {
   const pBalances = personBalances(state.entries, state.people);
   const totals = totalsFromBalances(pBalances);
-  const recent = [...state.entries].filter(e=>PERSON_ENTRY_TYPES.includes(e.type)).sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt)).slice(0,8);
-
-  main.innerHTML = `
+  const recent = recentDebtEntries(state.entries);
+  const overview = peopleOverviewMarkup(state.people, pBalances);
+  const dateLabel = new Intl.DateTimeFormat(undefined, {weekday:'long', month:'long', day:'numeric'}).format(new Date());
+  const actions = [
+    ['paid_for_person','up','They owe me','Record money you lent'],
+    ['received_from_person','check','They paid me','Record a repayment'],
+    ['borrowed_from_person','down','I owe them','Record money you borrowed'],
+    ['paid_to_person','check','I paid them','Settle what you owe'],
+    [SPLIT_ENTRY_TYPE,'people','Split a payment','Share it between people'],
+    ['person','plus','Add a person','Start a new statement']
+  ];
+  main.innerHTML = `<div class="dashboard">
+    <div class="dashboard-intro"><div><div class="eyebrow">YOUR MONEY, AT A GLANCE</div><h2>A clearer picture.</h2><p>Keep track of what’s owed. Make room for what’s next.</p></div><div class="dashboard-date">${icon('scheduled')}<span>${escapeHtml(dateLabel)}</span></div></div>
     <div class="grid stats debt-stats">
-      <div class="card stat good"><div class="stat-top"><div class="stat-label">PEOPLE OWE ME</div><div class="stat-icon">↗</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'owedToMe','0')}</div><div class="stat-note">Money you should receive</div></div>
-      <div class="card stat bad"><div class="stat-top"><div class="stat-label">I OWE PEOPLE</div><div class="stat-icon">↘</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe','0')}</div><div class="stat-note">Money you need to pay</div></div>
-      <div class="card stat net"><div class="stat-top"><div class="stat-label">NET POSITION</div><div class="stat-icon">≈</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net','0')}</div><div class="stat-note">Owed to you minus what you owe</div></div>
+      <section class="card stat good"><div class="stat-top"><h3 class="stat-label">People owe me</h3><div class="stat-icon">${icon('up')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'owedToMe',money(0,state.settings.defaultCurrency))}</div><div class="stat-note"><span class="stat-dot"></span>Money to receive</div></section>
+      <section class="card stat bad"><div class="stat-top"><h3 class="stat-label">I owe people</h3><div class="stat-icon">${icon('down')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'iOwe',money(0,state.settings.defaultCurrency))}</div><div class="stat-note"><span class="stat-dot"></span>Money to pay back</div></section>
+      <section class="card stat net"><div class="stat-top"><h3 class="stat-label">Net position</h3><div class="stat-icon">${icon('net')}</div></div><div class="stat-value">${currencyTotalsMarkup(totals,'net',money(0,state.settings.defaultCurrency))}</div><div class="stat-note">Owed to you minus what you owe</div></section>
     </div>
-    ${advancedMode()?'':`<div class="card panel" style="margin-bottom:16px"><div class="panel-head"><div><h3>Simple mode is active</h3><p>Your accounts, Bank Feed, budgets and recurring schedules stay saved but hidden. Advanced mode unlocks the full money system without changing or deleting your debt records.</p></div><button class="btn primary" id="enableAdvanced">Enable Advanced mode</button></div></div>`}
-    <div class="grid section-grid">
-      <section class="card panel">
-        <div class="panel-head"><div><h3>Recent activity</h3><p>Your latest debts and repayments</p></div><button class="btn small" data-go="transactions">View all</button></div>
-        ${recent.length ? transactionTable(recent, {compact:true}) : `<div class="empty"><strong>No debt activity yet</strong>Add a person, then record what they owe you or what you owe them.</div>`}
-      </section>
-      <section class="card panel">
-        <div class="panel-head"><div><h3>Quick actions</h3><p>No bank account needed</p></div></div>
-        <div class="quick-grid">
-          <button class="quick" data-action="paid_for_person"><span class="qicon">↗</span><strong>They owe me</strong><small>I paid for them / lent them money</small></button>
-          <button class="quick" data-action="received_from_person"><span class="qicon">💵</span><strong>They paid me</strong><small>Reduce what they owe me</small></button>
-          <button class="quick" data-action="borrowed_from_person"><span class="qicon">↘</span><strong>I owe them</strong><small>They paid for me / lent me money</small></button>
-          <button class="quick" data-action="paid_to_person"><span class="qicon">✅</span><strong>I paid them</strong><small>Reduce what I owe them</small></button>
-          <button class="quick" data-action="${SPLIT_ENTRY_TYPE}"><span class="qicon">👥</span><strong>Split between people</strong><small>One amount owed by multiple people</small></button>
-          <button class="quick" data-action="person"><span class="qicon">👤</span><strong>Add a person</strong><small>Create a statement</small></button>
-        </div>
-      </section>
-    </div>`;
+    <div class="dashboard-columns">
+      <div class="dashboard-primary">
+        <section class="card panel activity-panel">
+          <div class="panel-head"><div><h3>Recent activity</h3><p>The latest in your money story</p></div><a class="text-link" href="#transactions">View all ${icon('arrow')}</a></div>
+          ${recent.length ? activityMarkup(recent,state.people) : `<div class="dashboard-empty"><span class="empty-icon">${icon('transactions')}</span><h4>A fresh start for your finances</h4><p>Your debts and repayments will show up here.<br>${state.people.length?'Record your first debt or repayment to get started.':'Start with someone you exchange money with.'}</p><button class="btn primary" data-action="${state.people.length?'activity':'person'}">${icon('plus')} ${state.people.length?'Add activity':'Add your first person'}</button></div>`}
+          ${recent.length ? '<a class="activity-footer" href="#transactions">See all transactions '+icon('arrow')+'</a>' : ''}
+        </section>
+        <section class="card panel people-overview"><div class="panel-head"><div><h3>People & balances <span class="count-badge">${overview.count}</span></h3><p>Outstanding balances, by person</p></div><a class="text-link" href="#people">All people ${icon('arrow')}</a></div>${overview.markup || `<div class="people-empty">${icon('check')}<div><strong>${state.people.length?'You’re all settled up.':'Good records start with people.'}</strong><p>${state.people.length?'No outstanding balances right now.':'Add a person to keep every balance in one place.'}</p></div></div>`}</section>
+      </div>
+      <div class="dashboard-secondary">
+        <section class="card panel quick-panel"><div class="panel-head"><div><h3>Make a move</h3><p>A quick update. A clearer balance.</p></div><span class="keyboard-hint" title="Press N to add activity">N</span></div><div class="quick-grid">${actions.map(([type,symbol,title,note])=>`<button class="quick" data-action="${type}"><span class="qicon">${icon(symbol)}</span><strong>${title}</strong><small>${note}</small></button>`).join('')}</div><div class="quick-foot">${icon('check')} No bank account needed</div></section>
+        ${advancedMode()?`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>The bigger picture</h3><p>Explore your spending, categories and monthly budgets.</p><a class="text-link" href="#insights">Open insights ${icon('arrow')}</a></section>`:`<section class="workspace-note"><span class="note-icon">${icon('insights')}</span><h3>More clarity. When you’re ready.</h3><p>Bring accounts, budgets and schedules into view with Advanced mode. Your existing records stay just as they are.</p><button class="text-link" id="enableAdvanced">Enable Advanced mode ${icon('arrow')}</button></section>`}
+      </div>
+    </div>
+    <div class="dashboard-caption">${icon('check')} Your balances, all in one place. <span>${advancedMode()?'Advanced':'Simple'} workspace</span></div>
+  </div>`;
   main.querySelector('#enableAdvanced')?.addEventListener('click',async()=>{const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';const saved=await runMutation(version=>updateSettings({defaultCurrency:state.settings.defaultCurrency,appMode:'advanced',timezone},version),'Advanced mode enabled.');if(saved)location.hash='#dashboard';});
-  main.querySelector('[data-go="transactions"]')?.addEventListener('click',()=>location.hash='#transactions');
   main.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => {
     const a=b.dataset.action;
-    if (a==='person') openPersonModal(); else openTransactionModal(null,{type:a});
+    if (a==='person') openPersonModal(); else if(a==='activity') openQuickMenu(); else openTransactionModal(null,{type:a});
   }));
+  main.querySelectorAll('[data-dashboard-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.dashboardEntry))));
 }
 
 function renderPeople(main) {

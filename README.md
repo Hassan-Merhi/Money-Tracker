@@ -7,6 +7,18 @@ Money Tracker supports two persisted user modes:
 
 Switching modes never deletes hidden financial data. The app also runs as an installable PWA with an offline shell; financial changes remain server-authoritative and require a live connection.
 
+## Responsive dashboard
+
+The dashboard uses a teal-accented, theme-aware workspace with responsive balance
+cards, editable recent activity, a per-person outstanding balance overview, and
+quick actions. Desktop keeps the full sidebar; phones show five comfortable
+navigation targets (Advanced tools are available from **More**). All totals remain
+currency-separated and use the existing ledger calculations.
+
+No new runtime dependencies, external fonts, or analytics are needed. The PWA
+shell is version 13 and caches the dashboard stylesheet and presentation module.
+See [dashboard QA notes](docs/DASHBOARD_REFRESH.md) for validation and review steps.
+
 ## Block A — Secure core
 
 - One-time public owner registration, login/logout, owner-managed additional accounts from Settings, and server-backed sessions
@@ -23,7 +35,7 @@ Switching modes never deletes hidden financial data. The app also runs as an ins
 Block B makes the ledger practical for everyday use on desktop and mobile:
 
 - Responsive desktop navigation and mobile bottom navigation
-- Mobile floating quick-add button
+- Sticky-header quick-add button on mobile (no floating control covering ledger content)
 - Keyboard shortcut: **N** for quick add
 - Quick-entry menu for common money actions
 - Remembers the most recently used person locally for faster entry

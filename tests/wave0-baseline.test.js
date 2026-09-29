@@ -30,7 +30,7 @@ test('Wave 0 database snapshots are checksum-verifiable and preserve schema/data
   const dbPath=join(dir,'ledger.sqlite');
   const db=new DatabaseSync(dbPath);
   try{
-    db.exec('CREATE TABLE sample(id TEXT PRIMARY KEY, amount REAL NOT NULL); INSERT INTO sample VALUES ("a", 12.5);');
+    db.exec("CREATE TABLE sample(id TEXT PRIMARY KEY, amount REAL NOT NULL); INSERT INTO sample VALUES ('a', 12.5);");
     const before=schemaFingerprint(db);
     const result=createDatabaseSnapshot(db,{dataDir:dir,dbPath,label:'wave0-test',createdAt:new Date('2026-09-29T00:00:00.000Z')});
     assert.equal(result.schemaSha256,before);

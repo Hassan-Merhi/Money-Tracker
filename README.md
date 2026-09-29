@@ -113,12 +113,16 @@ Report filters apply to activity and exported transaction rows. Current outstand
 - Account-only **expense** and **income** ledger entries for transactions that do not involve another person
 - Review actions can instead classify a row as paid for someone, repayment received, borrowed money, paid someone back, or a same-currency transfer between your own accounts
 - If both sides of the same transfer are imported from separate account statements, the second reviewed side links to the existing transfer instead of creating a duplicate ledger movement
+- Transfer auto-linking compares the merchant/description text of both statement sides, so two same-amount transfers close together stay separate; an ambiguous match creates a new movement (recoverable with Undo) instead of silently merging two movements
 - Merchant/description rules can remember classifications and expense/income categories for future imports
 - Ignore, reopen, and delete controls for unposted feed rows
 - Atomic posting updates the ledger revision and feed status together
 - Direction validation prevents posting money-in rows as expenses or money-out rows as income/repayments
 - Stale-tab revision checks, CSRF protection, per-user feed/rule isolation, and rule/reference cleanup
 - Deleting a posted ledger entry reopens its feed item; deleting referenced accounts cleans unusable unposted rows/rules
+- Editing a posted transaction re-checks its bank feed row and reopens it when the amount, account, currency, or date no longer matches
+- The inbox is paginated (100 rows per page, Prev/Next with "showing X-Y of N") while the Pending/Posted/Ignored totals keep counting every stored row
+- A per-account reconciliation panel compares imported statement rows with posted/ignored/pending rows and the signed posted totals with that account's ledger movements, excluding the opening balance and counting transfers on both accounts
 - Bank-imported expenses participate in account balances, transaction editing/filtering, category budgets, exports, re-imports, and merchant/category reports
 - Block F modules are included in the PWA offline shell
 
@@ -211,6 +215,7 @@ Highlights:
 - keyboard and screen-reader navigation, focus-safe dialogs, labelled form controls, visible focus, reduced-motion support;
 - coherent storage and complete-backup limits from one shared contract;
 - Bank Feed full-table reconciliation totals and transactional scale limits;
+- Bank Feed pagination, posted-row revalidation, and transfer-link disambiguation;
 - bounded recurring/import history and continuously enforced security-event retention;
 - PWA cache v11 with reliable stale-while-revalidate updates;
 - ETag/304 static delivery;

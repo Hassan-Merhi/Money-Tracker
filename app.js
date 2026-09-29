@@ -598,7 +598,7 @@ function renderSettings(main) {
   main.querySelector('#exportBackup')?.addEventListener('click',async()=>{try{const backup=await exportFullBackup();downloadText(`money-tracker-complete-backup-${today()}.json`,JSON.stringify(backup,null,2));showToast('Complete backup exported.');}catch(error){showToast(error.message||'Could not export backup.');}});
   main.querySelector('#importBackup')?.addEventListener('click',()=>main.querySelector('#backupFile').click());
   main.querySelector('#openReports')?.addEventListener('click',()=>{location.hash='#reports';});
-  main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(Number(parsed.backupVersion)!==2||parsed.app!=='money-owed-tracker')throw new Error('That file is not a complete Money Tracker backup.');if(!confirm('Restore this complete backup? Current app data for this login will be replaced.'))return;const result=await restoreFullBackup(parsed);state=result.state;showToast('Complete backup restored.');render();}catch(error){showToast(error.message||'Could not restore that backup.');}finally{e.target.value='';}});
+  main.querySelector('#backupFile')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(Number(parsed.backupVersion)!==2||parsed.app!=='money-owed-tracker')throw new Error('That file is not a complete Money Tracker backup.');openCompleteBackupRestoreModal(parsed);}catch(error){showToast(error.message||'Could not read that backup.');}finally{e.target.value='';}});
   main.querySelector('#resetData')?.addEventListener('click',()=>openDeleteDataModal());
   main.querySelector('#deleteMyAccount')?.addEventListener('click',()=>openDeleteAccountModal());
   refreshSecurityPanel(main);
@@ -635,9 +635,73 @@ async function refreshManagedUsers(main){
   try{
     const data=await listUsers();
     host.innerHTML=`<div class="table-wrap mobile-card-table-wrap"><table class="table mobile-card-table"><thead><tr><th>Email</th><th>Role</th><th>Created</th><th></th></tr></thead><tbody>${data.users.map(account=>`<tr><td data-label="Email" data-mobile-wide="true"><strong>${escapeHtml(account.email)}</strong></td><td data-label="Role">${account.isOwner?'<span class="pill">Owner</span>':'User'}</td><td data-label="Created">${escapeHtml(String(account.createdAt||'').slice(0,10))}</td><td class="actions">${account.isOwner?'':`<button class="btn small" data-reset-user="${account.id}">Reset password</button> <button class="btn small danger" data-delete-user="${account.id}">Delete</button>`}</td></tr>`).join('')}</tbody></table></div>`;
-    host.querySelectorAll('[data-reset-user]').forEach(button=>button.addEventListener('click',async()=>{const password=prompt('Enter a new password (10+ characters) for this account:');if(!password)return;try{await resetUserPassword(button.dataset.resetUser,password);showToast('Password reset and that user’s sessions were revoked.');}catch(error){showToast(error.message||'Could not reset password.');}}));
-    host.querySelectorAll('[data-delete-user]').forEach(button=>button.addEventListener('click',async()=>{if(!confirm('Delete this user account and all of its app data?'))return;try{await deleteUserAccount(button.dataset.deleteUser);showToast('User account deleted.');await refreshManagedUsers(main);}catch(error){showToast(error.message||'Could not delete user account.');}}));
+    host.querySelectorAll('[data-reset-user]').forEach(button=>button.addEventListener('click',()=>openSecondaryPasswordResetModal(button.dataset.resetUser,main)));
+    host.querySelectorAll('[data-delete-user]').forEach(button=>button.addEventListener('click',()=>openSecondaryDeleteModal(button.dataset.deleteUser,main)));
   }catch(error){host.textContent=error.message||'Could not load user accounts.';}
+}
+
+function openCompleteBackupRestoreModal(backup){
+  openModal('Restore complete backup',`<form id="restoreBackupForm" class="form-grid">
+    <div class="span-2 warning">Restoring replaces all app data for this login. The backup is checked for integrity and broken references before replacement begins.</div>
+    <div class="field span-2"><label>Current password</label><input class="input" type="password" name="password" autocomplete="current-password" required></div>
+    <div class="field span-2"><label>Type RESTORE to confirm</label><input class="input" name="confirmation" autocomplete="off" required></div>
+  </form>`,()=>document.querySelector('#restoreBackupForm').requestSubmit());
+  const saveButton=document.querySelector('#modalSave');
+  if(saveButton){saveButton.textContent='Restore backup';saveButton.classList.remove('primary');saveButton.classList.add('danger');}
+  document.querySelector('#restoreBackupForm')?.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,fd=new FormData(form),button=document.querySelector('#modalSave');
+    if(button)button.disabled=true;
+    try{
+      const result=await restoreFullBackup(backup,fd.get('password'),fd.get('confirmation'));
+      state=result.state;closeModal();showToast('Complete backup restored.');render();
+    }catch(error){
+      showToast(error.message||'Could not restore that backup.');
+      form.querySelector('input[name="password"]')?.focus();
+    }finally{if(button?.isConnected)button.disabled=false;}
+  });
+}
+
+function openSecondaryPasswordResetModal(id,main){
+  openModal('Reset user password',`<form id="secondaryPasswordForm" class="form-grid">
+    <div class="span-2 warning">This signs the user out everywhere. Confirm with your current owner password.</div>
+    <div class="field span-2"><label>New password</label><input class="input" type="password" name="password" minlength="10" autocomplete="new-password" required></div>
+    <div class="field span-2"><label>Your current password</label><input class="input" type="password" name="currentPassword" autocomplete="current-password" required></div>
+  </form>`,()=>document.querySelector('#secondaryPasswordForm').requestSubmit());
+  document.querySelector('#secondaryPasswordForm')?.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,fd=new FormData(form),button=document.querySelector('#modalSave');
+    if(button)button.disabled=true;
+    try{
+      await resetUserPassword(id,fd.get('password'),fd.get('currentPassword'));
+      closeModal();showToast('Password reset and that user’s sessions were revoked.');await refreshManagedUsers(main);
+    }catch(error){
+      showToast(error.message||'Could not reset password.');
+      form.querySelector('input[name="currentPassword"]')?.focus();
+    }finally{if(button?.isConnected)button.disabled=false;}
+  });
+}
+
+function openSecondaryDeleteModal(id,main){
+  openModal('Delete user account',`<form id="secondaryDeleteForm" class="form-grid">
+    <div class="span-2 warning">This permanently deletes this user login and all app data owned by it. This cannot be undone.</div>
+    <div class="field span-2"><label>Your current password</label><input class="input" type="password" name="currentPassword" autocomplete="current-password" required></div>
+    <div class="field span-2"><label>Type DELETE to confirm</label><input class="input" name="confirmation" autocomplete="off" required></div>
+  </form>`,()=>document.querySelector('#secondaryDeleteForm').requestSubmit());
+  const saveButton=document.querySelector('#modalSave');
+  if(saveButton){saveButton.textContent='Delete user';saveButton.classList.remove('primary');saveButton.classList.add('danger');}
+  document.querySelector('#secondaryDeleteForm')?.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,fd=new FormData(form),button=document.querySelector('#modalSave');
+    if(button)button.disabled=true;
+    try{
+      await deleteUserAccount(id,fd.get('currentPassword'),fd.get('confirmation'));
+      closeModal();showToast('User account deleted.');await refreshManagedUsers(main);
+    }catch(error){
+      showToast(error.message||'Could not delete user account.');
+      form.querySelector('input[name="currentPassword"]')?.focus();
+    }finally{if(button?.isConnected)button.disabled=false;}
+  });
 }
 
 function openDeleteDataModal(){

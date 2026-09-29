@@ -1,8 +1,11 @@
 # Money Tracker — Debt Tracker
 
-Money Tracker currently runs in **debt-first mode**: track money people owe you and money you owe people without creating bank, cash, card, or wallet accounts. Record debts, repayments, opening balances, notes, attachments, imports, statements, and exports with only a person, amount, currency, and date.
+Money Tracker supports two persisted user modes:
 
-The account, bank-feed, budget, and recurring engines remain in the codebase for a later advanced-money mode, but they are hidden from the normal navigation for now.
+- **Simple mode** keeps the debt-first experience focused on money people owe you and money you owe people.
+- **Advanced mode** exposes accounts and cash, transfers, account income/expenses, Bank Feed, categories/budgets, recurring schedules, reminders, and the full reporting stack.
+
+Switching modes never deletes hidden financial data. The app also runs as an installable PWA with an offline shell; financial changes remain server-authoritative and require a live connection.
 
 ## Block A — Secure core
 
@@ -156,12 +159,26 @@ Then open `http://localhost:4173`.
 
 ## Tests
 
-The automated suite covers core ledger math, account-only expense/income movements, category insight math, monthly budget states, category lifecycle protection, categorized recurring entries, atomic category/budget backup restore, CSRF and user isolation, split allocation math and validation, receipt attachments, category-aware reporting and PDF/XLSX exports, XLSX parsing, category-preserving import mapping, bank CSV parsing and normalization, category-aware Bank Feed rules, feed deduplication, atomic posting, two-sided transfer deduplication, direction/revision safety, reference cleanup, recurrence date math, recurring schedule isolation, duplicate-post rejection, skipping, pausing, and reset cleanup.
+The automated suite covers core ledger math, exact-money storage, account-only income/expenses, categories/budgets, recurring schedules/reminders, Bank Feed import/history/undo, full backup/restore, session lifecycle, security-event behavior, cross-site mutation rejection, runtime diagnostics, server snapshots, PWA install/offline/update contracts, reporting/PDF/XLSX round-trips, imports, attachments, user isolation, and production release regressions.
 
 ## Render
 
 `render.yaml` defines a Node web service with a persistent disk mounted at `/var/data` for the SQLite database. The health endpoint is `/api/health`.
 
-## Still outside Blocks A/B/C/D/E/F/G
+## Lane C — Resilience, security & operations
+
+- PWA cache v9 with install/update handling, offline shell fallback, online/offline state, and update-safe cache headers
+- Controlled service-worker upgrades with automatic reload after activation
+- Same-origin Fetch Metadata and Origin enforcement layered on top of CSRF
+- Security event history with sensitive-field filtering and 90-day retention
+- Active-session visibility plus individual non-current session revocation
+- Cross-origin opener/resource response hardening and CSP worker/manifest directives
+- Per-request UUID tracing for server errors
+- SQLite quick-check / foreign-key diagnostics in health
+- Owner-only operational diagnostics and verified server snapshots
+- Graceful SIGTERM/SIGINT shutdown with WAL checkpointing
+- `LANE_C_READY` startup readiness marker and Lane C health versioning
+
+## Still outside current scope
 
 Live bank-provider connections (OAuth/open-banking APIs), background provider syncing, and provider-specific credential management remain outside the current scope. The current app supports statement-file ingestion, automatic classification/category rules, review-before-post, budgets, and personal cash-flow insights without storing bank credentials.

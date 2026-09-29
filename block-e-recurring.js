@@ -9,7 +9,7 @@ import {
   loadState
 } from './lib/store.js';
 import { recurringStatus, shouldRemind, recurrenceLabel } from './lib/recurring.js';
-import { today, escapeHtml, prettyType } from './lib/utils.js';
+import { dateInTimeZone, escapeHtml, prettyType } from './lib/utils.js';
 import { openRecurringRuleModal, summarizeRecurringTemplate } from './lib/recurring-rule-form.js';
 
 function formatDate(value){
@@ -21,8 +21,11 @@ function statusClass(key){ return key==='overdue'?'red':key==='due'?'amber':key=
 async function refreshRules(){ return (await listRecurringRules()).rules || []; }
 async function refreshReminderInbox(){ return await listRecurringReminders(); }
 
+// Same calendar day the server reminder worker uses (settings.timezone), so labels agree with the inbox.
+function zonedToday(state){ return dateInTimeZone(state.settings.timezone||'UTC'); }
+
 function scheduleCard(rule,state){
-  const status=recurringStatus(rule,today());
+  const status=recurringStatus(rule,zonedToday(state));
   const disabled=!rule.isActive||!rule.nextDueDate;
   return `<article class="card recurring-card">
     <div class="recurring-card-top"><div>
@@ -46,9 +49,13 @@ function scheduleCard(rule,state){
 }
 
 async function postRule(rule,state,ctx){
-  if(!rule?.nextDueDate||!confirm(`Post “${rule.title}” to the ledger dated ${today()}?`)) return;
+  if(!rule?.nextDueDate) return;
+  // Overdue occurrences keep their own date so they land in the right month; otherwise post on the user's local today.
+  const tzToday=dateInTimeZone(state.settings.timezone||'UTC');
+  const transactionDate=rule.nextDueDate<tzToday?rule.nextDueDate:tzToday;
+  if(!confirm(`Post “${rule.title}” to the ledger dated ${transactionDate}?`)) return;
   try{
-    const result=await postRecurringRule(rule.id,{expectedRevision:state.version,occurrenceDate:rule.nextDueDate,transactionDate:today()});
+    const result=await postRecurringRule(rule.id,{expectedRevision:state.version,occurrenceDate:rule.nextDueDate,transactionDate});
     ctx.replaceState(result.state);
     ctx.showToast('Recurring transaction posted and next due date advanced.');
   }catch(error){
@@ -78,11 +85,11 @@ function browserAlertButton(){
   if(Notification.permission==='denied') return '<span class="muted tiny">Browser alerts are blocked in browser settings.</span>';
   return '<button class="btn small" id="recurringNotify">Enable browser alerts</button>';
 }
-function maybeNotify(rules){
+function maybeNotify(rules,state){
   if(!('Notification' in window)||Notification.permission!=='granted') return;
-  const attention=rules.filter(rule=>shouldRemind(rule,today()));
+  const attention=rules.filter(rule=>shouldRemind(rule,zonedToday(state)));
   if(!attention.length) return;
-  const key='money-tracker-recurring-alert-'+today();
+  const key='money-tracker-recurring-alert-'+zonedToday(state);
   if(localStorage.getItem(key)) return;
   localStorage.setItem(key,'1');
   const body=attention.length===1?`${attention[0].title} is due ${formatDate(attention[0].nextDueDate)}.`:`${attention.length} recurring items need your attention.`;
@@ -94,7 +101,7 @@ export async function renderRecurringPage(main,state,ctx){
   let rules,reminderData={reminders:[],worker:{}};
   try{ [rules,reminderData]=await Promise.all([refreshRules(),refreshReminderInbox()]); }catch(error){ main.innerHTML=`<div class="card panel"><div class="warning">${escapeHtml(error.message||'Could not load recurring schedules.')}</div></div>`; return; }
   const reminders=reminderData.reminders||[];
-  const attention=Math.max(reminders.length,rules.filter(rule=>shouldRemind(rule,today())).length);
+  const attention=Math.max(reminders.length,rules.filter(rule=>shouldRemind(rule,zonedToday(state))).length);
   const active=rules.filter(rule=>rule.isActive).length;
   const reload=()=>renderRecurringPage(main,state,ctx);
   main.innerHTML=`
@@ -111,25 +118,25 @@ export async function renderRecurringPage(main,state,ctx){
   const openNew=()=>openRecurringRuleModal(null,state,ctx,reload);
   main.querySelector('#newRecurring')?.addEventListener('click',openNew);
   main.querySelector('#emptyRecurring')?.addEventListener('click',openNew);
-  main.querySelector('#recurringNotify')?.addEventListener('click',async()=>{ if(!('Notification' in window))return; const p=await Notification.requestPermission(); if(p==='granted'){ctx.showToast('Browser alerts enabled while Money Tracker is open.');maybeNotify(rules);} reload(); });
+  main.querySelector('#recurringNotify')?.addEventListener('click',async()=>{ if(!('Notification' in window))return; const p=await Notification.requestPermission(); if(p==='granted'){ctx.showToast('Browser alerts enabled while Money Tracker is open.');maybeNotify(rules,state);} reload(); });
   main.querySelectorAll('[data-reminder-dismiss]').forEach(btn=>btn.addEventListener('click',async()=>{try{await acknowledgeRecurringReminder(btn.dataset.reminderDismiss);ctx.showToast('Reminder dismissed.');await reload();}catch(error){ctx.showToast(error.message||'Could not dismiss reminder.');}}));
   main.querySelectorAll('[data-rule-edit]').forEach(b=>b.addEventListener('click',()=>openRecurringRuleModal(rules.find(r=>r.id===b.dataset.ruleEdit),state,ctx,reload)));
   main.querySelectorAll('[data-rule-post]').forEach(b=>b.addEventListener('click',()=>postRule(rules.find(r=>r.id===b.dataset.rulePost),state,ctx)));
   main.querySelectorAll('[data-rule-skip]').forEach(b=>b.addEventListener('click',()=>skipRule(rules.find(r=>r.id===b.dataset.ruleSkip),ctx,reload)));
   main.querySelectorAll('[data-rule-toggle]').forEach(b=>b.addEventListener('click',()=>toggleRule(rules.find(r=>r.id===b.dataset.ruleToggle),ctx,reload)));
   main.querySelectorAll('[data-rule-delete]').forEach(b=>b.addEventListener('click',()=>removeRule(rules.find(r=>r.id===b.dataset.ruleDelete),ctx,reload)));
-  maybeNotify(rules);
+  maybeNotify(rules,state);
 }
 
 export async function mountRecurringDashboardWidget(host,state,ctx){
   if(!host) return;
   try{
     const rules=await refreshRules();
-    const attention=rules.filter(rule=>shouldRemind(rule,today())).sort((a,b)=>(a.nextDueDate||'9999').localeCompare(b.nextDueDate||'9999')).slice(0,4);
+    const attention=rules.filter(rule=>shouldRemind(rule,zonedToday(state))).sort((a,b)=>(a.nextDueDate||'9999').localeCompare(b.nextDueDate||'9999')).slice(0,4);
     host.innerHTML=`<div class="panel-head"><div><h3>Scheduled reminders</h3><p>${attention.length?`${attention.length} item${attention.length===1?'':'s'} need attention`:'Nothing due inside your reminder windows'}</p></div><button class="btn small" id="dashboardSchedules">Manage</button></div>
-      ${attention.length?`<div class="dashboard-reminders">${attention.map(rule=>{const status=recurringStatus(rule,today());return `<div class="dashboard-reminder"><div><strong>${escapeHtml(rule.title)} <span class="pill ${statusClass(status.key)}">${escapeHtml(status.label)}</span></strong><div class="muted tiny">${summarizeRecurringTemplate(rule.template,state)}</div></div><button class="btn small primary" data-dashboard-post="${rule.id}">Post</button></div>`;}).join('')}</div>`:'<div class="muted">Create schedules for repeat payments, purchases, and transfers.</div>'}`;
+      ${attention.length?`<div class="dashboard-reminders">${attention.map(rule=>{const status=recurringStatus(rule,zonedToday(state));return `<div class="dashboard-reminder"><div><strong>${escapeHtml(rule.title)} <span class="pill ${statusClass(status.key)}">${escapeHtml(status.label)}</span></strong><div class="muted tiny">${summarizeRecurringTemplate(rule.template,state)}</div></div><button class="btn small primary" data-dashboard-post="${rule.id}">Post</button></div>`;}).join('')}</div>`:'<div class="muted">Create schedules for repeat payments, purchases, and transfers.</div>'}`;
     host.querySelector('#dashboardSchedules')?.addEventListener('click',()=>location.hash='#scheduled');
     host.querySelectorAll('[data-dashboard-post]').forEach(b=>b.addEventListener('click',()=>postRule(rules.find(r=>r.id===b.dataset.dashboardPost),state,ctx)));
-    maybeNotify(rules);
+    maybeNotify(rules,state);
   }catch(error){ host.innerHTML=`<div class="muted">Scheduled reminders unavailable: ${escapeHtml(error.message||'load error')}</div>`; }
 }

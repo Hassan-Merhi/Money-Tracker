@@ -392,6 +392,7 @@ function validateState(input, user) {
       if(!from||!to||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Invalid account transfer.');
       base.fromAmount=exactMoney(base.fromAmount,from.currency,{allowNegative:false,allowZero:false});
       base.toAmount=exactMoney(base.toAmount,to.currency,{allowNegative:false,allowZero:false});
+      if(from.currency===to.currency&&toMinor(base.fromAmount,from.currency)!==toMinor(base.toAmount,to.currency))throw new Error('Same-currency transfer amounts must match.');
       base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
     } else if(e.type==='split_paid_for_people'){
       if(!(amount>0)) throw new Error('Split transaction amount is missing.');
@@ -488,6 +489,7 @@ function cleanRecurringTemplate(raw,userId,defaultCurrency='USD') {
     if(!from||!to||base.fromAccountId===base.toAccountId||!(base.fromAmount>0)||!(base.toAmount>0)) throw new Error('Choose two different accounts and valid transfer amounts.');
     base.fromAmount=exactMoney(base.fromAmount,from.currency,{allowNegative:false,allowZero:false});
     base.toAmount=exactMoney(base.toAmount,to.currency,{allowNegative:false,allowZero:false});
+    if(from.currency===to.currency&&toMinor(base.fromAmount,from.currency)!==toMinor(base.toAmount,to.currency))throw new Error('Same-currency transfer amounts must match.');
     base.personId=null;base.accountId=null;base.currency=null;base.signedAmount=null;base.amount=base.fromAmount;base.categoryId=null;
   } else if(raw.type==='split_paid_for_people'){
     if(!(amount>0)) throw new Error('Choose an amount for the recurring split.');

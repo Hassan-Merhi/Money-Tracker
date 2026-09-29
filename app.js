@@ -1,4 +1,4 @@
-import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, logout, loadState, saveState, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
+import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
@@ -47,11 +47,11 @@ function parseRoute() {
 
 window.addEventListener('hashchange', () => { route = parseRoute(); if (state) render(); });
 
-async function persist(message) {
+async function runMutation(action,message='') {
   if (saving) { showToast('Saving the previous change…'); return false; }
   saving = true;
   try {
-    state = await saveState(state);
+    state = await action(state.version);
     if (message) showToast(message);
     render();
     return true;
@@ -276,7 +276,7 @@ function renderSettings(main) {
     <section class="card settings-card"><h3>Balance rules</h3><div class="warning"><strong>Balance rule:</strong> positive personal balance = they owe you. Negative personal balance = you owe them. Transfers affect accounts only and never change a person’s balance.</div></section>
     <section class="card settings-card"><h3>Danger zone</h3><p class="muted">This permanently deletes your people, accounts, transactions, attachments, recurring schedules, Bank Feed rows/rules, categories, and budgets from the server database. Your login remains active.</p><button class="btn danger" id="resetData">Delete all app data</button></section>
   </div>`;
-  main.querySelector('#saveSettings')?.addEventListener('click',()=>{state.settings.defaultCurrency=main.querySelector('#settingCurrency').value;saveThemePreference(main.querySelector('#settingTheme').value);persist('Settings saved.');});
+  main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value;saveThemePreference(main.querySelector('#settingTheme').value);await runMutation(version=>updateSettings({defaultCurrency},version),'Settings saved.');});
   main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
   main.querySelector('#exportBackup')?.addEventListener('click',()=>downloadText(`money-tracker-backup-${today()}.json`,JSON.stringify({...state,version:undefined},null,2)));
@@ -305,7 +305,19 @@ function openPersonModal(existing=null){
     <div class="field span-2"><label>Note</label><input class="input" name="note" maxlength="120" value="${escapeHtml(existing?.note||'')}" placeholder="e.g. Cousin / Amazon purchases"></div>
     ${isEdit?'':`<div class="field"><label>Opening balance</label><input class="input" name="opening" type="number" step="any" min="0" placeholder="0"></div><div class="field"><label>Currency</label><select class="select" name="currency">${currencyOptions(state.settings.defaultCurrency)}</select></div><div class="field span-2"><label>Opening balance means</label><select class="select" name="direction"><option value="to_me">They already owe me</option><option value="i_owe">I already owe them</option></select></div>`}
   </form>`,()=>document.querySelector('#personForm').requestSubmit());
-  document.querySelector('#personForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const name=fd.get('name').trim();if(!name)return;if(existing){existing.name=name;existing.note=fd.get('note').trim();persist('Person updated.');}else{const id=uid('person');state.people.push({id,name,note:fd.get('note').trim(),createdAt:new Date().toISOString()});const opening=Number(fd.get('opening')||0);if(opening>0){const sign=fd.get('direction')==='i_owe'?-1:1;state.entries.push({id:uid('entry'),type:'person_adjustment',personId:id,amount:opening,signedAmount:sign*opening,currency:fd.get('currency'),date:today(),description:'Opening balance',createdAt:new Date().toISOString()});}persist('Person added.');}closeModal();});
+  document.querySelector('#personForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.currentTarget),name=String(fd.get('name')||'').trim(),note=String(fd.get('note')||'').trim();
+    if(!name)return;
+    let saved=false;
+    if(existing){
+      saved=await runMutation(version=>updatePerson(existing.id,{name,note},version),'Person updated.');
+    }else{
+      const id=uid('person'),openingEntryId=uid('entry');
+      saved=await runMutation(version=>createPerson({id,name,note,openingBalance:Number(fd.get('opening')||0),currency:fd.get('currency'),direction:fd.get('direction'),openingEntryId,openingDate:today()},version),'Person added.');
+    }
+    if(saved)closeModal();
+  });
   if(existing){const foot=document.querySelector('.modal-foot');const del=document.createElement('button');del.type='button';del.className='btn danger';del.textContent='Delete person';del.style.marginRight='auto';del.onclick=()=>deletePerson(existing.id);foot.prepend(del);}
 }
 
@@ -317,7 +329,15 @@ function openAccountModal(existing=null){
     <div class="field"><label>Currency</label><select class="select" name="currency" ${isEdit?'disabled':''}>${currencyOptions(existing?.currency||state.settings.defaultCurrency)}</select></div>
     <div class="field span-2"><label>Opening balance</label><input class="input" name="openingBalance" type="number" step="any" value="${existing?.openingBalance??0}"><span class="muted tiny">Use the actual balance at the point you start tracking this account.</span></div>
   </form>`,()=>document.querySelector('#accountForm').requestSubmit());
-  document.querySelector('#accountForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const name=fd.get('name').trim();if(!name)return;if(existing){existing.name=name;existing.type=fd.get('type');existing.openingBalance=Number(fd.get('openingBalance')||0);persist('Account updated.');}else{state.accounts.push({id:uid('account'),name,type:fd.get('type'),currency:fd.get('currency'),openingBalance:Number(fd.get('openingBalance')||0),createdAt:new Date().toISOString()});persist('Account added.');}closeModal();});
+  document.querySelector('#accountForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.currentTarget),name=String(fd.get('name')||'').trim();if(!name)return;
+    const payload={name,type:fd.get('type'),openingBalance:Number(fd.get('openingBalance')||0)};
+    let saved=false;
+    if(existing)saved=await runMutation(version=>updateAccount(existing.id,payload,version),'Account updated.');
+    else saved=await runMutation(version=>createAccount({...payload,id:uid('account'),currency:fd.get('currency')},version),'Account added.');
+    if(saved)closeModal();
+  });
 }
 
 function lastUsed() {
@@ -416,9 +436,8 @@ function openTransactionModal(existing=null,prefill={}){
     if(split){const error=validateSplit(splits,amount,acc?.currency||fd.get('currency')||state.settings.defaultCurrency);if(error){showToast(error);return}}
     const item={id:existing?.id||uid('entry'),type:t,personId:(split||accountOnly)?null:person,accountId:t==='person_adjustment'?null:(fd.get('accountId')||null),amount,currency:acc?.currency||fd.get('currency'),date:fd.get('date'),merchant:fd.get('merchant').trim(),description:fd.get('description').trim(),categoryId:accountOnly?(fd.get('categoryId')||null):null,splits:split?splits:[],attachmentCount:existing?.attachmentCount||0,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
     if(t==='person_adjustment') item.signedAmount=(fd.get('direction')==='i_owe'?-1:1)*amount;
-    if(existing)Object.assign(existing,item);else state.entries.push(item);
     rememberUsed((split||accountOnly)?'':person,item.accountId,t);
-    const saved=await persist('');
+    const saved=await runMutation(version=>existing?updateEntry(existing.id,item,version):createEntry(item,version),'');
     if(!saved)return;
     try{
       for(const file of files) await uploadAttachment(item.id,file);
@@ -442,7 +461,14 @@ function openTransferModal(existing=null){
     <div class="field"><label>Note</label><input class="input" name="description" maxlength="180" value="${escapeHtml(existing?.description||'')}" placeholder="e.g. ATM withdrawal"></div>
     <div class="field span-2"><div class="warning">For same-currency transfers, enter the same amount twice. For currency exchange, enter the actual amount that left and the actual amount that arrived.</div></div>
   </form>`,()=>document.querySelector('#transferForm').requestSubmit());
-  document.querySelector('#transferForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const from=fd.get('fromAccountId'),to=fd.get('toAccountId'),fa=Number(fd.get('fromAmount')),ta=Number(fd.get('toAmount'));if(!from||!to||from===to){showToast('Choose two different accounts.');return}if(!(fa>0)||!(ta>0)){showToast('Enter both transfer amounts.');return}const item={id:existing?.id||uid('entry'),type:'account_transfer',fromAccountId:from,toAccountId:to,fromAmount:fa,toAmount:ta,amount:fa,date:fd.get('date'),description:fd.get('description').trim(),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};if(existing)Object.assign(existing,item);else state.entries.push(item);persist(existing?'Transfer updated.':'Transfer saved.');closeModal();});
+  document.querySelector('#transferForm').addEventListener('submit',async e=>{
+    e.preventDefault();const fd=new FormData(e.currentTarget),from=fd.get('fromAccountId'),to=fd.get('toAccountId'),fa=Number(fd.get('fromAmount')),ta=Number(fd.get('toAmount'));
+    if(!from||!to||from===to){showToast('Choose two different accounts.');return}
+    if(!(fa>0)||!(ta>0)){showToast('Enter both transfer amounts.');return}
+    const item={id:existing?.id||uid('entry'),type:'account_transfer',fromAccountId:from,toAccountId:to,fromAmount:fa,toAmount:ta,amount:fa,date:fd.get('date'),description:String(fd.get('description')||'').trim(),merchant:'',splits:[],createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    const saved=await runMutation(version=>existing?updateEntry(existing.id,item,version):createEntry(item,version),existing?'Transfer updated.':'Transfer saved.');
+    if(saved)closeModal();
+  });
 }
 
 function openModal(title,body,onSave=null,showFooter=true){
@@ -450,9 +476,9 @@ function openModal(title,body,onSave=null,showFooter=true){
 }
 function closeModal(){document.querySelector('.modal-backdrop')?.remove()}
 
-function deleteEntry(id){const e=state.entries.find(x=>x.id===id);if(!e)return;if(confirm('Delete this transaction? Balances will recalculate immediately.')){state.entries=state.entries.filter(x=>x.id!==id);persist('Transaction deleted.');closeModal();}}
-function deletePerson(id){const linked=state.entries.some(e=>entryTouchesPerson(e,id));if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){state.people=state.people.filter(p=>p.id!==id);persist('Person deleted.');closeModal();location.hash='#people';}}
-function deleteAccount(id){const linked=state.entries.some(e=>e.accountId===id||e.fromAccountId===id||e.toAccountId===id);if(linked){showToast('Delete or move this account’s transactions first.');return}if(confirm('Delete this account?')){state.accounts=state.accounts.filter(a=>a.id!==id);persist('Account deleted.');closeModal();}}
+async function deleteEntry(id){const e=state.entries.find(x=>x.id===id);if(!e)return;if(confirm('Delete this transaction? Balances will recalculate immediately.')){const saved=await runMutation(version=>removeEntry(id,version),'Transaction deleted.');if(saved)closeModal();}}
+async function deletePerson(id){const linked=state.entries.some(e=>entryTouchesPerson(e,id));if(linked){showToast('Delete this person’s transactions first.');return}if(confirm('Delete this person?')){const saved=await runMutation(version=>removePerson(id,version),'Person deleted.');if(saved){closeModal();location.hash='#people';}}}
+async function deleteAccount(id){const linked=state.entries.some(e=>e.accountId===id||e.fromAccountId===id||e.toAccountId===id);if(linked){showToast('Delete or move this account’s transactions first.');return}if(confirm('Delete this account?')){const saved=await runMutation(version=>removeAccount(id,version),'Account deleted.');if(saved)closeModal();}}
 
 function currencyOptions(selected){return CURRENCIES.map(c=>`<option value="${c}" ${selected===c?'selected':''}>${c}</option>`).join('')}
 function entryTypeOptions(selected,includeTransfer=true){

@@ -1210,6 +1210,9 @@ export const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;
+      if(rateLimited(req,'app-data-reset',{limit:5,windowMs:30*60_000}))return fail(res,429,'Too many app data deletion attempts. Try again later.');
+      const body=await bodyJson(req),password=String(body.password||''),u=q.userSecret.get(a.user_id);
+      if(!u||!verifyPassword(password,u.password_hash))return fail(res,403,'Password is incorrect.');
       q.deleteAllRecurring.run(a.user_id); recurringReminders.reset(a.user_id); const state=loadState(a.user_id); const blank={...state,people:[],accounts:[],entries:[]}; saveState(a,blank); q.deleteAttachments.run(a.user_id); bankFeed.reset(a.user_id); insights.reset(a.user_id);securityOps.event(a.user_id,'app_data_reset');return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/import/xlsx/preview'&&req.method==='POST'){

@@ -208,3 +208,39 @@ test('date parser accepts ISO and day-first dates used in ordinary spreadsheets'
   assert.equal(dateValue('29/09/2026'),'2026-09-29');
   assert.equal(dateValue('05/04/2026'),'2026-04-05');
 });
+
+
+test('quick paste imports legitimate repeated identical rows and preserves multiplicity on re-import',()=>{
+  const uid=ids(),text=[
+    'Name\tAmount\tDirection\tMerchant / Source\tDate\tCurrency',
+    'Mahmoud\t11\tThey owe me\tWHISH TO HAMZA\'S CARD 03/25\t29/09/2026\tUSD',
+    'Mahmoud\t11\tThey owe me\tWHISH TO HAMZA\'S CARD 03/25\t29/09/2026\tUSD',
+    'Mahmoud\t26\tThey owe me\tSteam\t29/09/2026\tUSD',
+    'Mahmoud\t26\tThey owe me\tSteam\t29/09/2026\tUSD'
+  ].join('\n');
+  let out=applyQuickPasteImport({state:baseState(),text,uidFactory:uid,nowIso:()=> '2026-09-29T10:00:00.000Z'});
+  assert.equal(out.result.entries,4);
+  assert.equal(out.result.skipped,0);
+  assert.equal(out.state.entries.length,4);
+  assert.equal(out.state.entries.filter(e=>e.merchant==="WHISH TO HAMZA'S CARD 03/25").length,2);
+  assert.equal(out.state.entries.filter(e=>e.merchant==='Steam').length,2);
+
+  out=applyQuickPasteImport({state:out.state,text,uidFactory:uid,nowIso:()=> '2026-09-29T10:05:00.000Z'});
+  assert.equal(out.result.entries,0);
+  assert.equal(out.result.skipped,4);
+  assert.equal(out.state.entries.length,4);
+});
+
+test('transaction import reconciles duplicate multiplicity against entries already in the ledger',()=>{
+  const uid=ids(),rows=[
+    {Date:'2026-09-29',Type:'person_adjustment',Person:'Mahmoud',Amount:11,Currency:'USD',Direction:'They owe me',Merchant:'WHISH'},
+    {Date:'2026-09-29',Type:'person_adjustment',Person:'Mahmoud',Amount:11,Currency:'USD',Direction:'They owe me',Merchant:'WHISH'}
+  ];
+  const mapping={date:'Date',type:'Type',person:'Person',amount:'Amount',currency:'Currency',direction:'Direction',merchant:'Merchant'};
+  let out=applyImport({state:baseState(),rows:[rows[0]],mode:'transactions',mapping,uidFactory:uid});
+  assert.equal(out.result.entries,1);
+  out=applyImport({state:out.state,rows,mode:'transactions',mapping,uidFactory:uid});
+  assert.equal(out.result.entries,1);
+  assert.equal(out.result.skipped,1);
+  assert.equal(out.state.entries.length,2);
+});

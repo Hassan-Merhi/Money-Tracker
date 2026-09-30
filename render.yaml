@@ -12,6 +12,8 @@ services:
         value: production
       - key: DATA_DIR
         value: /var/data
+      - key: PRODUCTION_SMOKE_ON_START
+        value: "1"
     disk:
       name: ledger-data
       mountPath: /var/data

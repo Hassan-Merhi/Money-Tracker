@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 
 const ROOT=dirname(fileURLToPath(new URL('../package.json',import.meta.url)));
 const read=path=>readFileSync(join(ROOT,path),'utf8');
@@ -25,9 +25,26 @@ test('Offline Block A O1: install shell includes iOS metadata, PNG icons and off
   assert.ok(existsSync(join(ROOT,'assets/icon-192.png')));
   assert.ok(existsSync(join(ROOT,'assets/icon-512.png')));
   assert.match(sw,/\/lib\/offline-db\.js/);
+  assert.match(sw,/\/lib\/money-parse\.js/);
   assert.match(sw,/\/assets\/icon-192\.png/);
   assert.match(sw,/\/assets\/icon-512\.png/);
   assert.match(sw,/url\.pathname\.startsWith\('\/api\/'\)/);
+});
+
+test('Offline Block A O1: every relative dependency in the cached client module graph is precached',()=>{
+  const sw=read('service-worker.js');
+  const core=/const CORE=\[([\s\S]*?)\];/.exec(sw)?.[1]||'';
+  const urls=[...core.matchAll(/'([^']+)'/g)].map(match=>match[1]);
+  const cached=new Set(urls.map(url=>url.split('?')[0]));
+  const modules=[...cached].filter(path=>path.endsWith('.js')&&existsSync(join(ROOT,path.replace(/^\//,''))));
+  for(const modulePath of modules){
+    const source=read(modulePath.replace(/^\//,''));
+    const imports=[...source.matchAll(/import\s+(?:[^'\"]+?\s+from\s+)?['\"]([^'\"]+)['\"]/g)].map(match=>match[1]).filter(specifier=>specifier.startsWith('.'));
+    for(const specifier of imports){
+      const dependency=posix.normalize(posix.join(posix.dirname(modulePath),specifier));
+      assert.ok(cached.has(dependency),modulePath+' imports uncached dependency '+dependency);
+    }
+  }
 });
 
 test('Offline Block A O2: IndexedDB schema has normalized core ledger stores and metadata',()=>{
@@ -39,21 +56,23 @@ test('Offline Block A O2: IndexedDB schema has normalized core ledger stores and
   assert.match(source,/createObjectStore\(name,\{keyPath:'id'\}\)/);
   assert.match(source,/STATE_HEAD_KEY='state-head'/);
   assert.match(source,/schemaVersion:OFFLINE_DB\.version/);
-  assert.match(source,/saveStateSnapshot/);
+  assert.match(source,/saveStateSnapshot\(state,expectedIdentity=''/);
+  assert.match(source,/userRecord\.identity!==identity/);
   assert.match(source,/loadStateSnapshot/);
-  assert.match(source,/clearOfflineData/);
+  assert.match(source,/clearOfflineData\(expectedIdentity=''/);
+  assert.match(source,/current\.identity!==identity/);
 });
 
-test('Offline Block A O3: authenticated reads fall back to local snapshots only on network failure',()=>{
+test('Offline Block A O3: authenticated reads are identity-bound and 401 responses invalidate matching local data',()=>{
   const store=read('lib/store.js');
-  assert.match(store,/loadAuthorizedUser/);
-  assert.match(store,/loadStateSnapshot/);
-  assert.match(store,/if\(e\.offline\)/);
-  assert.match(store,/const cached=await loadAuthorizedUser/);
+  assert.match(store,/const requestIdentity=authenticatedIdentity/);
+  assert.match(store,/res\.status===401&&requestIdentity/);
+  assert.match(store,/clearOfflineData\(requestIdentity\)/);
+  assert.match(store,/saveStateSnapshot\(data,requestIdentity\)/);
+  assert.match(store,/const cachedBefore=await loadAuthorizedUser/);
+  assert.match(store,/if\(e\.offline&&cachedBefore\)/);
   assert.match(store,/const cached=await loadStateSnapshot/);
-  assert.match(store,/if\(e\.status===401\)\{ await clearOfflineData/);
-  assert.match(store,/finally \{ csrfToken=''; await clearOfflineData/);
-  assert.match(store,/if \(isLedgerState\(data\)\) await saveStateSnapshot/);
+  assert.match(store,/authenticatedIdentity=userIdentity\(d\.user\)/);
 });
 
 test('Offline Block A stays read-only and does not fake server-only features',()=>{

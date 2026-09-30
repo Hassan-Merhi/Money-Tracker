@@ -213,4 +213,35 @@ test('Offline Block C server completes O7-O10 safety invariants',async(t)=>{
     assert.equal(state.version,ledgerRevision);
     assert.equal(state.entries.find(row=>row.id==='entry_attachment_host').attachmentCount,0);
   });
+
+  await t.test('O8 whole-state and complete-backup replacement preserve deletion tombstones',async()=>{
+    let response=await request('/api/people',{method:'POST',body:{
+      id:'person_state_replace_delete',name:'State Replace Delete',note:'',expectedRevision:state.version
+    }});
+    assert.equal(response.res.status,201);state=response.data;
+
+    const replacement={...state,people:state.people.filter(row=>row.id!=='person_state_replace_delete')};
+    response=await request('/api/state',{method:'PUT',body:replacement});
+    assert.equal(response.res.status,200);state=response.data;
+    assert.equal(state.people.some(row=>row.id==='person_state_replace_delete'),false);
+    let tomb=db.prepare('SELECT revision FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?').get(registered.data.user.id,'person','person_state_replace_delete');
+    assert.equal(Number(tomb.revision),state.version);
+
+    const exported=await request('/api/backup/full');
+    assert.equal(exported.res.status,200);
+    response=await request('/api/people',{method:'POST',body:{
+      id:'person_full_restore_delete',name:'Full Restore Delete',note:'',expectedRevision:state.version
+    }});
+    assert.equal(response.res.status,201);state=response.data;
+    assert.equal(state.people.some(row=>row.id==='person_full_restore_delete'),true);
+
+    const restored=await request('/api/backup/full/restore',{method:'POST',body:{
+      backup:exported.data,password,confirmation:'RESTORE'
+    }});
+    assert.equal(restored.res.status,200);state=restored.data.state;
+    assert.equal(state.people.some(row=>row.id==='person_full_restore_delete'),false);
+    tomb=db.prepare('SELECT revision FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?').get(registered.data.user.id,'person','person_full_restore_delete');
+    assert.equal(Number(tomb.revision),state.version);
+  });
+
 });

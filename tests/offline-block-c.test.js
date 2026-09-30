@@ -72,6 +72,7 @@ test('O10 has a separate durable idempotent attachment outbox',()=>{
   assert.match(server,/url\.pathname==='\/api\/sync\/attachments'/);
   assert.match(app,/queued/);
   assert.match(app,/reconnect to open/);
+  assert.match(store,/pendingOperationCount\(identity\)\.catch\(\(\)=>0\)/);
 });
 
 test('Block C has dedicated CI/browser gates and PWA v26',()=>{

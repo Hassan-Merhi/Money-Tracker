@@ -60,27 +60,8 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
   });
   expect(queuedSecond.pending).toBe(2);
 
-  const transferGuard=await page.evaluate(async()=>{
-    const store=await import('/lib/store.js');
-    const db=await import('/lib/offline-db.js');
-    const snapshot=await db.loadStateSnapshot();
-    try{
-      await store.createEntry({
-        id:'entry_offline_transfer',
-        type:'account_transfer',
-        fromAccountId:'account_a',
-        toAccountId:'account_b',
-        fromAmount:1,
-        toAmount:1,
-        amount:1,
-        date:'2026-09-30'
-      },snapshot.version);
-      return '';
-    }catch(error){
-      return String(error?.message||error);
-    }
-  });
-  expect(transferGuard).toContain('atomic-transfer phase');
+  // Offline transfer coverage moved to Block C (O9); Block B keeps validating the durable generic outbox.
+
 
   await page.reload({waitUntil:'domcontentloaded'});
   await expectHeading(page,'People');

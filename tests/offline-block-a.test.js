@@ -50,14 +50,14 @@ test('Offline Block A O1: every relative dependency in the cached client module 
 test('Offline Block A O2: IndexedDB schema has normalized core ledger stores and metadata',()=>{
   const source=read('lib/offline-db.js');
   assert.match(source,/name: 'money-tracker-offline'/);
-  assert.match(source,/version: 1/);
-  for(const store of ['meta','people','accounts','entries','categories','budgets']) assert.ok(source.includes("'"+store+"'"),store);
+  assert.match(source,/version: 2/);
+  for(const store of ['meta','people','accounts','entries','categories','budgets','syncQueue','syncState']) assert.ok(source.includes("'"+store+"'"),store);
   assert.match(source,/createObjectStore\(META_STORE,\{keyPath:'key'\}\)/);
   assert.match(source,/createObjectStore\(name,\{keyPath:'id'\}\)/);
   assert.match(source,/STATE_HEAD_KEY='state-head'/);
   assert.match(source,/schemaVersion:OFFLINE_DB\.version/);
   assert.match(source,/saveStateSnapshot\(state,expectedIdentity=''/);
-  assert.match(source,/db\.transaction\(OFFLINE_DB\.stores,'readwrite'\)/);
+  assert.match(source,/db\.transaction\(\[META_STORE,\.\.\.LEDGER_STORES\],'readwrite'\)/);
   assert.match(source,/activeRequest\.result\?\.identity!==identity/);
   assert.match(source,/identityMismatch=true;[\s\S]*?tx\.abort\(\)/);
   assert.match(source,/loadStateSnapshot/);
@@ -73,13 +73,13 @@ test('Offline Block A O3: authenticated reads are identity-bound and 401 respons
   assert.match(store,/const cachedBefore=await loadAuthorizedUser/);
   assert.match(store,/if\(e\.offline&&cachedBefore\)/);
   assert.match(store,/const cached=await loadStateSnapshot/);
-  assert.match(store,/authenticatedIdentity=userIdentity\(d\.user\)/);
+  assert.match(store,/adoptAuthenticatedUser/);
 });
 
-test('Offline Block A stays read-only and does not fake server-only features',()=>{
+test('Offline Block A cached-read foundation remains intact after Block B adds writes',()=>{
   const app=read('app.js');
-  assert.match(app,/Offline mode is read-only for now\. Reconnect to save changes\./);
-  assert.ok(app.includes('Offline · read only'));
+  assert.doesNotMatch(app,/Offline mode is read-only for now/);
+  assert.ok(app.includes('Offline · changes save locally'));
   assert.ok(app.includes("renderOfflineServerFeature(main,'Bank Feed'"));
   assert.ok(app.includes("renderOfflineServerFeature(main,'Scheduled & Reminders'"));
   assert.match(app,/cached ledger remains available in Dashboard, People, Accounts, Activity, Insights and Reports/i);

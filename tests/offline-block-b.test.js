@@ -45,6 +45,9 @@ test('Offline Block B O4 preserves unsynced changes across identity and cache bo
   assert.match(store,/Sync or discard the offline changes on this device before deleting the account\./);
   assert.match(store,/if\(!pending\)await clearOfflineData\(requestIdentity\)/);
   assert.match(store,/await publishSyncStatus\(\{authRequired:true\}\)/);
+  assert.match(store,/error\.status===401[\s\S]*?status:'pending'/);
+  assert.match(store,/error\?\.code==='OFFLINE_PENDING_USER_SWITCH'/);
+  assert.match(store,/pendingOperationCount\(identity\)\.catch\(\(\)=>0\)/);
 });
 
 test('Offline Block B O4 makes core ledger writes local-first while keeping transfers guarded',()=>{
@@ -58,6 +61,8 @@ test('Offline Block B O4 makes core ledger writes local-first while keeping tran
   assert.match(app,/Saved offline ·/);
   assert.match(app,/Offline · changes save locally/);
   assert.match(store,/Offline transfers are reserved for the atomic-transfer phase/);
+  assert.match(store,/existing\?\.type==='account_transfer'/);
+  assert.match(server,/existing\.type==='account_transfer'/);
   assert.match(store,/opening>0&&!person\.openingEntryId/);
   assert.match(store,/id:payload\.openingEntryId/);
 });
@@ -77,6 +82,10 @@ test('Offline Block B O5 implements ordered revision push/pull with safe full-re
   assert.match(server,/url\.pathname==='\/api\/sync\/push'/);
   assert.match(server,/url\.pathname==='\/api\/sync\/pull'/);
   assert.match(store,/const fresh=await api\('\/api\/state'\);[\s\S]*?await discardQueuedOperations\(identity\);[\s\S]*?await saveStateSnapshot\(fresh,identity\)/);
+  assert.match(store,/async function safeLocalSnapshot\(\).*loadStateSnapshot\(\)\.catch/);
+  assert.match(server,/reopenedFeedItems\+=bankFeed\.revalidatePosted/);
+  assert.match(server,/reopenedFeedItems\};/);
+  assert.match(read('app.js'),/detail\.reopenedFeedItems/);
 });
 
 test('Offline Block B O6 stores replay results and hashes immutable operation payloads',()=>{

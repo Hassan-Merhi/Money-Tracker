@@ -248,3 +248,26 @@ test('O5 hardening reports Bank Feed rows reopened by a synced entry edit',async
   const feed=(await request('/api/bank-feed')).data;
   assert.equal(feed.items.find(row=>row.id===item.id).status,'pending');
 });
+
+
+test('O5 hardening direct entry deletion returns the Bank Feed reopen count',async()=>{
+  let state=(await request('/api/state')).data;
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{
+    accountId:'account_offline_feed',
+    sourceName:'offline-delete.csv',
+    rows:[{date:'2026-09-30',description:'DELETE SYNC EXPENSE',merchant:'Delete Shop',signedAmount:-18,currency:'USD',externalId:'offline-delete-row'}]
+  }});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(row=>row.externalId==='offline-delete-row');
+  assert.ok(item);
+
+  const posted=await request('/api/bank-feed/'+item.id+'/post',{method:'POST',body:{expectedRevision:state.version,classification:'expense'}});
+  assert.equal(posted.res.status,200);state=posted.data.state;
+
+  const deleted=await request('/api/entries/'+posted.data.entryId,{method:'DELETE',body:{expectedRevision:state.version}});
+  assert.equal(deleted.res.status,200);
+  assert.equal(deleted.data.reopenedFeedItems,1);
+
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(row=>row.id===item.id).status,'pending');
+});

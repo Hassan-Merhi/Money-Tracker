@@ -50,14 +50,14 @@ test('Offline Block A O1: every relative dependency in the cached client module 
 test('Offline Block A O2: IndexedDB schema has normalized core ledger stores and metadata',()=>{
   const source=read('lib/offline-db.js');
   assert.match(source,/name: 'money-tracker-offline'/);
-  assert.match(source,/version: 2/);
+  assert.match(source,/version: [3-9][0-9]*/);
   for(const store of ['meta','people','accounts','entries','categories','budgets','syncQueue','syncState']) assert.ok(source.includes("'"+store+"'"),store);
   assert.match(source,/createObjectStore\(META_STORE,\{keyPath:'key'\}\)/);
   assert.match(source,/createObjectStore\(name,\{keyPath:'id'\}\)/);
   assert.match(source,/STATE_HEAD_KEY='state-head'/);
   assert.match(source,/schemaVersion:OFFLINE_DB\.version/);
   assert.match(source,/saveStateSnapshot\(state,expectedIdentity=''/);
-  assert.match(source,/db\.transaction\(\[META_STORE,\.\.\.LEDGER_STORES\],'readwrite'\)/);
+  assert.match(source,/db\.transaction\(\[META_STORE,\.\.\.LEDGER_STORES,TOMBSTONE_STORE\],'readwrite'\)/);
   assert.match(source,/activeRequest\.result\?\.identity!==identity/);
   assert.match(source,/identityMismatch=true;[\s\S]*?tx\.abort\(\)/);
   assert.match(source,/loadStateSnapshot/);

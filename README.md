@@ -188,6 +188,8 @@ The automated suite covers core ledger math, exact-money storage, account-only i
 
 `render.yaml` defines a Node web service with a persistent disk mounted at `/var/data` for the SQLite database. The health endpoint is `/api/health`.
 
+Wave 13 adds automatic production smoke verification. Every production process runs a startup HTTP smoke suite before it is allowed to remain healthy, and GitHub runs the same suite against the public deployment after the main CI workflow succeeds. The live health payload publishes the deployed commit/build identity, SQLite diagnostics, and PWA version contract. See `docs/WAVE_13_PRODUCTION_SMOKE.md`.
+
 ## Lane C — Resilience, security & operations
 
 - PWA cache v9 with install/update handling, offline shell fallback, online/offline state, and update-safe cache headers

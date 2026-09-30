@@ -161,6 +161,54 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
   await expect(page.locator('.connection-pill')).toContainText('Online · synced');
 
   await context.setOffline(true);
+  const queuedAfterExpiry=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const snapshot=await db.loadStateSnapshot();
+    const person=snapshot.people.find(row=>row.name==='Offline Bob');
+    await store.createEntry({
+      id:'entry_session_retry',
+      type:'paid_for_person',
+      personId:person.id,
+      accountId:null,
+      amount:5,
+      currency:'USD',
+      date:'2026-09-30',
+      merchant:'Session retry',
+      description:'Must survive expired authentication',
+      splits:[]
+    },snapshot.version);
+    return await store.getSyncStatus();
+  });
+  expect(queuedAfterExpiry.pending).toBe(1);
+
+  await context.clearCookies();
+  await context.setOffline(false);
+  const authRetry=await page.evaluate(async({email,password})=>{
+    const store=await import('/lib/store.js');
+    await store.syncPendingOperations();
+    const expired=await store.getSyncStatus();
+    const user=await store.login(email,password);
+    await store.syncPendingOperations();
+    const resumed=await store.getSyncStatus();
+    const serverState=await (await fetch('/api/state',{credentials:'same-origin'})).json();
+    return {
+      expiredPending:expired.pending,
+      expiredFailed:expired.failed,
+      expiredStatus:expired.queue[0]?.status||'',
+      userEmail:user?.email||'',
+      resumedPending:resumed.pending,
+      retryEntries:serverState.entries.filter(row=>row.id==='entry_session_retry').length
+    };
+  },{email:EMAIL,password:PASSWORD});
+  expect(authRetry.expiredPending).toBe(1);
+  expect(authRetry.expiredFailed).toBe(0);
+  expect(authRetry.expiredStatus).toBe('pending');
+  expect(authRetry.userEmail).toBe(EMAIL);
+  expect(authRetry.resumedPending).toBe(0);
+  expect(authRetry.retryEntries).toBe(1);
+
+  await context.setOffline(true);
   const failedLogout=await page.evaluate(async()=>{
     const store=await import('/lib/store.js');
     const db=await import('/lib/offline-db.js');

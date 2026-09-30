@@ -97,8 +97,8 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
 
     await page.locator('#transferBtn').click();
     modal=page.locator('.modal');
-    await modal.getByLabel('From account').selectOption({label:/Checking · USD/});
-    await modal.getByLabel('To account').selectOption({label:/Cash · USD/});
+    await modal.getByLabel('From account').selectOption({label:'Checking · USD'});
+    await modal.getByLabel('To account').selectOption({label:'Cash · USD'});
     await modal.getByLabel('Amount leaving source').fill('20');
     await modal.getByLabel('Amount arriving destination').fill('20');
     await modal.getByLabel('Note').fill('Wave 10 transfer');

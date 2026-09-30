@@ -9,6 +9,8 @@ async function go(page,hash,heading){
   await expect(page.locator('#pageHeading')).toHaveText(heading);
 }
 
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
 test.describe.serial('Wave 14 loading and error states',()=>{
   test.beforeAll(async()=>{await setupApi();await seedPopulatedExtremeState();});
   test.afterAll(async()=>{await disposeApi();});
@@ -21,16 +23,13 @@ test.describe.serial('Wave 14 loading and error states',()=>{
       test.setTimeout(120_000);
       const {context,page}=await newPage(browser,scenario.view,scenario.theme);
 
-      let releaseBank;
-      const bankGate=new Promise(resolve=>{releaseBank=resolve;});
-      await page.route('**/api/bank-feed**',async route=>{await bankGate;await route.continue();});
+      await page.route('**/api/bank-feed**',async route=>{await sleep(1200);await route.continue();});
       await go(page,'#bank','Bank Feed');
       await expect(page.getByText(/Loading bank feed/)).toBeVisible();
       await expectVisualIntegrity(page,'bank loading');
       await capture(page,'state',scenario.view.name,scenario.theme,'bank-loading');
-      releaseBank();
-      await page.unroute('**/api/bank-feed**');
       await expect(page.getByText(/Loading bank feed/)).toHaveCount(0,{timeout:10_000});
+      await page.unrouteAll({behavior:'wait'});
 
       await page.route('**/api/bank-feed**',route=>route.fulfill({
         status:500,contentType:'application/json',
@@ -41,18 +40,15 @@ test.describe.serial('Wave 14 loading and error states',()=>{
       await expect(page.getByText('Could not load bank feed')).toBeVisible();
       await expectVisualIntegrity(page,'bank error');
       await capture(page,'state',scenario.view.name,scenario.theme,'bank-error');
-      await page.unroute('**/api/bank-feed**');
+      await page.unrouteAll({behavior:'wait'});
 
-      let releaseRecurring;
-      const recurringGate=new Promise(resolve=>{releaseRecurring=resolve;});
-      await page.route('**/api/recurring**',async route=>{await recurringGate;await route.continue();});
+      await page.route('**/api/recurring**',async route=>{await sleep(1200);await route.continue();});
       await go(page,'#scheduled','Scheduled & Reminders');
       await expect(page.getByText(/Loading recurring schedules/)).toBeVisible();
       await expectVisualIntegrity(page,'scheduled loading');
       await capture(page,'state',scenario.view.name,scenario.theme,'scheduled-loading');
-      releaseRecurring();
-      await page.unroute('**/api/recurring**');
       await expect(page.getByText(/Loading recurring schedules/)).toHaveCount(0,{timeout:10_000});
+      await page.unrouteAll({behavior:'wait'});
 
       await page.route('**/api/recurring**',route=>route.fulfill({
         status:500,contentType:'application/json',
@@ -63,19 +59,16 @@ test.describe.serial('Wave 14 loading and error states',()=>{
       await expect(page.getByText(/Visual audit simulated recurring error/)).toBeVisible();
       await expectVisualIntegrity(page,'scheduled error');
       await capture(page,'state',scenario.view.name,scenario.theme,'scheduled-error');
-      await page.unroute('**/api/recurring**');
+      await page.unrouteAll({behavior:'wait'});
 
-      let releaseSettings;
-      const settingsGate=new Promise(resolve=>{releaseSettings=resolve;});
       const settingsPattern=/\/api\/(?:users|ops\/status|auth\/sessions|security\/events)$/;
-      await page.route(settingsPattern,async route=>{await settingsGate;await route.continue();});
+      await page.route(settingsPattern,async route=>{await sleep(1200);await route.continue();});
       await go(page,'#settings','Settings');
       await expect(page.getByText(/Loading diagnostics|Loading accounts|Loading sessions/).first()).toBeVisible();
       await expectVisualIntegrity(page,'settings loading');
       await capture(page,'state',scenario.view.name,scenario.theme,'settings-loading');
-      releaseSettings();
-      await page.unroute(settingsPattern);
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(1400);
+      await page.unrouteAll({behavior:'wait'});
 
       await page.route(settingsPattern,route=>route.fulfill({
         status:500,contentType:'application/json',
@@ -87,7 +80,7 @@ test.describe.serial('Wave 14 loading and error states',()=>{
       await expect(page.getByText(/Could not|simulated settings diagnostics error/i).first()).toBeVisible();
       await expectVisualIntegrity(page,'settings error');
       await capture(page,'state',scenario.view.name,scenario.theme,'settings-error');
-      await page.unroute(settingsPattern);
+      await page.unrouteAll({behavior:'wait'});
 
       await context.close();
     });

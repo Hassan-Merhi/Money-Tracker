@@ -367,3 +367,12 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
   .reports-page .report-stats{grid-template-columns:1fr}
 }
 
+
+
+/* Wave 10 — People import entry point */
+.people-toolbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.people-import-btn{width:44px;min-width:44px;padding-inline:0;font-size:17px;letter-spacing:.08em}
+@media(max-width:760px){
+  .people-toolbar-actions{gap:7px}
+  .people-import-btn{width:44px;min-width:44px}
+}

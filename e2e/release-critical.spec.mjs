@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const OWNER_EMAIL='wave10-owner@example.test';
 const OWNER_PASSWORD='correct horse battery staple';
+const PWA_VERSION_PATH=fileURLToPath(new URL('../pwa-version.js',import.meta.url));
 
 function watchBrowser(page){
   const errors=[];
@@ -24,6 +27,18 @@ async function expectNoHorizontalOverflow(page){
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.clientWidth+1);
 }
 
+async function appState(page){
+  return page.evaluate(async()=>{
+    const response=await fetch('/api/state',{cache:'no-store'});
+    if(!response.ok)throw new Error('State request failed: '+response.status);
+    return response.json();
+  });
+}
+
+async function waitForState(page,predicate,message){
+  await expect.poll(async()=>predicate(await appState(page)),{message,timeout:12_000}).toBe(true);
+}
+
 async function login(page){
   await page.goto('/');
   await page.getByLabel('Email').fill(OWNER_EMAIL);
@@ -32,10 +47,37 @@ async function login(page){
   await expectPageHeading(page,'Dashboard');
 }
 
+async function openHash(page,hash,heading){
+  await page.evaluate(value=>{location.hash=value;},hash);
+  await expectPageHeading(page,heading);
+}
+
+async function addPersonTransaction(page,values) {
+  await page.locator('#personTxn').click();
+  const modal=page.locator('.modal');
+  await modal.getByLabel('Transaction type').selectOption(values.type);
+  await modal.getByLabel('Total amount').fill(String(values.amount));
+  if(values.merchant)await modal.getByLabel('Merchant / source').fill(values.merchant);
+  await modal.getByLabel('Notes / details').fill(values.description);
+  await modal.getByRole('button',{name:'Save'}).click();
+  await expect(modal).toBeHidden();
+  await waitForState(page,state=>state.entries.some(entry=>entry.type===values.type&&entry.description===values.description),values.description+' saved');
+}
+
+async function downloadFrom(page,click,suffix){
+  const promise=page.waitForEvent('download');
+  await click();
+  const download=await promise;
+  expect(download.suggestedFilename().toLowerCase()).toMatch(new RegExp('\\'+suffix+'$'));
+  return download;
+}
+
 test.describe.serial('Wave 10 release-critical browser workflows',()=>{
-  test('desktop: owner signup, debt workflow, advanced accounts and transfers',async({browser})=>{
+  test('desktop: full daily workflow, import/export, Bank Feed and persistence',async({browser})=>{
+    test.setTimeout(90_000);
     const context=await browser.newContext({viewport:{width:1440,height:1000}});
     const page=await context.newPage();
+    page.on('dialog',dialog=>dialog.accept().catch(()=>{}));
 
     await page.goto('/');
     await expect(page.getByRole('heading',{name:'Money Owed Tracker'})).toBeVisible();
@@ -58,70 +100,136 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
 
     await page.getByRole('link',{name:/Alice/}).click();
     await expectPageHeading(page,'Person statement');
-    await page.locator('#personTxn').click();
-    const txnModal=page.locator('.modal');
-    await txnModal.getByLabel('Transaction type').selectOption('paid_for_person');
-    await txnModal.getByLabel('Total amount').fill('25.50');
-    await txnModal.getByLabel('Merchant / source').fill('Amazon');
-    await txnModal.getByLabel('Notes / details').fill('Wave 10 browser purchase');
-    await txnModal.getByRole('button',{name:'Save'}).click();
-    await expect(page.getByText('Amazon')).toBeVisible();
+
+    await addPersonTransaction(page,{type:'paid_for_person',amount:'25.50',merchant:'Amazon',description:'Wave 10 browser debt'});
+    await addPersonTransaction(page,{type:'received_from_person',amount:'20.50',description:'Wave 10 browser repayment'});
+    await addPersonTransaction(page,{type:'borrowed_from_person',amount:'10',description:'Wave 10 browser borrowed'});
+    await addPersonTransaction(page,{type:'paid_to_person',amount:'5',description:'Wave 10 browser paid them'});
+
+    await downloadFrom(page,()=>page.locator('#personPdf').click(),'.pdf');
+
+    let state=await appState(page);
+    const debt=state.entries.find(entry=>entry.description==='Wave 10 browser debt');
+    const repayment=state.entries.find(entry=>entry.description==='Wave 10 browser repayment');
+    expect(debt).toBeTruthy();
+    expect(repayment).toBeTruthy();
+
+    await page.locator('[data-menu-trigger="'+debt.id+'"]').click();
+    await page.locator('[data-edit-entry="'+debt.id+'"]').click();
+    let modal=page.locator('.modal');
+    await modal.getByLabel('Total amount').fill('30.50');
+    await modal.getByLabel('Notes / details').fill('Wave 10 browser debt edited');
+    await modal.getByRole('button',{name:'Save'}).click();
+    await waitForState(page,s=>s.entries.some(entry=>entry.id===debt.id&&entry.amount===30.5&&entry.description==='Wave 10 browser debt edited'),'edited transaction persisted');
+
+    await page.locator('[data-menu-trigger="'+repayment.id+'"]').click();
+    await page.locator('[data-delete-entry="'+repayment.id+'"]').click();
+    await waitForState(page,s=>!s.entries.some(entry=>entry.id===repayment.id),'deleted transaction removed');
+
+    await page.locator('.statement-back-link').click();
+    await expectPageHeading(page,'People');
+    await page.locator('#peopleImport').click();
+    await page.locator('#peoplePasteExcel').click();
+    await expect(page.locator('#impQuickPaste')).toBeVisible();
+    await page.locator('#impQuickPaste').fill('Name\tAmount\tDirection\tMerchant / Source\tDate\tDescription\tCurrency\nBob Browser\t40\tThey owe me\tImported\t30/09/2026\tQuick paste browser row\tUSD');
+    await page.locator('#impQuickApply').click();
+    await waitForState(page,s=>s.people.some(person=>person.name==='Bob Browser')&&s.entries.some(entry=>entry.description==='Quick paste browser row'),'spreadsheet paste imported into ledger');
+    await expect(page.getByRole('link',{name:/Bob Browser/})).toBeVisible();
 
     await page.locator('.sidebar').getByRole('button',{name:'Transactions'}).click();
     await expectPageHeading(page,'Transactions');
     await page.getByLabel('Filter by date').selectOption('all');
-    await expect(page.getByText('Wave 10 browser purchase')).toBeVisible();
+    await expect(page.getByText('Wave 10 browser debt edited')).toBeVisible();
 
     await page.locator('.sidebar').getByRole('button',{name:'Settings'}).click();
     await expectPageHeading(page,'Settings');
     await page.getByLabel('App mode').selectOption('advanced');
     await page.getByRole('button',{name:'Save settings'}).click();
+    await waitForState(page,s=>s.settings.appMode==='advanced','Advanced mode persisted');
+
+    await page.reload();
+    await expectPageHeading(page,'Settings');
     await expect(page.locator('.sidebar').getByRole('button',{name:'Accounts & Cash'})).toBeVisible();
 
     await page.locator('.sidebar').getByRole('button',{name:'Accounts & Cash'}).click();
     await expectPageHeading(page,'Accounts & Cash');
-    await page.locator('#addAccount').click();
-    let modal=page.locator('.modal');
-    await modal.getByLabel('Account name').fill('Checking');
-    await modal.getByLabel('Opening balance',{exact:true}).fill('500');
-    await modal.getByRole('button',{name:'Save'}).click();
-    await expect(page.locator('.account-card').filter({hasText:'Checking'})).toBeVisible();
+    for(const row of [['Checking','bank','500'],['Cash','cash','50']]){
+      await page.locator('#addAccount').click();
+      modal=page.locator('.modal');
+      await modal.getByLabel('Account name').fill(row[0]);
+      await modal.getByLabel('Type').selectOption(row[1]);
+      await modal.getByLabel('Opening balance',{exact:true}).fill(row[2]);
+      await modal.getByRole('button',{name:'Save'}).click();
+      await waitForState(page,s=>s.accounts.some(account=>account.name===row[0]),row[0]+' account created');
+    }
 
-    await page.locator('#addAccount').click();
-    modal=page.locator('.modal');
-    await modal.getByLabel('Account name').fill('Cash');
-    await modal.getByLabel('Type').selectOption('cash');
-    await modal.getByLabel('Opening balance',{exact:true}).fill('50');
-    await modal.getByRole('button',{name:'Save'}).click();
-    await expect(page.locator('.account-card').filter({hasText:'Cash'})).toBeVisible();
+    state=await appState(page);
+    const checking=state.accounts.find(account=>account.name==='Checking');
+    const cash=state.accounts.find(account=>account.name==='Cash');
+    expect(checking).toBeTruthy();
+    expect(cash).toBeTruthy();
 
     await page.locator('#transferBtn').click();
     modal=page.locator('.modal');
-    await modal.getByLabel('From account').selectOption({label:'Checking · USD'});
-    await modal.getByLabel('To account').selectOption({label:'Cash · USD'});
+    await modal.getByLabel('From account').selectOption(checking.id);
+    await modal.getByLabel('To account').selectOption(cash.id);
     await modal.getByLabel('Amount leaving source').fill('20');
     await modal.getByLabel('Amount arriving destination').fill('20');
     await modal.getByLabel('Note').fill('Wave 10 transfer');
     await modal.getByRole('button',{name:'Save'}).click();
-
+    await waitForState(page,s=>s.entries.some(entry=>entry.type==='account_transfer'&&entry.description==='Wave 10 transfer'),'transfer persisted');
     await expect(page.locator('.account-card').filter({hasText:'Checking'})).toContainText('480');
     await expect(page.locator('.account-card').filter({hasText:'Cash'})).toContainText('70');
 
-    for(const [hash,heading] of [
-      ['#bank','Bank Feed'],
-      ['#insights','Insights & Budgets'],
-      ['#scheduled','Scheduled & Reminders'],
-      ['#reports','Reports & Exports']
-    ]){
-      await page.evaluate(value=>{location.hash=value;},hash);
-      await expectPageHeading(page,heading);
+    await openHash(page,'#reports','Reports & Exports');
+    await downloadFrom(page,async()=>{await page.locator('#reportExportTrigger').click();await page.locator('#exportPdf').click();},'.pdf');
+    await downloadFrom(page,async()=>{await page.locator('#reportExportTrigger').click();await page.locator('#exportXlsx').click();},'.xlsx');
+
+    await openHash(page,'#bank','Bank Feed');
+    await page.locator('#bankAccount').selectOption(checking.id);
+    await page.locator('#bankFile').setInputFiles({
+      name:'wave10-bank.csv',
+      mimeType:'text/csv',
+      buffer:Buffer.from('Date,Description,Amount\n2026-09-30,Coffee shop,-12.34\n')
+    });
+    await expect(page.locator('#bankImportNow')).toBeVisible();
+    await expect(page.locator('[data-map="amount"]')).toHaveValue('Amount');
+    await expect(page.locator('[data-map="debit"]')).toHaveValue('');
+    await expect(page.locator('[data-map="credit"]')).toHaveValue('');
+    await page.locator('#bankImportNow').click();
+    await expect(page.locator('.bank-post')).toBeVisible({timeout:12_000});
+    await page.locator('.bank-post').click();
+    await waitForState(page,s=>s.entries.some(entry=>entry.type==='account_expense'&&Math.abs(entry.amount-12.34)<0.000001),'Bank Feed item posted');
+    await page.locator('[data-bank-status="posted"]').click();
+    await expect(page.locator('.bank-undo')).toBeVisible();
+    await page.locator('.bank-undo').click();
+    await waitForState(page,s=>!s.entries.some(entry=>entry.type==='account_expense'&&Math.abs(entry.amount-12.34)<0.000001),'Bank Feed posting undone');
+
+    for(const row of [['#insights','Insights & Budgets'],['#scheduled','Scheduled & Reminders']]){
+      await openHash(page,row[0],row[1]);
     }
+
+    await openHash(page,'#settings','Settings');
+    await page.locator('#settingsLogout').click();
+    await expect(page.locator('#authForm')).toBeVisible();
+    await page.getByLabel('Email').fill(OWNER_EMAIL);
+    await page.getByLabel('Password').fill(OWNER_PASSWORD);
+    await page.locator('#authForm').getByRole('button',{name:'Sign in'}).click();
+    await expectPageHeading(page,'Dashboard');
+
+    state=await appState(page);
+    expect(state.settings.appMode).toBe('advanced');
+    expect(state.people.some(person=>person.name==='Alice')).toBe(true);
+    expect(state.people.some(person=>person.name==='Bob Browser')).toBe(true);
+    expect(state.accounts.some(account=>account.name==='Checking')).toBe(true);
+    expect(state.entries.some(entry=>entry.description==='Wave 10 transfer')).toBe(true);
 
     assertClean();
     await context.close();
   });
 
   test('mobile: real phone viewport can navigate and add data without horizontal overflow',async({browser})=>{
+    test.setTimeout(60_000);
     const context=await browser.newContext({
       viewport:{width:390,height:844},
       deviceScaleFactor:3,
@@ -148,7 +256,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await page.locator('.mobile-nav').getByRole('button',{name:'Activity'}).click();
     await expectPageHeading(page,'Transactions');
     await page.getByLabel('Filter by date').selectOption('all');
-    await expect(page.getByText('Wave 10 browser purchase')).toBeVisible();
+    await expect(page.getByText('Wave 10 browser debt edited')).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.locator('.mobile-nav').getByRole('button',{name:'More navigation'}).click();
@@ -167,10 +275,11 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await context.close();
   });
 
-  test('PWA: current shell is installed, cached, and serves static assets offline without caching APIs',async({browser})=>{
+  test('PWA: current shell works offline and a real waiting update activates cleanly',async({browser})=>{
+    test.setTimeout(75_000);
     const context=await browser.newContext({viewport:{width:1280,height:800}});
     const page=await context.newPage();
-    await page.goto('/');
+    await login(page);
 
     await page.waitForFunction(async()=>{
       if(!('serviceWorker' in navigator))return false;
@@ -207,6 +316,27 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     expect(offlineStatic).toBe(true);
     expect(offlineApi).toBe(false);
     await context.setOffline(false);
+
+    const original=readFileSync(PWA_VERSION_PATH,'utf8');
+    const currentVersion=Number(/version:(\d+)/.exec(original)?.[1]||0);
+    const nextVersion=currentVersion+1;
+    const updated=original
+      .replace(/version:\d+/,'version:'+nextVersion)
+      .replace(/cacheName:'money-tracker-debt-v\d+'/,"cacheName:'money-tracker-debt-v"+nextVersion+"'");
+
+    try{
+      writeFileSync(PWA_VERSION_PATH,updated);
+      await page.evaluate(()=>navigator.serviceWorker.getRegistration().then(registration=>registration?.update()));
+      await expect(page.locator('#applyUpdate')).toBeVisible({timeout:20_000});
+      await page.locator('#applyUpdate').click();
+      await page.waitForFunction(version=>caches.keys().then(keys=>keys.includes('money-tracker-debt-v'+version)),nextVersion,{timeout:20_000});
+      await expect(page.locator('#pageHeading')).toBeVisible();
+      const keys=await page.evaluate(()=>caches.keys());
+      expect(keys).toContain('money-tracker-debt-v'+nextVersion);
+      expect(keys).not.toContain(cacheState.cacheName);
+    } finally {
+      writeFileSync(PWA_VERSION_PATH,original);
+    }
 
     await context.close();
   });

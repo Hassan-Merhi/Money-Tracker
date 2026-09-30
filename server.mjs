@@ -14,9 +14,14 @@ import { exportFullBackup, restoreFullBackup, DATA_LIMITS } from './lib/full-bac
 import { normalizeMoney, toMinor } from './lib/money.js';
 import { createSecurityOps } from './lib/security-ops.js';
 import { createRuntimeOps } from './lib/runtime-ops.js';
+import { computeAssetVersion, stampHtmlAssets, stampModuleImports, stampServiceWorker } from './lib/release-assets.js';
 import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, getMigrationQuarantineStats, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
+const ASSET_VERSION = process.env.NODE_ENV==='test'&&/^[a-f0-9]{12}$/i.test(process.env.TEST_ASSET_VERSION||'')
+  ? String(process.env.TEST_ASSET_VERSION).toLowerCase()
+  : computeAssetVersion(ROOT);
+const BUILD_ID = String(process.env.RENDER_GIT_COMMIT||process.env.GITHUB_SHA||ASSET_VERSION).slice(0,12);
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = process.env.DB_PATH || join(DATA_DIR, 'ledger.sqlite');
@@ -751,13 +756,20 @@ function staticFile(req,res,url){
   let p=decodeURIComponent(url.pathname); if(p==='/'||!extname(p))p='/index.html';
   const safe=normalize(p).replace(/^(\.\.[/\\])+/, ''); const file=join(ROOT,safe);
   if(!file.startsWith(ROOT)||!existsSync(file)||file.includes(`${join(ROOT,'data')}`)){fail(res,404,'Not found.');return;}
-  securityHeaders(res);res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');
-  const base=String(file).split(/[\\/]/).at(-1),stats=statSync(file),etag=`W/"${stats.size}-${Math.floor(stats.mtimeMs)}"`;
+  const extension=extname(file),base=String(file).split(/[\\/]/).at(-1);
+  let body=readFileSync(file);
+  if(base==='index.html')body=Buffer.from(stampHtmlAssets(body.toString('utf8'),ASSET_VERSION));
+  else if(base==='service-worker.js')body=Buffer.from(stampServiceWorker(body.toString('utf8'),ASSET_VERSION));
+  else if(extension==='.js')body=Buffer.from(stampModuleImports(body.toString('utf8'),ASSET_VERSION));
+  securityHeaders(res);res.setHeader('Content-Type',mime[extension]||'application/octet-stream');
+  const etag=`"${createHash('sha256').update(body).digest('hex').slice(0,24)}"`;
   res.setHeader('ETag',etag);
-  res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
+  const exactVersion=url.searchParams.get('v')===ASSET_VERSION;
+  const immutable=exactVersion&&['.js','.css','.svg','.png','.ico'].includes(extension);
+  res.setHeader('Cache-Control',(extension==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':immutable?'public, max-age=31536000, immutable':'public, max-age=300');
   if(base==='service-worker.js')res.setHeader('Service-Worker-Allowed','/');
   if(String(req.headers['if-none-match']||'')===etag){res.writeHead(304);res.end();return;}
-  res.writeHead(200);res.end(readFileSync(file));
+  res.writeHead(200);res.end(body);
 }
 
 let recurringTimer=null;
@@ -771,7 +783,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:16,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:ASSET_VERSION,assetVersion:ASSET_VERSION,buildId:BUILD_ID,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

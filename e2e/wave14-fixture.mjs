@@ -41,8 +41,16 @@ async function apiJson(response,label){
 export async function setupApi(){
   mkdirSync(VISUAL_DIR,{recursive:true});
   api=await request.newContext({baseURL:BASE_URL});
-  const registration=await apiJson(await api.post('/api/auth/register',{data:{email:OWNER_EMAIL,password:OWNER_PASSWORD}}),'register Wave 14 owner');
-  csrfToken=registration.csrfToken;
+  let auth=await api.post('/api/auth/login',{data:{email:OWNER_EMAIL,password:OWNER_PASSWORD}});
+  if(auth.status()===401){
+    auth=await api.post('/api/auth/register',{data:{email:OWNER_EMAIL,password:OWNER_PASSWORD}});
+  }
+  const session=await apiJson(auth,'authenticate Wave 14 owner');
+  csrfToken=session.csrfToken;
+  await apiJson(await api.post('/api/state/reset',{
+    headers:{'x-csrf-token':csrfToken},
+    data:{password:OWNER_PASSWORD}
+  }),'reset Wave 14 workspace');
   await seedEmptyAdvancedState();
 }
 export async function disposeApi(){await api?.dispose();}

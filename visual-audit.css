@@ -137,8 +137,34 @@ html[data-theme="dark"] .entry-menu-popover{background:var(--panel);border-color
   .bank-description{min-width:0}
   .bank-amount{max-width:46vw;overflow-wrap:anywhere}
   .bank-amount strong{overflow-wrap:anywhere}
+  .g-insight-grid,.g-manage-grid,.g-manage-card,
+  .g-breakdown-group,.g-breakdown-row,
+  .g-category-list,.g-category-row,
+  .g-budget-list,.g-budget-row{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+  }
+  .g-manage-card{overflow:hidden}
+  .g-breakdown-row{
+    grid-template-columns:minmax(0,1fr) minmax(0,auto);
+    overflow:hidden;
+  }
+  .g-breakdown-label,.g-breakdown-row strong,
+  .g-budget-top>div,.g-budget-bottom>span{
+    min-width:0;
+    max-width:100%;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+  }
+  .g-budget-top{flex-wrap:wrap}
+  .g-budget-top>div{flex:1 1 170px}
   .g-category-name{width:100%}
   .g-category-name>div{min-width:0}
+  .g-category-name strong,.g-category-name small{white-space:normal}
+  .g-category-row .page-actions{width:100%}
+  .g-category-row .page-actions .btn{flex:1 1 120px}
+  .g-manage-card .panel-head{align-items:flex-start;flex-wrap:wrap}
   .report-toolbar{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
   .report-toolbar>p{flex:1 1 220px;margin:0}
   .report-export-menu-wrap{margin-left:auto}

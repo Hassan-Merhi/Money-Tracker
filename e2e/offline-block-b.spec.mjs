@@ -159,5 +159,22 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
   expect(afterRetry.amountTotal).toBe(55);
 
   await expect(page.locator('.connection-pill')).toContainText('Online · synced');
+
+  await context.setOffline(true);
+  const failedLogout=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    let error='';
+    try{await store.logout();}catch(reason){error=String(reason?.message||reason);}
+    const cached=await db.loadAuthorizedUser();
+    const snapshot=await db.loadStateSnapshot();
+    return {error,cachedEmail:cached?.email||'',hasPerson:snapshot?.people?.some(row=>row.name==='Offline Bob')||false};
+  });
+  expect(failedLogout.error).toContain('offline');
+  expect(failedLogout.cachedEmail).toBe(EMAIL);
+  expect(failedLogout.hasPerson).toBe(true);
+  await expectHeading(page,'People');
+
+  await context.setOffline(false);
   await context.close();
 });

@@ -52,8 +52,10 @@ test('Wave 14 has a dedicated screenshot audit and CI artifact retention',()=>{
   assert.match(spec,/Could not load bank feed/);
 });
 
-test('Wave 14 advances the coherent PWA shell version',()=>{
-  const version=read('pwa-version.js');
-  assert.match(version,/version:20/);
-  assert.match(version,/cacheName:'money-tracker-debt-v20'/);
+test('Wave 14 keeps a coherent PWA shell version at or beyond its release baseline',()=>{
+  const source=read('pwa-version.js');
+  const version=Number(/version:(\d+)/.exec(source)?.[1]||0);
+  const cacheName=/cacheName:'([^']+)'/.exec(source)?.[1]||'';
+  assert.ok(Number.isInteger(version)&&version>=20);
+  assert.equal(cacheName,`money-tracker-debt-v${version}`);
 });

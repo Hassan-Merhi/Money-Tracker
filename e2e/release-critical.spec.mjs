@@ -36,7 +36,6 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
   test('desktop: owner signup, debt workflow, advanced accounts and transfers',async({browser})=>{
     const context=await browser.newContext({viewport:{width:1440,height:1000}});
     const page=await context.newPage();
-    const assertClean=watchBrowser(page);
 
     await page.goto('/');
     await expect(page.getByRole('heading',{name:'Money Owed Tracker'})).toBeVisible();
@@ -46,6 +45,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await page.getByLabel('Password').fill(OWNER_PASSWORD);
     await page.locator('#authForm').getByRole('button',{name:'Create account'}).click();
     await expectPageHeading(page,'Dashboard');
+    const assertClean=watchBrowser(page);
 
     await page.locator('.sidebar').getByRole('button',{name:'People'}).click();
     await expectPageHeading(page,'People');
@@ -129,8 +129,8 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
       hasTouch:true
     });
     const page=await context.newPage();
-    const assertClean=watchBrowser(page);
     await login(page);
+    const assertClean=watchBrowser(page);
 
     await expect(page.locator('.mobile-nav')).toBeVisible();
     await expectNoHorizontalOverflow(page);

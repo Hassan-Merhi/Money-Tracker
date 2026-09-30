@@ -49,7 +49,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
 
     await page.locator('.sidebar').getByRole('button',{name:'People'}).click();
     await expectPageHeading(page,'People');
-    await page.getByRole('button',{name:'Add person'}).click();
+    await page.locator('#addPerson').click();
     const personModal=page.locator('.modal');
     await personModal.getByLabel('Name').fill('Alice');
     await personModal.getByLabel('Opening balance').fill('100');
@@ -58,7 +58,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
 
     await page.getByRole('link',{name:/Alice/}).click();
     await expectPageHeading(page,'Person statement');
-    await page.getByRole('button',{name:'Add transaction'}).click();
+    await page.locator('#personTxn').click();
     const txnModal=page.locator('.modal');
     await txnModal.getByLabel('Transaction type').selectOption('paid_for_person');
     await txnModal.getByLabel('Total amount').fill('25.50');
@@ -80,14 +80,14 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
 
     await page.locator('.sidebar').getByRole('button',{name:'Accounts & Cash'}).click();
     await expectPageHeading(page,'Accounts & Cash');
-    await page.getByRole('button',{name:'Add account'}).click();
+    await page.locator('#addAccount').click();
     let modal=page.locator('.modal');
     await modal.getByLabel('Account name').fill('Checking');
     await modal.getByLabel('Opening balance').fill('500');
     await modal.getByRole('button',{name:'Save'}).click();
     await expect(page.locator('.account-card').filter({hasText:'Checking'})).toBeVisible();
 
-    await page.getByRole('button',{name:'Add account'}).click();
+    await page.locator('#addAccount').click();
     modal=page.locator('.modal');
     await modal.getByLabel('Account name').fill('Cash');
     await modal.getByLabel('Type').selectOption('cash');
@@ -138,7 +138,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await page.locator('.mobile-nav').getByRole('button',{name:'People'}).click();
     await expect(page.getByRole('heading',{name:'People'})).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    await page.getByRole('button',{name:'Add person'}).click();
+    await page.locator('#addPerson').click();
     const modal=page.locator('.modal');
     await modal.getByLabel('Name').fill('Mobile Person');
     await modal.getByRole('button',{name:'Save'}).click();

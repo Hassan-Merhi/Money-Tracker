@@ -1,5 +1,5 @@
 // Authoritative PWA shell version. Keep the numeric value here only.
 self.MONEY_TRACKER_PWA=Object.freeze({
-  version:20,
-  cacheName:'money-tracker-debt-v20'
+  version:21,
+  cacheName:'money-tracker-debt-v21'
 });

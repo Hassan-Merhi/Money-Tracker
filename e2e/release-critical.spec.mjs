@@ -151,7 +151,9 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await expect(page.getByText('Wave 10 browser purchase')).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
-    await page.locator('.mobile-nav').getByRole('button',{name:'Reports'}).click();
+    await page.locator('.mobile-nav').getByRole('button',{name:'More navigation'}).click();
+    await expect(page.getByRole('dialog',{name:'Your workspace'})).toBeVisible();
+    await page.getByRole('button',{name:/Reports & Exports/}).click();
     await expectPageHeading(page,'Reports & Exports');
     await expectNoHorizontalOverflow(page);
 

@@ -65,6 +65,7 @@ document.querySelector('.skip-link')?.addEventListener('click',event=>{
 });
 
 async function runMutation(action,message='') {
+  if (!navigator.onLine) { showToast('Offline mode is read-only for now. Reconnect to save changes.'); return false; }
   if (saving) { showToast('Saving the previous change…'); return false; }
   saving = true;
   try {
@@ -130,6 +131,10 @@ function subFor(page) {
   })[page] || '';
 }
 
+function renderOfflineServerFeature(main,title,detail){
+  main.innerHTML=`<section class="card panel"><div class="empty"><strong>${escapeHtml(title)} needs a connection</strong>${escapeHtml(detail)}<div class="muted tiny" style="margin-top:8px">Your cached ledger remains available in Dashboard, People, Accounts, Activity, Insights and Reports.</div></div></section>`;
+}
+
 function render() {
   closeAllEntryMenus();
   const hiddenInSimpleMode=['accounts','bank','insights','scheduled'];
@@ -148,7 +153,7 @@ function render() {
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2 id="pageHeading" tabindex="-1">${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">${icon('plus')} Add activity</button></div>
+          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline · read only'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">${icon('plus')} Add activity</button></div>
         </header>
         <main class="main" id="main" aria-labelledby="pageHeading" tabindex="-1"></main>
       </section>
@@ -171,9 +176,9 @@ function render() {
   else if (route.page === 'people') renderPeople(main);
   else if (route.page === 'accounts') renderAccounts(main);
   else if (route.page === 'transactions') renderTransactions(main);
-  else if (route.page === 'bank') renderBankFeedPage(main,state,{showToast,replaceState(next){state=next;render();}});
+  else if (route.page === 'bank') pwa.online?renderBankFeedPage(main,state,{showToast,replaceState(next){state=next;render();}}):renderOfflineServerFeature(main,'Bank Feed','Imported bank rows are not part of the Block A offline snapshot yet.');
   else if (route.page === 'insights') renderInsightsPage(main,state,route,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
-  else if (route.page === 'scheduled') renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
+  else if (route.page === 'scheduled') pwa.online?renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}}):renderOfflineServerFeature(main,'Scheduled & Reminders','Recurring rules and reminder inboxes still require the server.');
   else if (route.page === 'reports') renderReports(main,state,route,{money,escapeHtml,today});
   else if (route.page === 'settings') renderSettings(main);
   else if (route.page === 'person') renderPerson(main, route.params.get('id'));

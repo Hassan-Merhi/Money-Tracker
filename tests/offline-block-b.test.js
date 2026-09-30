@@ -106,8 +106,11 @@ test('Offline Block B has a dedicated CI and browser gate and bumps the PWA cach
 
 test('Offline Block B hardening keeps auth failures retryable and connected writes resilient to IndexedDB errors',()=>{
   const store=read('lib/store.js');
-  assert.match(store,/async function localSnapshot\(\)/);
+  assert.match(store,/async function localSnapshot\(expectedIdentity=authenticatedIdentity\)/);
+  assert.match(store,/userIdentity\(cachedUser\)!==expectedIdentity/);
   assert.match(store,/catch\{return null;\}/);
+  assert.match(store,/error\?\.code==='OFFLINE_PENDING_USER_SWITCH'/);
+  assert.match(store,/if\(browserOnline\(\)&&error\?\.status!==409\)return await directCoreMutation/);
   assert.match(store,/if\(error\.status===401\)\{[\s\S]*?status:'pending'[\s\S]*?authRequired:true/);
   assert.match(store,/const snapshot=await localSnapshot\(\)/);
   assert.match(store,/if\(!snapshot\)\{[\s\S]*?browserOnline\(\)[\s\S]*?directCoreMutation/);
@@ -118,6 +121,7 @@ test('Offline Block B hardening blocks transfer deletion from the offline queue 
   const server=read('server.mjs');
   const bank=read('lib/bank-server.js');
   assert.match(store,/existing\?\.type==='account_transfer'/);
+  assert.match(store,/Reconnect to edit this transfer/);
   assert.match(store,/Reconnect to delete this transfer/);
   assert.match(server,/if\(existing\.type==='account_transfer'\)throw ledgerError/);
   assert.match(server,/reopenedFeedItems\+=bankFeed\.revalidatePosted/);

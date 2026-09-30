@@ -1,0 +1,48 @@
+name: Production Smoke
+
+on:
+  workflow_run:
+    workflows: ["Money Tracker CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      production_url:
+        description: Optional production URL override
+        required: false
+        type: string
+      expected_commit:
+        description: Optional deployed commit SHA override
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: money-tracker-production-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PRODUCTION_URL: ${{ inputs.production_url || vars.PRODUCTION_URL || 'https://money-owed-tracker.onrender.com' }}
+      EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit || github.event.workflow_run.head_sha || github.sha }}
+      PRODUCTION_SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
+      PRODUCTION_SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}
+      PRODUCTION_SMOKE_WAIT_MS: "720000"
+      PRODUCTION_SMOKE_INTERVAL_MS: "10000"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit || github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.1'
+      - name: Verify deployed production
+        run: node scripts/production-smoke.mjs

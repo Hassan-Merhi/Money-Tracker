@@ -47,6 +47,7 @@ function saveThemePreference(preference){
 applyTheme();
 themeMedia?.addEventListener?.('change',()=>{if(themePreference()==='system')applyTheme('system');});
 window.addEventListener('moneytracker:pwa',event=>{pwa=event.detail||pwa;if(state)render();});
+window.addEventListener('moneytracker:state-replaced',event=>{if(event.detail){state=event.detail;if(user)render();}});
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -240,11 +241,16 @@ function renderPeople(main) {
     <section class="people-page" aria-label="People">
       <div class="people-toolbar">
         <div class="people-search-wrap"><input id="peopleSearch" class="input search people-search" type="search" inputmode="search" autocomplete="off" aria-label="Search people" placeholder="Search people…" value="${escapeHtml(route.params.get('q')||'')}"></div>
-        <button class="btn primary people-add-btn" id="addPerson" type="button" aria-label="Add person">${icon('plus')}<span>Add person</span></button>
+        <div class="people-toolbar-actions"><button class="btn people-import-btn" id="peopleImport" type="button" aria-label="Import people and statement data" title="Import people and statement data">•••</button><button class="btn primary people-add-btn" id="addPerson" type="button" aria-label="Add person">${icon('plus')}<span>Add person</span></button></div>
       </div>
       ${people.length ? `<div class="people-grid">${people.map(p=>personCard(p,balances[p.id]||{})).join('')}</div>` : `<div class="card hero-empty empty"><div class="big">👥</div><h3>${query?'No matching people':'Add the people you exchange money with'}</h3><p>Each person gets a separate running statement. Positive means they owe you. Negative means you owe them.</p><button class="btn primary" id="emptyAddPerson">＋ Add person</button></div>`}
     </section>`;
   main.querySelector('#addPerson')?.addEventListener('click',()=>openPersonModal());
+  main.querySelector('#peopleImport')?.addEventListener('click',()=>{
+    openModal('Import people & statements',`<div class="quick-menu"><button class="quick" id="peoplePasteExcel"><span class="qicon">▦</span><strong>Paste Excel rows</strong><small>Fast entry for person statement rows</small></button><button class="quick" id="peopleImportFile"><span class="qicon">↑</span><strong>Import Excel / CSV</strong><small>Preview and map a spreadsheet file</small></button></div>`,null,false);
+    document.querySelector('#peoplePasteExcel')?.addEventListener('click',()=>{closeModal();window.dispatchEvent(new CustomEvent('moneytracker:open-quick-import'));});
+    document.querySelector('#peopleImportFile')?.addEventListener('click',()=>{closeModal();window.dispatchEvent(new CustomEvent('moneytracker:open-import'));});
+  });
   main.querySelector('#emptyAddPerson')?.addEventListener('click',()=>openPersonModal());
   main.querySelector('#peopleSearch')?.addEventListener('input', e => {
     const q=e.target.value.trim(); location.hash = q ? `#people?q=${encodeURIComponent(q)}` : '#people';

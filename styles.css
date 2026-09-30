@@ -258,7 +258,7 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
 .person-card-arrow .ui-icon{width:17px;height:17px}
 
 @media(max-width:760px){
-  .people-page .people-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:8px;margin-bottom:10px}
+  .people-page .people-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:10px}
   .people-page .people-search-wrap{max-width:none}
   .people-page .people-search{min-width:0;height:48px;border-radius:14px;padding:0 14px;font-size:16px}
   .people-page .people-add-btn{width:48px;min-width:48px;height:48px;min-height:48px;padding:0;border-radius:14px}
@@ -367,3 +367,12 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
   .reports-page .report-stats{grid-template-columns:1fr}
 }
 
+
+
+/* Wave 10 — People import entry point */
+.people-toolbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.people-import-btn{width:44px;min-width:44px;padding-inline:0;font-size:17px;letter-spacing:.08em}
+@media(max-width:760px){
+  .people-toolbar-actions{gap:7px}
+  .people-import-btn{width:44px;min-width:44px}
+}

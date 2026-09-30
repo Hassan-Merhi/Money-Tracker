@@ -52,12 +52,19 @@ test('theme bootstrap is external so script CSP does not block it',()=>{
 });
 
 
-test('import tools stay implemented without being injected into Settings or Reports',()=>{
+test('import tools stay out of Settings/Reports and are reachable from People',()=>{
   const source=readFileSync(new URL('../block-c-import.js',import.meta.url),'utf8');
+  const app=readFileSync(new URL('../app.js',import.meta.url),'utf8');
   assert.doesNotMatch(source,/data-import-card/);
   assert.match(source,/applyQuickPasteImport/);
   assert.match(source,/They owe me/);
   assert.match(source,/Took from them/);
   assert.doesNotMatch(source,/querySelector\('#exportXlsx'\)/);
   assert.doesNotMatch(source,/dataset\.openQuickImport/);
+  assert.match(app,/id="peopleImport"/);
+  assert.match(app,/moneytracker:open-quick-import/);
+  assert.match(app,/moneytracker:open-import/);
+  assert.match(source,/moneytracker:state-replaced/);
+  assert.match(source,/moneytracker:open-quick-import/);
+  assert.match(source,/moneytracker:open-import/);
 });

@@ -13,6 +13,15 @@ test('suggests common statement columns',()=>{
   assert.equal(m.date,'Posting Date'); assert.equal(m.description,'Narrative'); assert.equal(m.debit,'Debit'); assert.equal(m.credit,'Credit');
 });
 
+test('generic Amount stays a signed amount and is never misclassified as debit plus credit',()=>{
+  const m=suggestBankMapping(['Date','Description','Amount']);
+  assert.equal(m.date,'Date');
+  assert.equal(m.description,'Description');
+  assert.equal(m.amount,'Amount');
+  assert.equal(m.debit,'');
+  assert.equal(m.credit,'');
+});
+
 test('normalizes debit and credit rows into signed amounts',()=>{
   const rows=[
     {'Date':'28/09/2026','Memo':'Amazon','Debit':'25.40','Credit':'','CCY':'USD'},

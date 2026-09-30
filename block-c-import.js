@@ -8,6 +8,8 @@ import { currencyExponent } from './lib/money.js';
 let state=null,preview=null,sheetIndex=0,legacyAnalysis=null,manualMode=false,importerReturnFocus=null;
 const q=s=>document.querySelector(s);
 
+function publishImportedState(next){state=next;window.dispatchEvent(new CustomEvent('moneytracker:state-replaced',{detail:next}));return next;}
+
 function activateImporterDialog(wrap){
   const dialog=wrap.querySelector('.imp-shell');
   if(!dialog)return;
@@ -27,7 +29,7 @@ function activateImporterDialog(wrap){
 
 function downloadBytes(filename,bytes,type){const blob=new Blob([bytes],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),0);}
 function templateWorkbook(){return buildXlsx([
-  {name:'README',rows:[['Money Tracker import template'],['People: add Name, optional Note/Currency/Balance/Direction/Date. Direction: They owe me or I owe them.'],['Debt transactions: Account is optional. Use Person, Amount, Currency, Date, and Type.'],['Useful Type values: paid_for_person (they owe me), received_from_person (they paid me), borrowed_from_person (I owe them), paid_to_person (I paid them), person_adjustment, split_paid_for_people.'],['For split_paid_for_people, Account is optional; fill Amount, Currency, and Split Details like Alice: 10 | Bob: 15 (optional note).'],['Account/bank transaction types remain supported for later if you decide to enable account tracking.'],['Upload in Settings > Import & migration, preview, map columns, then confirm.']]},
+  {name:'README',rows:[['Money Tracker import template'],['People: add Name, optional Note/Currency/Balance/Direction/Date. Direction: They owe me or I owe them.'],['Debt transactions: Account is optional. Use Person, Amount, Currency, Date, and Type.'],['Useful Type values: paid_for_person (they owe me), received_from_person (they paid me), borrowed_from_person (I owe them), paid_to_person (I paid them), person_adjustment, split_paid_for_people.'],['For split_paid_for_people, Account is optional; fill Amount, Currency, and Split Details like Alice: 10 | Bob: 15 (optional note).'],['Account/bank transaction types remain supported for later if you decide to enable account tracking.'],['Open People > ••• > Import Excel / CSV, preview, map columns, then confirm.']]},
   {name:'People',rows:[['Name','Note','Currency','Balance','Direction','Date','Description']]},
   {name:'Accounts',rows:[['Name','Type','Currency','Opening Balance']]},
   {name:'Transactions',rows:[['Date','Type','Person','Account','Amount','Currency','Merchant','Category','Description','From Account','To Account','From Currency','To Currency','From Amount','To Amount','Signed Amount','Direction','Split Details']]}
@@ -58,7 +60,7 @@ async function reviewQuickPaste(){
   if(!r.entries && !r.updated){alert(`Nothing to import.${issues.length?`\n\n${issues.join('\n')}`:''}`);return;}
   if(!confirm(`Import these pasted rows?\n\n${parts.join(', ')}.${issues.length?`\n\nRows with issues will be skipped:\n${issues.join('\n')}`:''}\n\nEach valid row will appear on that person's statement.`))return;
   const btn=q('#impQuickApply'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
-  try{state=await saveState(prepared.state);alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
+  try{publishImportedState(await saveState(prepared.state));alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the paste importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
@@ -130,7 +132,7 @@ async function reviewLegacy(){
     }
   }
   const btn=q('#impLegacyReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
-  try{state=await saveState(prepared.state);alert(`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
+  try{publishImportedState(await saveState(prepared.state));alert(`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
@@ -156,7 +158,10 @@ async function review(){
   if(!r.people&&!r.accounts&&!r.entries&&!r.updated){alert(`Nothing to import.${parts.length?' '+parts.join(', '):''}${issues?`\n\n${issues}`:''}`);return;}
   if(!confirm(`Apply import?\n\n${parts.join(', ')}.${issues?`\n\nFirst issues:\n${issues}`:''}\n\nThis appends to your current ledger.`))return;
   const btn=q('#impReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Applying…';
-  try{state=await saveState(prepared.state);alert(`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
+  try{publishImportedState(await saveState(prepared.state));alert(`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
+
+window.addEventListener('moneytracker:open-import',()=>openImporter());
+window.addEventListener('moneytracker:open-quick-import',()=>openQuickImporter());

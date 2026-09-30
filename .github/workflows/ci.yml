@@ -61,6 +61,7 @@ jobs:
           node --check lib/bank-feed.js
           node --check lib/bank-server.js
           node --check lib/store.js
+          node --check lib/offline-db.js
           node --check block-g-insights.js
           node --check lib/insights.js
           node --check lib/insights-server.js
@@ -78,6 +79,7 @@ jobs:
           node --check scripts/production-smoke.mjs
           node --check playwright.config.mjs
           node --check e2e/release-critical.spec.mjs
+          node --check e2e/offline-block-a.spec.mjs
           node --check e2e/wave14-fixture.mjs
           node --check e2e/visual-audit-matrix.spec.mjs
           node --check e2e/visual-audit-states.spec.mjs
@@ -100,6 +102,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run Wave 10 browser E2E
         run: npm run test:wave10
+      - name: Run Offline Block A browser gate
+        run: npm run test:offline-a-e2e
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit

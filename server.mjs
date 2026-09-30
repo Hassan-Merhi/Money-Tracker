@@ -1277,13 +1277,14 @@ export const server=http.createServer(async(req,res)=>{
       }
       if(req.method==='DELETE'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+        let reopenedFeedItems=0;
         withLedgerMutation(a.user_id,expected,()=>{
           q.deleteEntryAttachments.run(a.user_id,id);
           const changed=q.deleteEntry.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
-          bankFeed.reopenOrphans(a.user_id);
+          reopenedFeedItems=bankFeed.reopenOrphans(a.user_id);
         });
-        return json(res,200,loadState(a.user_id));
+        return json(res,200,{...loadState(a.user_id),reopenedFeedItems});
       }
       return fail(res,405,'Transaction action not supported.');
     }

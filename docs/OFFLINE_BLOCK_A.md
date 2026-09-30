@@ -96,10 +96,11 @@ Implemented:
 - maskable SVG icon retained
 - iOS installed-app metadata
 - Apple touch icon
+- complete transitive client module graph included in the precached shell
 - IndexedDB module included in the precached shell
 - API routes excluded from Cache Storage so private ledger responses are not cached as generic HTTP assets
 
-PWA cache version for this block: **21**.
+PWA cache version for this block: **22**.
 
 ## O2 — Local database
 
@@ -119,9 +120,9 @@ Stores:
 
 The active authorized user and the state head (settings, revision/version, snapshot timestamp and schema version) are stored as metadata. Core collections are stored separately rather than as one opaque blob so later sync blocks can add per-record status/version/outbox behavior without replacing the database.
 
-Only one active user's offline ledger is retained. Signing in as a different user clears the previous local ledger before saving the new identity.
+Only one active user's offline ledger is retained. Signing in as a different user clears the previous local ledger before saving the new identity. Snapshot writes carry the request-time user identity and are rejected if the active offline identity changed before the response completed, preventing stale cross-tab responses from crossing user boundaries.
 
-Logout, confirmed account deletion, and an online 401 clear the local offline data.
+Logout, confirmed account deletion, and authenticated 401 responses clear only the matching user's local offline data. Identity-checked clearing prevents a stale tab from wiping a newer user's offline cache.
 
 No password, CSRF token or server session secret is stored in IndexedDB.
 
@@ -155,7 +156,7 @@ The UI displays **Offline · read only**. Financial mutations remain blocked unt
 ## Definition of done
 
 - [x] Existing network paths audited and classified.
-- [x] PWA launches from the cached application shell.
+- [x] PWA launches from the cached application shell, including a cold second launch with the network already unavailable.
 - [x] Install metadata includes desktop/mobile/iOS essentials.
 - [x] Core authenticated ledger is written to IndexedDB.
 - [x] Offline boot can recover the authorized identity without storing credentials.
@@ -164,5 +165,7 @@ The UI displays **Offline · read only**. Financial mutations remain blocked unt
 - [x] Balances remain derived; no independent cached balance becomes authoritative.
 - [x] Server-only pages are explicit instead of failing ambiguously.
 - [x] Offline writes are blocked until the sync/outbox phases.
-- [x] Local data is cleared on logout, account deletion and invalid online session.
+- [x] Local data is cleared on logout, account deletion and any authenticated 401 without crossing active-user boundaries.
+- [x] Stale state responses cannot overwrite another user's active offline snapshot.
+- [x] Automated checks verify every relative dependency in the cached client module graph is precached.
 - [x] Automated contract tests cover O0–O3.

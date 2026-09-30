@@ -63,7 +63,7 @@ test.describe.serial('Wave 14 modal and menu containment',()=>{
         await expect(page.locator('.entry-menu-popover:not([hidden])')).toBeVisible();
         await expectVisualIntegrity(page,'transaction menu');
         await capture(page,'overlay',view.name,theme,'transaction-menu');
-        await menuTrigger.click();
+        await page.keyboard.press('Escape');
         await expect(page.locator('.entry-menu-popover:not([hidden])')).toHaveCount(0);
 
         await openRoute(page,ROUTES[6]);

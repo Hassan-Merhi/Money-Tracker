@@ -32,6 +32,8 @@ jobs:
         run: npm run test:wave13
       - name: Run Wave 14 visual contract
         run: node --test tests/release-wave-14-visual-audit.test.js
+      - name: Run Wave 15 final release-candidate gate
+        run: npm run test:wave15
       - name: Run accounting reconciliation gate
         run: npm run accounting:check
       - name: Check browser JavaScript syntax

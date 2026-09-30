@@ -52,7 +52,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await page.locator('#addPerson').click();
     const personModal=page.locator('.modal');
     await personModal.getByLabel('Name').fill('Alice');
-    await personModal.getByLabel('Opening balance').fill('100');
+    await personModal.getByLabel('Opening balance',{exact:true}).fill('100');
     await personModal.getByRole('button',{name:'Save'}).click();
     await expect(page.getByRole('link',{name:/Alice/})).toBeVisible();
 
@@ -83,7 +83,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await page.locator('#addAccount').click();
     let modal=page.locator('.modal');
     await modal.getByLabel('Account name').fill('Checking');
-    await modal.getByLabel('Opening balance').fill('500');
+    await modal.getByLabel('Opening balance',{exact:true}).fill('500');
     await modal.getByRole('button',{name:'Save'}).click();
     await expect(page.locator('.account-card').filter({hasText:'Checking'})).toBeVisible();
 
@@ -91,7 +91,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     modal=page.locator('.modal');
     await modal.getByLabel('Account name').fill('Cash');
     await modal.getByLabel('Type').selectOption('cash');
-    await modal.getByLabel('Opening balance').fill('50');
+    await modal.getByLabel('Opening balance',{exact:true}).fill('50');
     await modal.getByRole('button',{name:'Save'}).click();
     await expect(page.locator('.account-card').filter({hasText:'Cash'})).toBeVisible();
 

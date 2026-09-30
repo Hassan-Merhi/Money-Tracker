@@ -214,6 +214,70 @@ test('Offline Block C: two-device conflicts auto-rebase or resolve explicitly',a
   await contextA.close();
 });
 
+
+test('Offline Block C: later queued remote edits are detected before they can be overwritten',async({browser})=>{
+  const contextA=await browser.newContext({viewport:{width:390,height:844}});
+  const contextB=await browser.newContext({viewport:{width:390,height:844}});
+  const pageA=await contextA.newPage(),pageB=await contextB.newPage();
+  await pageA.goto('/');await pageB.goto('/');
+  let stateA=await moduleCall(pageA,'login',{email:EMAIL,password:PASSWORD});
+  let stateB=await moduleCall(pageB,'login',{email:EMAIL,password:PASSWORD});
+
+  for(const spec of [
+    {id:'person_queue_safe_prefix',name:'Queue Safe Prefix'},
+    {id:'person_queue_later_conflict',name:'Queue Later Conflict'}
+  ]){
+    if(!stateA.people.some(row=>row.id===spec.id)){
+      stateA=await pageA.evaluate(async({state,spec})=>{
+        const store=await import('/lib/store.js');
+        return await store.createPerson({id:spec.id,name:spec.name,note:'base',openingBalance:0,currency:'USD',direction:'to_me'},state.version);
+      },{state:stateA,spec});
+    }
+  }
+  stateB=await pageB.evaluate(async()=>{const store=await import('/lib/store.js');return await store.loadState();});
+
+  await contextA.setOffline(true);
+  await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    let state=await db.loadStateSnapshot();
+    let person=state.people.find(row=>row.id==='person_queue_safe_prefix');
+    state=await store.updatePerson(person.id,{name:person.name,note:'safe prefix local'},state.version);
+    person=state.people.find(row=>row.id==='person_queue_later_conflict');
+    await store.updatePerson(person.id,{name:person.name,note:'later local value'},state.version);
+  });
+
+  await pageB.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const state=await store.loadState();
+    const person=state.people.find(row=>row.id==='person_queue_later_conflict');
+    await store.updatePerson(person.id,{name:person.name,note:'later remote value'},state.version);
+  });
+
+  await contextA.setOffline(false);
+  await expect.poll(()=>pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const status=await store.getSyncStatus();
+    return {pending:status.pending,conflicts:status.conflicts,conflictId:status.queue.find(row=>row.status==='conflict')?.entityId||''};
+  }),{timeout:10000}).toEqual({pending:1,conflicts:1,conflictId:'person_queue_later_conflict'});
+
+  const server=await pageA.evaluate(async()=>await (await fetch('/api/state',{credentials:'same-origin'})).json());
+  expect(server.people.find(row=>row.id==='person_queue_safe_prefix').note).toBe('safe prefix local');
+  expect(server.people.find(row=>row.id==='person_queue_later_conflict').note).toBe('later remote value');
+
+  const operationId=await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    return (await store.getSyncStatus()).queue.find(row=>row.status==='conflict')?.operationId||'';
+  });
+  await pageA.evaluate(async operationId=>{
+    const store=await import('/lib/store.js');
+    await store.resolveSyncConflict(operationId,'keep_server');
+  },operationId);
+  await expect.poll(()=>pageA.evaluate(async()=>{const store=await import('/lib/store.js');return (await store.getSyncStatus()).pending;})).toBe(0);
+
+  await contextB.close();await contextA.close();
+});
+
 test('Offline Block C: transfers and attachments survive offline reload and converge',async({browser})=>{
   const context=await browser.newContext({viewport:{width:390,height:844}});
   const page=await context.newPage();

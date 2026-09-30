@@ -104,4 +104,4 @@ The final Block B gate also covers follow-up recovery cases found in review:
 - connected writes fall back to the existing atomic HTTP endpoints when IndexedDB cannot be opened or read;
 - existing account transfers cannot be updated, reclassified, or deleted through the offline queue before O9;
 - synced transaction edits/deletes propagate the count of reopened Bank Feed rows so the UI keeps the reconciliation warning;
-- these client changes ship with PWA cache version 24.
+- these client changes ship with PWA cache version 25.

@@ -52,6 +52,7 @@ window.addEventListener('moneytracker:sync',event=>{
   const detail=event.detail||{};
   syncInfo={...syncInfo,...detail};
   if(detail.state)state=detail.state;
+  if(Number(detail.reopenedFeedItems)>0)showToast('Bank Feed row reopened - the posted amount no longer matches this transaction.');
   if(state)render();
 });
 window.addEventListener('moneytracker:state-replaced',event=>{if(event.detail){state=event.detail;if(user)render();}});

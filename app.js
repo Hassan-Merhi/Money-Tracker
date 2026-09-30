@@ -47,6 +47,7 @@ function saveThemePreference(preference){
 applyTheme();
 themeMedia?.addEventListener?.('change',()=>{if(themePreference()==='system')applyTheme('system');});
 window.addEventListener('moneytracker:pwa',event=>{pwa=event.detail||pwa;if(state)render();});
+window.addEventListener('moneytracker:state-replaced',event=>{if(event.detail){state=event.detail;if(user)render();}});
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';

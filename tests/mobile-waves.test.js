@@ -64,6 +64,9 @@ test('Wave 3 import and advanced table cards carry labels instead of requiring h
 
 test('mobile asset URLs move together so installed phones do not mix old and new UI files',()=>{
   const html=read('index.html'),sw=read('service-worker.js');
-  for(const path of ['./mobile.css?v=mobile-v3','./activity.css?v=mobile-v3','./app.js?v=mobile-v3'])assert.ok(html.includes(path),path);
-  for(const path of ['/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/app.js?v=mobile-v3'])assert.ok(sw.includes("'"+path+"'"),path);
+  assert.match(html,/money-tracker-build/);
+  for(const path of ['./mobile.css','./activity.css','./app.js'])assert.ok(html.includes(path),path);
+  for(const path of ['/mobile.css','/activity.css','/app.js'])assert.ok(sw.includes("'"+path+"'"),path);
+  assert.doesNotMatch(html,/mobile-v\\d+/);
+  assert.match(sw,/shellUrl/);
 });

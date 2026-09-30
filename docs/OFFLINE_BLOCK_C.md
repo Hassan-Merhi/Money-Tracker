@@ -45,7 +45,7 @@ Offline attachment behavior:
 - adding a file stores it locally immediately and increments the cached transaction attachment count;
 - locally stored files remain openable offline through a data URL;
 - deleting an attachment is queued locally and decrements the cached count;
-- deleting an attachment that was created offline but never synced simply cancels its create operation;
+- deleting a locally pending attachment replaces its create with an idempotent delete, because a lost response may mean the server already committed the upload;
 - attachment operations survive reload, participate in logout/account-switch data-loss protection, and retry idempotently;
 - the server uses the same processed-operation table to prevent duplicate file writes after lost responses.
 

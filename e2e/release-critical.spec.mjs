@@ -136,7 +136,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await expectNoHorizontalOverflow(page);
 
     await page.locator('.mobile-nav').getByRole('button',{name:'People'}).click();
-    await expect(page.getByRole('heading',{name:'People'})).toBeVisible();
+    await expectPageHeading(page,'People');
     await expectNoHorizontalOverflow(page);
     await page.locator('#addPerson').click();
     const modal=page.locator('.modal');

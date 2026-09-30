@@ -1,7 +1,7 @@
 importScripts('/pwa-version.js');
 const CACHE=self.MONEY_TRACKER_PWA.cacheName;
 const CORE=[
-  '/','/index.html','/pwa-version.js','/styles.css','/dashboard.css','/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/desktop-tablet.css?v=wave4-v1','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=mobile-v3',
+  '/','/index.html','/pwa-version.js','/styles.css','/dashboard.css','/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/desktop-tablet.css?v=wave4-v1','/visual-audit.css?v=wave14-v1','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=mobile-v3',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg',

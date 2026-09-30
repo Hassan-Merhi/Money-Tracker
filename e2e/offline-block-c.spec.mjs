@@ -186,6 +186,30 @@ test('Offline Block C: two-device conflicts auto-rebase or resolve explicitly',a
   server=await pageA.evaluate(async()=>await (await fetch('/api/state',{credentials:'same-origin'})).json());
   expect(server.people.some(row=>row.id==='person_block_c_conflict')).toBe(false);
 
+  // If both devices delete the same record, the intended state already converged.
+  await pageA.evaluate(async()=>{const store=await import('/lib/store.js');await store.loadState();});
+  await pageB.evaluate(async()=>{const store=await import('/lib/store.js');await store.loadState();});
+  await contextA.setOffline(true);
+  await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const state=await db.loadStateSnapshot();
+    await store.removePerson('person_block_c_unrelated',state.version);
+  });
+  await pageB.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const state=await store.loadState();
+    await store.removePerson('person_block_c_unrelated',state.version);
+  });
+  await contextA.setOffline(false);
+  await expect.poll(()=>pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const status=await store.getSyncStatus();
+    return {pending:status.pending,conflicts:status.conflicts};
+  }),{timeout:10000}).toEqual({pending:0,conflicts:0});
+  server=await pageA.evaluate(async()=>await (await fetch('/api/state',{credentials:'same-origin'})).json());
+  expect(server.people.some(row=>row.id==='person_block_c_unrelated')).toBe(false);
+
   await contextB.close();
   await contextA.close();
 });

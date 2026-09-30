@@ -678,11 +678,37 @@ function loadState(userId) {
   return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency,appMode:u.app_mode||'simple',timezone:u.timezone||'UTC'},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};
 }
 
+
+function currentLedgerEntityIds(userId){
+  return {
+    person:new Set(q.people.all(userId).map(row=>row.id)),
+    account:new Set(q.accounts.all(userId).map(row=>row.id)),
+    entry:new Set(q.entries.all(userId).map(row=>row.id))
+  };
+}
+function stateLedgerEntityIds(state){
+  return {
+    person:new Set((state?.people||[]).map(row=>row.id)),
+    account:new Set((state?.accounts||[]).map(row=>row.id)),
+    entry:new Set((state?.entries||[]).map(row=>row.id))
+  };
+}
+function reconcileServerTombstones(userId,before,after,revision){
+  const stamp=nowIso();
+  for(const entity of ['person','account','entry']){
+    for(const id of after[entity]||[])syncQ.deleteTombstone.run(userId,entity,id);
+    for(const id of before[entity]||[]){
+      if(!(after[entity]||new Set()).has(id))syncQ.upsertTombstone.run(userId,entity,id,revision,stamp);
+    }
+  }
+}
+
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
   let clean; try{clean=validateState(input,user);assertRecurringReferences(user.user_id,clean);}catch(error){throw Object.assign(error,{status:400});}
   db.exec('BEGIN IMMEDIATE');
   try{
+    const before=currentLedgerEntityIds(user.user_id);
     const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,user.user_id,expected);
     if(Number(upd.changes)!==1) throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
     q.deleteEntries.run(user.user_id); q.deletePeople.run(user.user_id); q.deleteAccounts.run(user.user_id);
@@ -697,6 +723,7 @@ function saveState(user, input) {
     }
     q.deleteOrphanAttachments.run(user.user_id,user.user_id);
     bankFeed.reopenOrphans(user.user_id);bankFeed.reconcileReferences(user.user_id);
+    reconcileServerTombstones(user.user_id,before,stateLedgerEntityIds(clean),expected+1);
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);
@@ -1590,6 +1617,7 @@ export const server=http.createServer(async(req,res)=>{
       if(!body||typeof body!=='object'||!Array.isArray(body.people)||!Array.isArray(body.accounts)||!Array.isArray(body.entries))return fail(res,400,'That file is not a valid ledger backup.');
       db.exec('BEGIN IMMEDIATE');
       try{
+        const before=currentLedgerEntityIds(a.user_id);
         insights.replace(a.user_id,Array.isArray(body.categories)?body.categories:[],Array.isArray(body.budgets)?body.budgets:[]);
         const clean=validateState({...body,version:a.revision},a);assertRecurringReferences(a.user_id,clean);
         const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,a.user_id,a.revision);
@@ -1601,6 +1629,7 @@ export const server=http.createServer(async(req,res)=>{
         for(const e of clean.entries){const storage=entryToStorage(e,restoreAccountById);q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,storage.amountMinor,e.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,e.date,e.merchant,e.description,e.categoryId||null,storage.splitJson,e.createdAt,e.updatedAt);}
         q.deleteOrphanAttachments.run(a.user_id,a.user_id);
         bankFeed.reopenOrphans(a.user_id);bankFeed.reconcileReferences(a.user_id);
+        reconcileServerTombstones(a.user_id,before,stateLedgerEntityIds(clean),a.revision+1);
         db.exec('COMMIT');
         return json(res,200,loadState(a.user_id));
       }catch(error){db.exec('ROLLBACK');throw error;}

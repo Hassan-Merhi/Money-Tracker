@@ -27,7 +27,7 @@ test('Wave 14 closes dark-mode parity at mobile widths',()=>{
 test('Wave 14 protects long names, large values, overlays and menus from viewport overflow',()=>{
   const css=read('visual-audit.css');
   assert.match(css,/\.stat-value,[\s\S]*?overflow-wrap:anywhere/);
-  assert.match(css,/\.report-export-menu,\.entry-menu[\s\S]*?max-width:min\(320px,calc\(100vw - 24px\)\)/);
+  assert.match(css,/\.report-export-menu,\.entry-menu-popover[\s\S]*?max-width:min\(320px,calc\(100vw - 24px\)\)/);
   assert.match(css,/\.modal-backdrop,\.imp-backdrop\{max-width:100vw;overflow-x:hidden\}/);
   assert.match(css,/\.bank-amount\{max-width:46vw/);
   assert.match(css,/\.recurring-card-top,[\s\S]*?flex-wrap:wrap/);
@@ -37,7 +37,7 @@ test('Wave 14 has a dedicated screenshot audit and CI artifact retention',()=>{
   const pkg=read('package.json');
   const ci=read('.github/workflows/ci.yml');
   const spec=[read('e2e/visual-audit-matrix.spec.mjs'),read('e2e/visual-audit-states.spec.mjs'),read('e2e/visual-audit-overlays.spec.mjs'),read('e2e/wave14-fixture.mjs')].join('\n');
-  assert.match(pkg,/"test:wave14": "playwright test e2e\/visual-audit\.spec\.mjs --workers=1"/);
+  assert.match(pkg,/"test:wave14": "playwright test e2e\/visual-audit-matrix\.spec\.mjs e2e\/visual-audit-states\.spec\.mjs e2e\/visual-audit-overlays\.spec\.mjs --workers=1"/);
   assert.match(ci,/Run Wave 14 visual audit/);
   assert.match(ci,/wave14-visual-audit/);
   assert.match(ci,/test-results\/wave14-visual/);

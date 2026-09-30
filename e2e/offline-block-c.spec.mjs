@@ -150,6 +150,42 @@ test('Offline Block C: two-device conflicts auto-rebase or resolve explicitly',a
   server=await pageA.evaluate(async()=>await (await fetch('/api/state',{credentials:'same-origin'})).json());
   expect(server.people.find(row=>row.id==='person_block_c_conflict').note).toBe('keep server value');
 
+  // Server deletion wins the UUID. "Keep mine" must not loop or resurrect it.
+  await pageA.evaluate(async()=>{const store=await import('/lib/store.js');await store.loadState();});
+  await pageB.evaluate(async()=>{const store=await import('/lib/store.js');await store.loadState();});
+  await contextA.setOffline(true);
+  await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const state=await db.loadStateSnapshot(),person=state.people.find(row=>row.id==='person_block_c_conflict');
+    await store.updatePerson(person.id,{name:person.name,note:'must not resurrect'},state.version);
+  });
+  await pageB.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const state=await store.loadState();
+    await store.removePerson('person_block_c_conflict',state.version);
+  });
+  await contextA.setOffline(false);
+  await expect.poll(()=>pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');return (await store.getSyncStatus()).conflicts;
+  }),{timeout:10000}).toBe(1);
+  const deletedConflict=await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');return (await store.getSyncStatus()).queue.find(row=>row.status==='conflict')?.operationId||'';
+  });
+  await pageA.evaluate(()=>{location.hash='#settings';});
+  await expect(pageA.locator('[data-resolve-conflict][data-strategy="keep_mine"]')).toHaveCount(0);
+  await expect(pageA.locator('[data-resolve-conflict][data-strategy="keep_server"]')).toBeVisible();
+  const keepMineError=await pageA.evaluate(async operationId=>{
+    const store=await import('/lib/store.js');
+    try{await store.resolveSyncConflict(operationId,'keep_mine');return '';}catch(error){return String(error?.message||error);}
+  },deletedConflict);
+  expect(keepMineError).toContain('deleted on another device');
+  await pageA.evaluate(async operationId=>{
+    const store=await import('/lib/store.js');await store.resolveSyncConflict(operationId,'keep_server');
+  },deletedConflict);
+  server=await pageA.evaluate(async()=>await (await fetch('/api/state',{credentials:'same-origin'})).json());
+  expect(server.people.some(row=>row.id==='person_block_c_conflict')).toBe(false);
+
   await contextB.close();
   await contextA.close();
 });

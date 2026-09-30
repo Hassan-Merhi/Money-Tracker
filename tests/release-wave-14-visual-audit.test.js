@@ -36,7 +36,7 @@ test('Wave 14 protects long names, large values, overlays and menus from viewpor
 test('Wave 14 has a dedicated screenshot audit and CI artifact retention',()=>{
   const pkg=read('package.json');
   const ci=read('.github/workflows/ci.yml');
-  const spec=read('e2e/visual-audit.spec.mjs');
+  const spec=[read('e2e/visual-audit-matrix.spec.mjs'),read('e2e/visual-audit-states.spec.mjs'),read('e2e/visual-audit-overlays.spec.mjs'),read('e2e/wave14-fixture.mjs')].join('\n');
   assert.match(pkg,/"test:wave14": "playwright test e2e\/visual-audit\.spec\.mjs --workers=1"/);
   assert.match(ci,/Run Wave 14 visual audit/);
   assert.match(ci,/wave14-visual-audit/);

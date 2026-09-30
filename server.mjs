@@ -14,6 +14,7 @@ import { exportFullBackup, restoreFullBackup, DATA_LIMITS } from './lib/full-bac
 import { normalizeMoney, toMinor } from './lib/money.js';
 import { createSecurityOps } from './lib/security-ops.js';
 import { createRuntimeOps } from './lib/runtime-ops.js';
+import { runProductionSmoke } from './lib/production-smoke.js';
 import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, getMigrationQuarantineStats, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -21,6 +22,16 @@ const PWA_VERSION_SOURCE=readFileSync(join(ROOT,'pwa-version.js'),'utf8');
 const PWA_CACHE_VERSION=Number(/version:(\d+)/.exec(PWA_VERSION_SOURCE)?.[1]||0);
 const PWA_CACHE_NAME=/cacheName:'([^']+)'/.exec(PWA_VERSION_SOURCE)?.[1]||'';
 if(!Number.isInteger(PWA_CACHE_VERSION)||PWA_CACHE_VERSION<1||PWA_CACHE_NAME!==`money-tracker-debt-v${PWA_CACHE_VERSION}`)throw new Error('Invalid PWA version contract.');
+const DEPLOYMENT_GIT_COMMIT=String(process.env.RENDER_GIT_COMMIT||process.env.GIT_COMMIT||'local');
+const DEPLOYMENT_INFO=Object.freeze({
+  provider:process.env.RENDER==='true'?'render':'local',
+  gitCommit:DEPLOYMENT_GIT_COMMIT,
+  gitBranch:String(process.env.RENDER_GIT_BRANCH||process.env.GIT_BRANCH||''),
+  repoSlug:String(process.env.RENDER_GIT_REPO_SLUG||''),
+  externalUrl:String(process.env.RENDER_EXTERNAL_URL||''),
+  nodeVersion:process.version
+});
+const BUILD_VERSION=`pwa-${PWA_CACHE_VERSION}+${DEPLOYMENT_GIT_COMMIT.slice(0,12)}`;
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = process.env.DB_PATH || join(DATA_DIR, 'ledger.sqlite');
@@ -775,7 +786,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -1272,7 +1283,24 @@ export const server=http.createServer(async(req,res)=>{
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port=Number(process.env.PORT||4173);
-  server.listen(port,'0.0.0.0',()=>console.log(`Money Owed Tracker listening on http://0.0.0.0:${port}`));
+  server.listen(port,'0.0.0.0',async()=>{
+    console.log(`Money Owed Tracker listening on http://0.0.0.0:${port}`);
+    if(isProd&&process.env.PRODUCTION_SMOKE_ON_START!=='0'){
+      try{
+        const report=await runProductionSmoke({
+          baseUrl:`http://127.0.0.1:${port}`,
+          expectedCommit:process.env.RENDER_GIT_COMMIT||'',
+          waitMs:30_000,
+          intervalMs:500
+        });
+        console.log('WAVE13_PRODUCTION_SMOKE_OK '+JSON.stringify(report));
+      }catch(error){
+        console.error('WAVE13_PRODUCTION_SMOKE_FAILED '+JSON.stringify({message:String(error?.message||error),buildVersion:BUILD_VERSION,gitCommit:DEPLOYMENT_GIT_COMMIT}));
+        process.exitCode=1;
+        server.close(()=>{try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}try{db.close();}catch{}process.exit(1);});
+      }
+    }
+  });
   let shuttingDown=false;
   const shutdown=signal=>{
     if(shuttingDown)return;shuttingDown=true;

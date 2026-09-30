@@ -166,6 +166,15 @@ CREATE TABLE IF NOT EXISTS sync_changes (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sync_changes_user_revision ON sync_changes(user_id, revision, seq);
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  deleted_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, entity, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_tombstones_user_revision ON sync_tombstones(user_id, revision);
 `);
 const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(row=>row.name));
 if (!sessionColumns.has('last_seen_at')) db.exec("ALTER TABLE sessions ADD COLUMN last_seen_at TEXT");
@@ -263,7 +272,11 @@ const syncQ={
   processedById:db.prepare('SELECT request_hash AS requestHash,result_json AS resultJson FROM sync_operations WHERE user_id=? AND operation_id=?'),
   insertProcessed:db.prepare('INSERT INTO sync_operations(user_id,operation_id,request_hash,result_json,created_at) VALUES(?,?,?,?,?)'),
   insertChange:db.prepare('INSERT INTO sync_changes(user_id,revision,entity,entity_id,operation,payload_json,created_at) VALUES(?,?,?,?,?,?,?)'),
-  changesSince:db.prepare('SELECT seq,revision,entity,entity_id AS entityId,operation,payload_json AS payloadJson,created_at AS createdAt FROM sync_changes WHERE user_id=? AND revision>? ORDER BY revision,seq')
+  changesSince:db.prepare('SELECT seq,revision,entity,entity_id AS entityId,operation,payload_json AS payloadJson,created_at AS createdAt FROM sync_changes WHERE user_id=? AND revision>? ORDER BY revision,seq'),
+  tombstoneByEntity:db.prepare('SELECT revision,deleted_at AS deletedAt FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?'),
+  upsertTombstone:db.prepare(`INSERT INTO sync_tombstones(user_id,entity,entity_id,revision,deleted_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(user_id,entity,entity_id) DO UPDATE SET revision=excluded.revision,deleted_at=excluded.deleted_at`),
+  deleteTombstone:db.prepare('DELETE FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?')
 };
 
 const bankFeed = createBankFeedService(db);
@@ -1027,7 +1040,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

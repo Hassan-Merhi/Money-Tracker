@@ -1247,6 +1247,12 @@ export const server=http.createServer(async(req,res)=>{
       const sinceRevision=Number(url.searchParams.get('sinceRevision'));
       return json(res,200,pullSyncChanges(a.user_id,sinceRevision));
     }
+    if(url.pathname==='/api/sync/attachments'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req,ATTACHMENT_BODY_LIMIT);
+      const result=applyAttachmentSyncOperation(a,body.operation);
+      return json(res,result.alreadyProcessed?200:201,result);
+    }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);

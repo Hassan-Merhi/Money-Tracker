@@ -24,7 +24,9 @@
     "test:offline-a": "node --test tests/offline-block-a.test.js tests/release-wave-5-pwa.test.js",
     "test:offline-a-e2e": "playwright test e2e/offline-block-a.spec.mjs --workers=1",
     "test:offline-b": "node --test tests/offline-block-b.test.js tests/offline-block-b-server.test.js",
-    "test:offline-b-e2e": "playwright test e2e/offline-block-b.spec.mjs --workers=1"
+    "test:offline-b-e2e": "playwright test e2e/offline-block-b.spec.mjs --workers=1",
+    "test:offline-c": "node --test tests/offline-block-c.test.js tests/offline-block-c-server.test.js",
+    "test:offline-c-e2e": "playwright test e2e/offline-block-c.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

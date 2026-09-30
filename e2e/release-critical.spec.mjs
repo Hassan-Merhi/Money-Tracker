@@ -10,6 +10,10 @@ function watchBrowser(page){
   return ()=>expect(errors,'browser console/page errors').toEqual([]);
 }
 
+async function expectPageHeading(page,name){
+  await expect(page.locator('#pageHeading')).toHaveText(name);
+}
+
 async function expectNoHorizontalOverflow(page){
   const metrics=await page.evaluate(()=>({
     scrollWidth:document.documentElement.scrollWidth,
@@ -25,7 +29,7 @@ async function login(page){
   await page.getByLabel('Email').fill(OWNER_EMAIL);
   await page.getByLabel('Password').fill(OWNER_PASSWORD);
   await page.locator('#authForm').getByRole('button',{name:'Sign in'}).click();
-  await expect(page.getByRole('heading',{name:'Dashboard'})).toBeVisible();
+  await expectPageHeading(page,'Dashboard');
 }
 
 test.describe.serial('Wave 10 release-critical browser workflows',()=>{
@@ -41,10 +45,10 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await page.getByLabel('Email').fill(OWNER_EMAIL);
     await page.getByLabel('Password').fill(OWNER_PASSWORD);
     await page.locator('#authForm').getByRole('button',{name:'Create account'}).click();
-    await expect(page.getByRole('heading',{name:'Dashboard'})).toBeVisible();
+    await expectPageHeading(page,'Dashboard');
 
     await page.locator('.sidebar').getByRole('button',{name:'People'}).click();
-    await expect(page.getByRole('heading',{name:'People'})).toBeVisible();
+    await expectPageHeading(page,'People');
     await page.getByRole('button',{name:'Add person'}).click();
     const personModal=page.locator('.modal');
     await personModal.getByLabel('Name').fill('Alice');
@@ -53,7 +57,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await expect(page.getByRole('link',{name:/Alice/})).toBeVisible();
 
     await page.getByRole('link',{name:/Alice/}).click();
-    await expect(page.getByRole('heading',{name:'Person statement'})).toBeVisible();
+    await expectPageHeading(page,'Person statement');
     await page.getByRole('button',{name:'Add transaction'}).click();
     const txnModal=page.locator('.modal');
     await txnModal.getByLabel('Transaction type').selectOption('paid_for_person');
@@ -64,18 +68,18 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await expect(page.getByText('Amazon')).toBeVisible();
 
     await page.locator('.sidebar').getByRole('button',{name:'Transactions'}).click();
-    await expect(page.getByRole('heading',{name:'Transactions'})).toBeVisible();
+    await expectPageHeading(page,'Transactions');
     await page.getByLabel('Filter by date').selectOption('all');
     await expect(page.getByText('Wave 10 browser purchase')).toBeVisible();
 
     await page.locator('.sidebar').getByRole('button',{name:'Settings'}).click();
-    await expect(page.getByRole('heading',{name:'Settings'})).toBeVisible();
+    await expectPageHeading(page,'Settings');
     await page.getByLabel('App mode').selectOption('advanced');
     await page.getByRole('button',{name:'Save settings'}).click();
     await expect(page.locator('.sidebar').getByRole('button',{name:'Accounts & Cash'})).toBeVisible();
 
     await page.locator('.sidebar').getByRole('button',{name:'Accounts & Cash'}).click();
-    await expect(page.getByRole('heading',{name:'Accounts & Cash'})).toBeVisible();
+    await expectPageHeading(page,'Accounts & Cash');
     await page.getByRole('button',{name:'Add account'}).click();
     let modal=page.locator('.modal');
     await modal.getByLabel('Account name').fill('Checking');
@@ -110,7 +114,7 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
       ['#reports','Reports & Exports']
     ]){
       await page.evaluate(value=>{location.hash=value;},hash);
-      await expect(page.getByRole('heading',{name:heading})).toBeVisible();
+      await expectPageHeading(page,heading);
     }
 
     assertClean();
@@ -142,19 +146,19 @@ test.describe.serial('Wave 10 release-critical browser workflows',()=>{
     await expectNoHorizontalOverflow(page);
 
     await page.locator('.mobile-nav').getByRole('button',{name:'Activity'}).click();
-    await expect(page.getByRole('heading',{name:'Transactions'})).toBeVisible();
+    await expectPageHeading(page,'Transactions');
     await page.getByLabel('Filter by date').selectOption('all');
     await expect(page.getByText('Wave 10 browser purchase')).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.locator('.mobile-nav').getByRole('button',{name:'Reports'}).click();
-    await expect(page.getByRole('heading',{name:'Reports & Exports'})).toBeVisible();
+    await expectPageHeading(page,'Reports & Exports');
     await expectNoHorizontalOverflow(page);
 
     await page.locator('.mobile-nav').getByRole('button',{name:'More navigation'}).click();
     await expect(page.getByRole('dialog',{name:'Your workspace'})).toBeVisible();
     await page.getByRole('button',{name:/Settings/}).click();
-    await expect(page.getByRole('heading',{name:'Settings'})).toBeVisible();
+    await expectPageHeading(page,'Settings');
     await expectNoHorizontalOverflow(page);
 
     assertClean();

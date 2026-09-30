@@ -51,8 +51,10 @@ test('Wave 4 restores light/dark parity for feature surfaces that hard-code ligh
   assert.match(css,/html\[data-theme="dark"\] \.report-export-menu/);
 });
 
-test('Wave 4 advances the coherent PWA shell version',()=>{
-  const version=read('pwa-version.js');
-  assert.match(version,/version:19/);
-  assert.match(version,/cacheName:'money-tracker-debt-v19'/);
+test('Wave 4 remains compatible with the coherent PWA shell version',()=>{
+  const source=read('pwa-version.js');
+  const version=Number(/version:(\d+)/.exec(source)?.[1]||0);
+  const cache=/cacheName:'([^']+)'/.exec(source)?.[1]||'';
+  assert.ok(version>=19,'Wave 4 requires PWA shell v19 or newer');
+  assert.equal(cache,`money-tracker-debt-v${version}`);
 });

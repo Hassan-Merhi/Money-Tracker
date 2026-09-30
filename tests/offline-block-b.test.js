@@ -129,3 +129,29 @@ test('Offline Block B hardening blocks transfer deletion from the offline queue 
   assert.match(server,/reopenedFeedItems\};/);
   assert.match(bank,/reopenOrphans\(userId\)\{return Number\(q\.reopenOrphans\.run/);
 });
+
+
+test('Offline Block B hardening never turns a committed outbox write into a retryable create failure',()=>{
+  const offline=read('lib/offline-db.js');
+  const store=read('lib/store.js');
+  assert.match(offline,/try\{state=await loadStateSnapshot\(\);\}catch\{\}/);
+  assert.match(offline,/return \{operationId,state,committed:true\}/);
+  assert.match(store,/function projectLocalMutation/);
+  assert.match(store,/const optimistic=projectLocalMutation\(snapshot,spec\)/);
+  assert.match(store,/await localSnapshot\(\)\|\|queued\.state\|\|optimistic/);
+});
+
+test('Offline Block B hardening transitions expired sync sessions to sign-in and surfaces delayed Bank Feed reopen warnings',()=>{
+  const store=read('lib/store.js');
+  const app=read('app.js');
+  assert.match(store,/authRequired:true[\s\S]*?throw error/);
+  assert.match(app,/if\(detail\.authRequired\)\{[\s\S]*?showAuth\('Your session expired/);
+  assert.match(app,/detail\.reopenedFeedItems[\s\S]*?!saving[\s\S]*?Bank Feed row reopened/);
+  assert.match(app,/const result=await syncPendingOperations\(\)[\s\S]*?result\?\.reopenedFeedItems/);
+});
+
+test('Offline Block B hardening returns reopened Bank Feed counts from direct entry deletes',()=>{
+  const server=read('server.mjs');
+  assert.match(server,/if\(req\.method==='DELETE'\)\{[\s\S]*?let reopenedFeedItems=0;[\s\S]*?reopenedFeedItems=bankFeed\.reopenOrphans/);
+  assert.match(server,/return json\(res,200,\{\.\.\.loadState\(a\.user_id\),reopenedFeedItems\}\)/);
+});

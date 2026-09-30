@@ -147,6 +147,25 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
   PRIMARY KEY (user_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_recurring_user_due ON recurring_rules(user_id, is_active, next_due_date);
+CREATE TABLE IF NOT EXISTS sync_operations (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  operation_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, operation_id)
+);
+CREATE TABLE IF NOT EXISTS sync_changes (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  payload_json TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_changes_user_revision ON sync_changes(user_id, revision, seq);
 `);
 const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(row=>row.name));
 if (!sessionColumns.has('last_seen_at')) db.exec("ALTER TABLE sessions ADD COLUMN last_seen_at TEXT");
@@ -238,6 +257,13 @@ const q = {
   bumpRevision: db.prepare('UPDATE users SET revision=revision+1 WHERE id=? AND revision=?'),
   deleteAllData: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deleteAllRecurring: db.prepare('DELETE FROM recurring_rules WHERE user_id=?'),
+};
+
+const syncQ={
+  processedById:db.prepare('SELECT request_hash AS requestHash,result_json AS resultJson FROM sync_operations WHERE user_id=? AND operation_id=?'),
+  insertProcessed:db.prepare('INSERT INTO sync_operations(user_id,operation_id,request_hash,result_json,created_at) VALUES(?,?,?,?,?)'),
+  insertChange:db.prepare('INSERT INTO sync_changes(user_id,revision,entity,entity_id,operation,payload_json,created_at) VALUES(?,?,?,?,?,?,?)'),
+  changesSince:db.prepare('SELECT seq,revision,entity,entity_id AS entityId,operation,payload_json AS payloadJson,created_at AS createdAt FROM sync_changes WHERE user_id=? AND revision>? ORDER BY revision,seq')
 };
 
 const bankFeed = createBankFeedService(db);
@@ -786,7 +812,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

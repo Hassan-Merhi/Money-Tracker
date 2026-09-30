@@ -1,6 +1,7 @@
-const CACHE='money-tracker-debt-v16';
-const CORE=[
-  '/','/index.html','/styles.css','/dashboard.css','/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=mobile-v3',
+const ASSET_VERSION='__ASSET_VERSION__';
+const CACHE=`money-tracker-shell-${ASSET_VERSION}`;
+const CORE_SOURCE=[
+  '/','/index.html','/styles.css','/dashboard.css','/mobile.css','/activity.css','/lib/dashboard-ui.js','/theme-init.js','/app.js',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg',
@@ -8,13 +9,16 @@ const CORE=[
   '/lib/recurring.js','/lib/recurring-rule-form.js','/lib/bank-feed.js','/lib/insights.js',
   '/lib/reporting.js','/lib/xlsx.js','/lib/importer.js','/lib/legacy-excel.js','/lib/pdf.js','/lib/reports-ui.js'
 ];
+const VERSIONED_EXT=/\.(?:js|css|svg|png|ico)$/;
+const shellUrl=path=>VERSIONED_EXT.test(path)?`${path}?v=${encodeURIComponent(ASSET_VERSION)}`:path;
+const CORE=CORE_SOURCE.map(shellUrl);
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
 });
 
 self.addEventListener('activate',event=>{
-  event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));
+  event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE&&key.startsWith('money-tracker-')).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));
 });
 
 self.addEventListener('message',event=>{
@@ -46,7 +50,11 @@ async function staleWhileRevalidate(request,revalidatePromise){
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
-  if(event.request.mode==='navigate'){event.respondWith(networkFirst(event.request));return;}
+  const requestVersion=url.searchParams.get('v');
+  if(event.request.mode==='navigate'||requestVersion!==ASSET_VERSION){
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
   const revalidatePromise=fetchAndCache(event.request);
   event.waitUntil(revalidatePromise.then(()=>undefined));
   event.respondWith(staleWhileRevalidate(event.request,revalidatePromise));

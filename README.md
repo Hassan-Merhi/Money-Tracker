@@ -15,8 +15,8 @@ quick actions. Desktop keeps the full sidebar; phones show five comfortable
 navigation targets (Advanced tools are available from **More**). All totals remain
 currency-separated and use the existing ledger calculations.
 
-No new runtime dependencies, external fonts, or analytics are needed. The PWA
-shell is version 16 and caches the dashboard stylesheet and presentation module.
+No runtime dependencies, external fonts, or analytics are required in production. The current PWA
+shell version is owned only by `pwa-version.js`; the service worker and health endpoint both consume that contract so cache-version drift cannot recur.
 See [dashboard QA notes](docs/DASHBOARD_REFRESH.md) for validation and review steps.
 
 ## Block A — Secure core

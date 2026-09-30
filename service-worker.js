@@ -1,6 +1,7 @@
-const CACHE='money-tracker-debt-v16';
+importScripts('/pwa-version.js');
+const CACHE=self.MONEY_TRACKER_PWA.cacheName;
 const CORE=[
-  '/','/index.html','/styles.css','/dashboard.css','/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=mobile-v3',
+  '/','/index.html','/pwa-version.js','/styles.css','/dashboard.css','/mobile.css?v=mobile-v3','/activity.css?v=mobile-v3','/lib/dashboard-ui.js','/theme-init.js','/app.js?v=mobile-v3',
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg',
@@ -21,25 +22,29 @@ self.addEventListener('message',event=>{
   if(event.data?.type==='SKIP_WAITING')self.skipWaiting();
 });
 
+async function currentCache(){return await caches.open(CACHE);}
+
 async function networkFirst(request){
+  const cache=await currentCache();
   try{
-    const response=await fetch(request);
-    if(response?.ok){const cache=await caches.open(CACHE);cache.put(request,response.clone()).catch(()=>{});}
+    const response=await fetch(request,{cache:'no-store'});
+    if(response?.ok)cache.put(request,response.clone()).catch(()=>{});
     return response;
   }catch{
-    return await caches.match(request)||await caches.match('/index.html')||Response.error();
+    return await cache.match(request)||await cache.match('/index.html')||Response.error();
   }
 }
 
 function fetchAndCache(request){
-  return fetch(request).then(async response=>{
-    if(response?.ok){const cache=await caches.open(CACHE);await cache.put(request,response.clone()).catch(()=>{});}
+  return currentCache().then(cache=>fetch(request,{cache:'no-store'}).then(async response=>{
+    if(response?.ok)await cache.put(request,response.clone()).catch(()=>{});
     return response;
-  }).catch(()=>null);
+  }).catch(()=>null));
 }
 
 async function staleWhileRevalidate(request,revalidatePromise){
-  const cached=await caches.match(request);
+  const cache=await currentCache();
+  const cached=await cache.match(request);
   return cached||await revalidatePromise||Response.error();
 }
 

@@ -17,6 +17,10 @@ import { createRuntimeOps } from './lib/runtime-ops.js';
 import { accountFromStorage, accountToStorage, ensureCoreExactMoneySchema, entryFromStorage, entryToStorage, exactMoneySchemaVersion, getMigrationQuarantineStats, markExactMoneySchema, templateFromStorage, templateToStorage } from './lib/money-storage.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
+const PWA_VERSION_SOURCE=readFileSync(join(ROOT,'pwa-version.js'),'utf8');
+const PWA_CACHE_VERSION=Number(/version:(\d+)/.exec(PWA_VERSION_SOURCE)?.[1]||0);
+const PWA_CACHE_NAME=/cacheName:'([^']+)'/.exec(PWA_VERSION_SOURCE)?.[1]||'';
+if(!Number.isInteger(PWA_CACHE_VERSION)||PWA_CACHE_VERSION<1||PWA_CACHE_NAME!==`money-tracker-debt-v${PWA_CACHE_VERSION}`)throw new Error('Invalid PWA version contract.');
 const DATA_DIR = process.env.DATA_DIR || join(ROOT, 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = process.env.DB_PATH || join(DATA_DIR, 'ledger.sqlite');
@@ -754,7 +758,7 @@ function staticFile(req,res,url){
   securityHeaders(res);res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');
   const base=String(file).split(/[\\/]/).at(-1),stats=statSync(file),etag=`W/"${stats.size}-${Math.floor(stats.mtimeMs)}"`;
   res.setHeader('ETag',etag);
-  res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
+  res.setHeader('Cache-Control',(extname(file)==='.html'||base==='service-worker.js'||base==='pwa-version.js'||base==='manifest.webmanifest')?'no-cache':'public, max-age=300');
   if(base==='service-worker.js')res.setHeader('Service-Worker-Allowed','/');
   if(String(req.headers['if-none-match']||'')===etag){res.writeHead(304);res.end();return;}
   res.writeHead(200);res.end(readFileSync(file));
@@ -771,7 +775,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:16,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

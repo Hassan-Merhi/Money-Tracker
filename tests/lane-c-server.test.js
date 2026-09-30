@@ -28,7 +28,8 @@ test('Lane C health exposes runtime diagnostics and hardened headers',async()=>{
   const r=await request('/api/health');
   assert.equal(r.res.status,200);
   assert.equal(r.data.laneCVersion,1);
-  assert.equal(r.data.pwaCacheVersion,16);
+  assert.ok(Number.isInteger(r.data.pwaCacheVersion)&&r.data.pwaCacheVersion>0);
+  assert.equal(r.data.pwaCacheName,`money-tracker-debt-v${r.data.pwaCacheVersion}`);
   assert.equal(r.data.runtime.sqliteQuickCheck,'ok');
   assert.equal(r.data.runtime.foreignKeyViolations,0);
   assert.equal(r.res.headers.get('cross-origin-opener-policy'),'same-origin');
@@ -41,6 +42,9 @@ test('service worker and manifest are served with update-safe cache policy',asyn
   assert.equal(sw.status,200);
   assert.match(sw.headers.get('cache-control')||'',/no-cache/);
   assert.equal(sw.headers.get('service-worker-allowed'),'/');
+  const version=await fetch(base+'/pwa-version.js');
+  assert.equal(version.status,200);
+  assert.match(version.headers.get('cache-control')||'',/no-cache/);
   const manifest=await fetch(base+'/manifest.webmanifest');
   assert.equal(manifest.status,200);
   assert.match(manifest.headers.get('cache-control')||'',/no-cache/);

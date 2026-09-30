@@ -25,11 +25,12 @@ async function request(path,{method='GET',body,cookie='',csrf='',headers={}}={})
 let cookie='',csrf='',userId='';
 const ownerPassword='correct horse battery staple';
 
-test('Lane D health reports release readiness and PWA v16',async()=>{
+test('Lane D health reports release readiness and the current PWA contract',async()=>{
   const r=await request('/api/health');
   assert.equal(r.res.status,200);
   assert.equal(r.data.laneDVersion,1);
-  assert.equal(r.data.pwaCacheVersion,16);
+  assert.ok(Number.isInteger(r.data.pwaCacheVersion)&&r.data.pwaCacheVersion>0);
+  assert.equal(r.data.pwaCacheName,`money-tracker-debt-v${r.data.pwaCacheVersion}`);
   assert.equal(r.data.dataLimits.bankFeedItems,50000);
   assert.equal(r.data.dataLimits.attachmentBytes,100*1024*1024);
 });

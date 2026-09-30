@@ -258,7 +258,7 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
 .person-card-arrow .ui-icon{width:17px;height:17px}
 
 @media(max-width:760px){
-  .people-page .people-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:8px;margin-bottom:10px}
+  .people-page .people-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:10px}
   .people-page .people-search-wrap{max-width:none}
   .people-page .people-search{min-width:0;height:48px;border-radius:14px;padding:0 14px;font-size:16px}
   .people-page .people-add-btn{width:48px;min-width:48px;height:48px;min-height:48px;padding:0;border-radius:14px}

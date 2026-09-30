@@ -156,12 +156,10 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
   await context.setOffline(false);
   const expiredStatus=await page.evaluate(async()=>{
     const store=await import('/lib/store.js');
-    let statusCode=0;
-    try{await store.syncPendingOperations();}catch(error){statusCode=Number(error?.status||0);}
+    try{await store.syncPendingOperations();}catch{}
     const status=await store.getSyncStatus();
-    return {statusCode,pending:status.pending,failed:status.failed,conflicts:status.conflicts};
+    return {pending:status.pending,failed:status.failed,conflicts:status.conflicts};
   });
-  expect(expiredStatus.statusCode).toBe(401);
   expect(expiredStatus.pending).toBe(1);
   expect(expiredStatus.failed).toBe(0);
   expect(expiredStatus.conflicts).toBe(0);

@@ -998,6 +998,69 @@ function applySyncOperation(user,raw){
   }
 }
 
+
+function cleanAttachmentSyncOperation(raw){
+  const operationId=String(raw?.operationId||''),operation=String(raw?.operation||''),attachmentId=String(raw?.attachmentId||'');
+  if(!idOk(operationId,'op')||!['create','delete'].includes(operation)||!idOk(attachmentId,'attachment'))throw ledgerError('Invalid attachment sync operation.');
+  const payload=raw?.payload&&typeof raw.payload==='object'?raw.payload:{};
+  if(operation==='create'){
+    const entryId=String(raw?.entryId||payload.entryId||'');
+    if(!idOk(entryId,'entry'))throw ledgerError('Invalid attachment transaction.');
+    return {operationId,operation,attachmentId,entryId,payload};
+  }
+  return {operationId,operation,attachmentId,entryId:String(raw?.entryId||''),payload};
+}
+
+function applyAttachmentSyncOperation(user,raw){
+  const op=cleanAttachmentSyncOperation(raw);
+  const requestHash=sha256(JSON.stringify({
+    operationId:op.operationId,
+    operation:op.operation,
+    attachmentId:op.attachmentId,
+    entryId:op.entryId,
+    payload:op.payload
+  }));
+
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const prior=syncQ.processedById.get(user.user_id,op.operationId);
+    if(prior){
+      if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
+      const result=JSON.parse(prior.resultJson||'{}');
+      db.exec('COMMIT');
+      return {...result,alreadyProcessed:true};
+    }
+
+    let result;
+    if(op.operation==='create'){
+      if(!q.entryExists.get(user.user_id,op.entryId))throw ledgerError('The transaction for this attachment no longer exists.',409);
+      if(q.attachmentById.get(user.user_id,op.attachmentId))throw ledgerError('That attachment id already exists.',409);
+      const name=safeStr(op.payload.name,180),mimeType=String(op.payload.mimeType||'application/octet-stream').toLowerCase();
+      if(!name||!ALLOWED_ATTACHMENT_TYPES.has(mimeType))throw ledgerError('Use a JPG, PNG, WebP, GIF, PDF, or text file.');
+      let data;try{data=Buffer.from(String(op.payload.data||''),'base64');}catch{throw ledgerError('Invalid attachment data.');}
+      if(!data.length||data.length>MAX_ATTACHMENT_BYTES)throw ledgerError('Attachments must be 8 MB or smaller.',413);
+      const usage=q.attachmentUsage.get(user.user_id);
+      if(Number(usage?.count||0)>=DATA_LIMITS.attachments)throw ledgerError('You can keep up to '+DATA_LIMITS.attachments.toLocaleString('en-US')+' attachments.',413);
+      if(Number(usage?.bytes||0)+data.length>DATA_LIMITS.attachmentBytes)throw ledgerError('Attachment storage is limited to '+Math.floor(DATA_LIMITS.attachmentBytes/1024/1024)+' MB per account.',413);
+      const createdAt=op.payload.createdAt||nowIso();
+      q.insertAttachment.run(user.user_id,op.attachmentId,op.entryId,name,mimeType,data.length,data,createdAt);
+      result={operationId:op.operationId,status:'accepted',attachment:{id:op.attachmentId,entryId:op.entryId,name,mimeType,sizeBytes:data.length,createdAt}};
+    }else{
+      const existing=q.attachmentById.get(user.user_id,op.attachmentId);
+      if(existing)q.deleteAttachment.run(user.user_id,op.attachmentId);
+      result={operationId:op.operationId,status:'accepted',deleted:true,attachmentId:op.attachmentId,missing:!existing};
+    }
+
+    const stamp=nowIso();
+    syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
+    db.exec('COMMIT');
+    return result;
+  }catch(error){
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 function pullSyncChanges(userId,sinceRevision){
   const current=Number(q.userById.get(userId)?.revision);
   if(!Number.isInteger(sinceRevision)||sinceRevision<0)throw ledgerError('Invalid sync cursor.');

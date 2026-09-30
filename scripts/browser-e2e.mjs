@@ -377,8 +377,12 @@ try{
   await setFile('#bankFile',csvPath);
   await waitFor(`Boolean(document.querySelector('#bankImportNow'))`,'Bank Feed mapping preview',{timeout:16000});
   await fill('#bankAccount',accountA.id);
+  const bankMappingBeforeImport=await evaluate(`({account:document.querySelector('#bankAccount')?.value,mapping:Object.fromEntries([...document.querySelectorAll('[data-map]')].map(el=>[el.dataset.map,el.value])),toast:document.querySelector('.toast')?.textContent||''})`);
   await click('#bankImportNow');
-  const importedFeed=await waitFor(`fetch('/api/bank-feed?status=pending&limit=100&offset=0',{cache:'no-store'}).then(r=>r.json()).then(d=>Number(d.stats?.pending||0)>0?d:null)`,'Bank Feed server import',{timeout:16000});
+  await sleep(900);
+  const bankImportDiag=await evaluate(`Promise.all([fetch('/api/bank-feed?status=pending&limit=100&offset=0',{cache:'no-store'}).then(r=>r.json()),Promise.resolve(document.querySelector('.toast')?.textContent||'')]).then(([feed,toast])=>({feed,toast}))`);
+  if(Number(bankImportDiag.feed?.stats?.pending||0)===0)throw new Error('Bank Feed import created no pending rows: '+JSON.stringify({before:bankMappingBeforeImport,after:bankImportDiag}));
+  const importedFeed=bankImportDiag.feed;
   assert.ok(importedFeed.items?.some(item=>item.status==='pending'));
   await waitFor(`Boolean(document.querySelector('.bank-post'))`,'pending Bank Feed row',{timeout:16000});
   await click('.bank-post');

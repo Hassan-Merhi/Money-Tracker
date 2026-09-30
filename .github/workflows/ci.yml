@@ -12,7 +12,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,6 +26,8 @@ jobs:
         run: npm run test:wave11-12
       - name: Run accounting reconciliation gate
         run: npm run accounting:check
+      - name: Run Wave 5 PWA integrity gate
+        run: npm run test:wave5
       - name: Check browser JavaScript syntax
         run: |
           node --check app.js
@@ -63,3 +65,6 @@ jobs:
           node --check scripts/restore-db-snapshot.mjs
           node --check scripts/accounting-check.mjs
           node --check scripts/accounting-bank-feed-check.mjs
+          node --check scripts/browser-e2e.mjs
+      - name: Run Wave 10 real-browser E2E gate
+        run: npm run test:browser

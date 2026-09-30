@@ -99,6 +99,59 @@ test('Offline Block B has a dedicated CI and browser gate and bumps the PWA cach
   assert.equal(pkg.scripts['test:offline-b-e2e'],'playwright test e2e/offline-block-b.spec.mjs --workers=1');
   assert.match(ci,/Run Offline Block B contract gate/);
   assert.match(ci,/Run Offline Block B browser gate/);
-  assert.match(version,/version:23/);
-  assert.match(version,/money-tracker-debt-v23/);
+  assert.match(version,/version:25/);
+  assert.match(version,/money-tracker-debt-v25/);
+});
+
+
+test('Offline Block B hardening keeps auth failures retryable and connected writes resilient to IndexedDB errors',()=>{
+  const store=read('lib/store.js');
+  assert.match(store,/async function localSnapshot\(expectedIdentity=authenticatedIdentity\)/);
+  assert.match(store,/userIdentity\(cachedUser\)!==expectedIdentity/);
+  assert.match(store,/catch\{return null;\}/);
+  assert.match(store,/error\?\.code==='OFFLINE_PENDING_USER_SWITCH'/);
+  assert.match(store,/if\(browserOnline\(\)&&error\?\.status!==409\)return await directCoreMutation/);
+  assert.match(store,/if\(error\.status===401\)\{[\s\S]*?status:'pending'[\s\S]*?authRequired:true/);
+  assert.match(store,/const snapshot=await localSnapshot\(\)/);
+  assert.match(store,/if\(!snapshot\)\{[\s\S]*?browserOnline\(\)[\s\S]*?directCoreMutation/);
+});
+
+test('Offline Block B hardening blocks transfer deletion from the offline queue and propagates Bank Feed reopen counts',()=>{
+  const store=read('lib/store.js');
+  const server=read('server.mjs');
+  const bank=read('lib/bank-server.js');
+  assert.match(store,/existing\?\.type==='account_transfer'/);
+  assert.match(store,/Reconnect to edit this transfer/);
+  assert.match(store,/Reconnect to delete this transfer/);
+  assert.match(server,/if\(existing\.type==='account_transfer'\)throw ledgerError/);
+  assert.match(server,/reopenedFeedItems\+=bankFeed\.revalidatePosted/);
+  assert.match(server,/reopenedFeedItems\+=bankFeed\.reopenOrphans/);
+  assert.match(server,/reopenedFeedItems\};/);
+  assert.match(bank,/reopenOrphans\(userId\)\{return Number\(q\.reopenOrphans\.run/);
+});
+
+
+test('Offline Block B hardening never turns a committed outbox write into a retryable create failure',()=>{
+  const offline=read('lib/offline-db.js');
+  const store=read('lib/store.js');
+  assert.match(offline,/try\{state=await loadStateSnapshot\(\);\}catch\{\}/);
+  assert.match(offline,/return \{operationId,state,committed:true\}/);
+  assert.match(store,/function projectLocalMutation/);
+  assert.match(store,/const optimistic=projectLocalMutation\(snapshot,spec\)/);
+  assert.match(store,/await localSnapshot\(\)\|\|queued\.state\|\|optimistic/);
+});
+
+test('Offline Block B hardening transitions expired sync sessions to sign-in and surfaces delayed Bank Feed reopen warnings',()=>{
+  const store=read('lib/store.js');
+  const app=read('app.js');
+  assert.match(store,/authRequired:true[\s\S]*?throw error/);
+  assert.match(app,/if\(detail\.authRequired\)\{[\s\S]*?showAuth\('Your session expired/);
+  assert.match(app,/detail\.reopenedFeedItems[\s\S]*?!saving[\s\S]*?Bank Feed row reopened/);
+  assert.match(app,/const result=await syncPendingOperations\(\)[\s\S]*?result\?\.reopenedFeedItems/);
+});
+
+test('Offline Block B hardening returns reopened Bank Feed counts from direct entry deletes',()=>{
+  const server=read('server.mjs');
+  assert.match(server,/if\(req\.method==='DELETE'\)\{[\s\S]*?let reopenedFeedItems=0;[\s\S]*?reopenedFeedItems=bankFeed\.reopenOrphans/);
+  assert.match(server,/return json\(res,200,\{\.\.\.loadState\(a\.user_id\),reopenedFeedItems\}\)/);
 });

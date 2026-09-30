@@ -51,8 +51,14 @@ window.addEventListener('moneytracker:pwa',event=>{pwa=event.detail||pwa;if(stat
 window.addEventListener('moneytracker:sync',event=>{
   const detail=event.detail||{};
   syncInfo={...syncInfo,...detail};
+  if(detail.authRequired){
+    user=null;state=null;
+    void showAuth('Your session expired. Sign in again. Unsynced device changes were preserved.');
+    return;
+  }
   if(detail.state)state=detail.state;
   if(state)render();
+  if(Number(detail.reopenedFeedItems)>0&&!saving)showToast('Bank Feed row reopened - the posted amount no longer matches this transaction.');
 });
 window.addEventListener('moneytracker:state-replaced',event=>{if(event.detail){state=event.detail;if(user)render();}});
 
@@ -622,7 +628,7 @@ function renderSettings(main) {
   </div>`;
   main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value,appMode=main.querySelector('#settingMode').value,timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';saveThemePreference(main.querySelector('#settingTheme').value);const saved=await runMutation(version=>updateSettings({defaultCurrency,appMode,timezone},version),'Settings saved.');if(saved&&appMode==='advanced')showToast('Advanced mode enabled — accounts, Bank Feed, budgets and schedules are now available.');});
   main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
-  main.querySelector('#syncNow')?.addEventListener('click',async()=>{try{await syncPendingOperations();syncInfo=await getSyncStatus();state=await loadState();render();showToast(syncInfo.pending?'Sync paused. Check the queued change status.':'Everything is synced.');}catch(error){showToast(error.message||'Could not sync.');}});
+  main.querySelector('#syncNow')?.addEventListener('click',async()=>{try{const result=await syncPendingOperations();syncInfo=await getSyncStatus();state=await loadState();render();if(Number(result?.reopenedFeedItems)>0)showToast('Bank Feed row reopened - the posted amount no longer matches this transaction.');else showToast(syncInfo.pending?'Sync paused. Check the queued change status.':'Everything is synced.');}catch(error){if(error.status===401){user=null;state=null;void showAuth('Your session expired. Sign in again. Unsynced device changes were preserved.');}else showToast(error.message||'Could not sync.');}});
   main.querySelector('#discardSync')?.addEventListener('click',async()=>{if(!confirm('Discard every queued offline change on this device and reload the server copy?'))return;try{state=await discardPendingChangesAndReload();syncInfo=await getSyncStatus();render();showToast('Queued device changes were discarded and the server copy was reloaded.');}catch(error){showToast(error.message||'Could not reload the server copy.');}});
   main.querySelector('#installApp')?.addEventListener('click',async()=>{const accepted=await installPwa();showToast(accepted?'Money Tracker installation started.':'Installation was not completed.');});
   main.querySelector('#settingsApplyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});

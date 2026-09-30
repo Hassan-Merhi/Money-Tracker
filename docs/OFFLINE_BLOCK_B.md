@@ -94,3 +94,14 @@ Block B is complete when:
 - pull can incrementally converge or safely request a full refresh;
 - existing Block A offline-read guarantees remain intact;
 - CI includes contract, server and browser tests for O4–O6.
+
+
+## Post-merge hardening
+
+The final Block B gate also covers follow-up recovery cases found in review:
+
+- HTTP 401 during sync leaves the operation `pending`, preserves local data, and resumes after sign-in;
+- connected writes fall back to the existing atomic HTTP endpoints when IndexedDB cannot be opened or read;
+- existing account transfers cannot be updated, reclassified, or deleted through the offline queue before O9;
+- synced transaction edits/deletes propagate the count of reopened Bank Feed rows so the UI keeps the reconciliation warning;
+- these client changes ship with PWA cache version 25.

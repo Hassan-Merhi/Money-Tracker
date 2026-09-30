@@ -834,6 +834,7 @@ function applySyncOperation(user,raw){
     if(current!==op.baseRevision)throw ledgerError('This ledger changed before the offline change could sync.',409);
 
     const changes=[];
+    let reopenedFeedItems=0;
 
     if(op.entity==='settings'){
       const currentUser=q.userById.get(user.user_id);
@@ -930,17 +931,18 @@ function applySyncOperation(user,raw){
       }else{
         const existing=currentEntry(user.user_id,op.entityId);
         if(!existing)throw ledgerError('Transaction not found.',404);
+        if(existing.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
         if(op.operation==='update'){
           const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId},{existing});
           if(entry.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
           updateLedgerEntryRow(user.user_id,entry);
-          bankFeed.revalidatePosted(user.user_id,op.entityId);
+          reopenedFeedItems+=bankFeed.revalidatePosted(user.user_id,op.entityId).length;
           changes.push(syncChange('entry',entry.id,'update',entry));
         }else{
           q.deleteEntryAttachments.run(user.user_id,op.entityId);
           const changed=q.deleteEntry.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
-          bankFeed.reopenOrphans(user.user_id);
+          reopenedFeedItems+=bankFeed.reopenOrphans(user.user_id);
           changes.push(syncChange('entry',op.entityId,'delete',null));
         }
       }
@@ -961,7 +963,7 @@ function applySyncOperation(user,raw){
         stamp
       );
     }
-    const result={operationId:op.operationId,status:'accepted',revision};
+    const result={operationId:op.operationId,status:'accepted',revision,reopenedFeedItems};
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');
     return result;
@@ -1275,13 +1277,14 @@ export const server=http.createServer(async(req,res)=>{
       }
       if(req.method==='DELETE'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body);
+        let reopenedFeedItems=0;
         withLedgerMutation(a.user_id,expected,()=>{
           q.deleteEntryAttachments.run(a.user_id,id);
           const changed=q.deleteEntry.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
-          bankFeed.reopenOrphans(a.user_id);
+          reopenedFeedItems=bankFeed.reopenOrphans(a.user_id);
         });
-        return json(res,200,loadState(a.user_id));
+        return json(res,200,{...loadState(a.user_id),reopenedFeedItems});
       }
       return fail(res,405,'Transaction action not supported.');
     }

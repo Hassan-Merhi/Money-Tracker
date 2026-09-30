@@ -177,3 +177,97 @@ test('O5 requests a full refresh when a non-sync server mutation creates a revis
   assert.equal(pulled.data.requiresFullRefresh,true);
   assert.deepEqual(pulled.data.changes,[]);
 });
+
+
+test('O5 hardening rejects queued deletion of an existing account transfer',async()=>{
+  let state=(await request('/api/state')).data;
+  if(state.settings.appMode!=='advanced'){
+    const settings=await request('/api/settings',{method:'PUT',body:{appMode:'advanced',defaultCurrency:state.settings.defaultCurrency||'USD',timezone:state.settings.timezone||'UTC',expectedRevision:state.version}});
+    assert.equal(settings.res.status,200);
+    state=settings.data;
+  }
+
+  let response=await request('/api/accounts',{method:'POST',body:{expectedRevision:state.version,id:'account_offline_transfer_a',name:'Offline Transfer A',type:'cash',currency:'USD',openingBalance:100}});
+  assert.equal(response.res.status,201);state=response.data;
+  response=await request('/api/accounts',{method:'POST',body:{expectedRevision:state.version,id:'account_offline_transfer_b',name:'Offline Transfer B',type:'cash',currency:'USD',openingBalance:0}});
+  assert.equal(response.res.status,201);state=response.data;
+  response=await request('/api/entries',{method:'POST',body:{
+    expectedRevision:state.version,id:'entry_offline_transfer_guard',type:'account_transfer',
+    fromAccountId:'account_offline_transfer_a',toAccountId:'account_offline_transfer_b',
+    amount:10,fromAmount:10,toAmount:10,date:'2026-09-30',merchant:'',description:'Guarded transfer'
+  }});
+  assert.equal(response.res.status,201);state=response.data;
+
+  const revisionBefore=state.version;
+  const blocked=await request('/api/sync/push',{method:'POST',body:{operation:{
+    operationId:'op_transfer_delete_guard',
+    entity:'entry',
+    entityId:'entry_offline_transfer_guard',
+    operation:'delete',
+    baseRevision:revisionBefore,
+    payload:{id:'entry_offline_transfer_guard'}
+  }}});
+  assert.equal(blocked.res.status,400);
+  assert.match(blocked.data.error,/atomic-transfer phase/i);
+
+  const after=(await request('/api/state')).data;
+  assert.equal(after.version,revisionBefore);
+  assert.equal(after.entries.some(row=>row.id==='entry_offline_transfer_guard'),true);
+});
+
+test('O5 hardening reports Bank Feed rows reopened by a synced entry edit',async()=>{
+  let state=(await request('/api/state')).data;
+  let response=await request('/api/accounts',{method:'POST',body:{expectedRevision:state.version,id:'account_offline_feed',name:'Offline Feed',type:'bank',currency:'USD',openingBalance:500}});
+  assert.equal(response.res.status,201);state=response.data;
+
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{
+    accountId:'account_offline_feed',
+    sourceName:'offline-sync.csv',
+    rows:[{date:'2026-09-30',description:'SYNC EXPENSE',merchant:'Sync Shop',signedAmount:-25,currency:'USD',externalId:'offline-sync-row'}]
+  }});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(row=>row.externalId==='offline-sync-row');
+  assert.ok(item);
+
+  const posted=await request('/api/bank-feed/'+item.id+'/post',{method:'POST',body:{expectedRevision:state.version,classification:'expense'}});
+  assert.equal(posted.res.status,200);state=posted.data.state;
+  const entry=state.entries.find(row=>row.id===posted.data.entryId);
+  assert.ok(entry);
+
+  const pushed=await request('/api/sync/push',{method:'POST',body:{operation:{
+    operationId:'op_bank_feed_reopen_1',
+    entity:'entry',
+    entityId:entry.id,
+    operation:'update',
+    baseRevision:state.version,
+    payload:{...entry,amount:30}
+  }}});
+  assert.equal(pushed.res.status,201);
+  assert.equal(pushed.data.reopenedFeedItems,1);
+
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(row=>row.id===item.id).status,'pending');
+});
+
+
+test('O5 hardening direct entry deletion returns the Bank Feed reopen count',async()=>{
+  let state=(await request('/api/state')).data;
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{
+    accountId:'account_offline_feed',
+    sourceName:'offline-delete.csv',
+    rows:[{date:'2026-09-30',description:'DELETE SYNC EXPENSE',merchant:'Delete Shop',signedAmount:-18,currency:'USD',externalId:'offline-delete-row'}]
+  }});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(row=>row.externalId==='offline-delete-row');
+  assert.ok(item);
+
+  const posted=await request('/api/bank-feed/'+item.id+'/post',{method:'POST',body:{expectedRevision:state.version,classification:'expense'}});
+  assert.equal(posted.res.status,200);state=posted.data.state;
+
+  const deleted=await request('/api/entries/'+posted.data.entryId,{method:'DELETE',body:{expectedRevision:state.version}});
+  assert.equal(deleted.res.status,200);
+  assert.equal(deleted.data.reopenedFeedItems,1);
+
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(row=>row.id===item.id).status,'pending');
+});

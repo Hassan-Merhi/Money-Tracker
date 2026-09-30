@@ -55,6 +55,9 @@ test('Wave 5: activation deletes stale shell caches and runtime reads only the c
 
 test('Wave 5: update activation remains explicit and reloads only after controller change',()=>{
   const pwa=read('lib/pwa.js'),sw=read('service-worker.js');
+  assert.match(pwa,/updateViaCache:'none'/);
+  assert.match(pwa,/registration\.update\(\)\.catch/);
+  assert.match(pwa,/visibilitychange/);
   assert.match(pwa,/registration\.addEventListener\('updatefound'/);
   assert.match(pwa,/navigator\.serviceWorker\.addEventListener\('controllerchange'/);
   assert.match(pwa,/registration\.waiting\.postMessage\(\{type:'SKIP_WAITING'\}\)/);

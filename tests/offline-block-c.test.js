@@ -33,6 +33,10 @@ test('O7 stores conflict bases and supports automatic rebase plus explicit resol
   assert.match(app,/serverDeleted=\['update','delete'\]\.includes\(row\.operation\)/);
   assert.match(app,/canKeepMine=row\.operation!=='create'&&!serverDeleted/);
   assert.match(store,/operation\.operation==='delete'&&serverRecord==null/);
+  assert.match(offline,/function sameQueuedBase/);
+  assert.match(offline,/automatic&&row\.status!=='failed'&&!sameQueuedBase/);
+  assert.match(offline,/row\.status='conflict'/);
+  assert.match(store,/if\(operation\.status==='failed'\|\|operation\.status==='conflict'\)/);
 });
 
 test('O8 upgrades IndexedDB to durable tombstones and server tombstones',()=>{

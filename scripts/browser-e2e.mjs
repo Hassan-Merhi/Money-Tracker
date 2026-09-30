@@ -376,7 +376,10 @@ try{
   await fill('#bankAccount',accountA.id);
   await setFile('#bankFile',csvPath);
   await waitFor(`Boolean(document.querySelector('#bankImportNow'))`,'Bank Feed mapping preview',{timeout:16000});
+  await fill('#bankAccount',accountA.id);
   await click('#bankImportNow');
+  const importedFeed=await waitFor(`fetch('/api/bank-feed?status=pending&limit=100&offset=0',{cache:'no-store'}).then(r=>r.json()).then(d=>Number(d.stats?.pending||0)>0?d:null)`,'Bank Feed server import',{timeout:16000});
+  assert.ok(importedFeed.items?.some(item=>item.status==='pending'));
   await waitFor(`Boolean(document.querySelector('.bank-post'))`,'pending Bank Feed row',{timeout:16000});
   await click('.bank-post');
   await waitState(s=>s.entries?.some(e=>e.type==='account_expense'&&Math.abs(e.amount-12.34)<0.000001),'Bank Feed expense posted',16000);

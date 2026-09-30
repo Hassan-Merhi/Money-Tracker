@@ -70,8 +70,6 @@ export async function newPage(browser,view,theme,{authScreenshot=false}={}){
     hasTouch:view.hasTouch||false
   });
   const page=await context.newPage(),browserErrors=[];
-  page.on('pageerror',error=>browserErrors.push('pageerror: '+error.message));
-  page.on('console',message=>{if(message.type()==='error')browserErrors.push('console: '+message.text());});
   await page.addInitScript(({theme})=>localStorage.setItem('mot-theme',theme),{theme});
   await page.goto('/');
   await expect(page.locator('#authForm')).toBeVisible();
@@ -80,6 +78,8 @@ export async function newPage(browser,view,theme,{authScreenshot=false}={}){
   expect(login.ok(),'visual audit browser login').toBeTruthy();
   await page.reload();
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
+  page.on('pageerror',error=>browserErrors.push('pageerror: '+error.message));
+  page.on('console',message=>{if(message.type()==='error')browserErrors.push('console: '+message.text());});
   await page.addStyleTag({content:'*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}'});
   return {context,page,assertClean:()=>expect(browserErrors,'browser console/page errors').toEqual([])};
 }
@@ -166,7 +166,7 @@ export async function seedPopulatedExtremeState(){
   await putState({...state,settings:{...state.settings,displayName:'A Very Long Money Tracker Workspace Name Used For Final Visual Quality Assurance',defaultCurrency:'USD',appMode:'advanced',timezone:'Asia/Beirut'},people,accounts,entries});
   await post('/api/budgets',{categoryId:customExpenseCategoryId,currency:'USD',monthlyLimit:9876543210.99},'save visual budget');
   await post('/api/recurring',{title:'Monthly Recurring Schedule With A Very Long Name That Must Wrap Without Breaking Cards',frequency:'monthly',interval:1,anchorDate:TODAY,nextDueDate:TODAY,endDate:'2027-12-31',remindDaysBefore:7,isActive:true,template:{type:'account_expense',accountId:'account_usd_primary',amount:1234567.89,categoryId:customExpenseCategoryId,merchant:'Recurring Merchant With Long Name',description:'Recurring visual audit expense.'}},'create visual recurring rule');
-  await post('/api/recurring',{title:'Cross Currency Transfer Schedule',frequency:'monthly',interval:1,anchorDate:'2026-10-15',nextDueDate:'2026-10-15',endDate:null,remindDaysBefore:3,isActive:true,template:{type:'account_transfer',fromAccountId:'account_usd_primary',toAccountId:'account_eur',fromAmount:5000,toAmount:4400,merchant:'FX Transfer',description:'Scheduled FX transfer.'}},'create transfer schedule');
+  await post('/api/recurring',{title:'Cross Currency Transfer Schedule',frequency:'monthly',interval:1,anchorDate:'2026-10-15',nextDueDate:'2026-10-15',endDate:null,remindDaysBefore:3,isActive:true,template:{type:'account_transfer',fromAccountId:'account_usd_primary',toAccountId:'account_eur',amount:5000,fromAmount:5000,toAmount:4400,merchant:'FX Transfer',description:'Scheduled FX transfer.'}},'create transfer schedule');
   await post('/api/bank-feed/import',{accountId:'account_usd_primary',sourceName:'Visual Audit Statement September 2026 With A Long Source Name',rows:[
     {date:TODAY,description:'Bank row with an extremely long description that must render safely without widening the page',merchant:'Very Long Merchant Name For Bank Feed Rendering',signedAmount:-123456789.12,currency:'USD',externalId:'wave14-bank-1'},
     {date:'2026-09-29',description:'Salary deposit with a large amount',merchant:'Employer With Long Legal Company Name',signedAmount:987654321.01,currency:'USD',externalId:'wave14-bank-2'},

@@ -283,5 +283,51 @@ test('Offline Block C: transfers and attachments survive offline reload and conv
   serverAttachments=await page.evaluate(async()=>await (await fetch('/api/attachments?entry=entry_block_c_attachment_host',{credentials:'same-origin'})).json());
   expect(serverAttachments.attachments.length).toBe(0);
 
+  // A lost create response is ambiguous: the server may have committed it.
+  // Deleting locally must replace the create with an idempotent delete so no orphan survives.
+  let droppedAttachmentResponse=false;
+  await page.route('**/api/sync/attachments',async route=>{
+    if(!droppedAttachmentResponse){
+      droppedAttachmentResponse=true;
+      await route.fetch();
+      await route.abort('failed');
+      return;
+    }
+    await route.continue();
+  });
+  const ambiguous=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const file=new File(['ambiguous committed attachment'],'ambiguous.txt',{type:'text/plain'});
+    await store.uploadAttachment('entry_block_c_attachment_host',file);
+    const listed=await store.listAttachments('entry_block_c_attachment_host');
+    const status=await store.getSyncStatus();
+    const item=listed.attachments.find(row=>row.name==='ambiguous.txt');
+    return {id:item?.id||'',pending:status.attachmentQueue.filter(row=>row.status==='pending').length};
+  });
+  expect(droppedAttachmentResponse).toBe(true);
+  expect(ambiguous.id).toContain('attachment_');
+  expect(ambiguous.pending).toBe(1);
+  await page.unroute('**/api/sync/attachments');
+
+  await context.setOffline(true);
+  const afterAmbiguousDelete=await page.evaluate(async id=>{
+    const store=await import('/lib/store.js');
+    await store.deleteAttachment(id);
+    const status=await store.getSyncStatus();
+    const listed=await store.listAttachments('entry_block_c_attachment_host');
+    return {
+      attachmentCount:listed.attachments.length,
+      queue:status.attachmentQueue.map(row=>({operation:row.operation,attachmentId:row.attachmentId,status:row.status}))
+    };
+  },ambiguous.id);
+  expect(afterAmbiguousDelete.attachmentCount).toBe(0);
+  expect(afterAmbiguousDelete.queue).toEqual([{operation:'delete',attachmentId:ambiguous.id,status:'pending'}]);
+
+  await context.setOffline(false);
+  await page.evaluate(async()=>{const store=await import('/lib/store.js');await store.syncPendingOperations();});
+  await expect.poll(()=>page.evaluate(async()=>{const store=await import('/lib/store.js');return (await store.getSyncStatus()).pending;}),{timeout:10000}).toBe(0);
+  serverAttachments=await page.evaluate(async()=>await (await fetch('/api/attachments?entry=entry_block_c_attachment_host',{credentials:'same-origin'})).json());
+  expect(serverAttachments.attachments.some(row=>row.id===ambiguous.id)).toBe(false);
+
   await context.close();
 });

@@ -67,7 +67,7 @@ test('Offline Block B O5 implements ordered revision push/pull with safe full-re
   assert.match(store,/export async function syncPendingOperations/);
   assert.match(store,/\/api\/sync\/push/);
   assert.match(store,/\/api\/sync\/pull\?sinceRevision=/);
-  assert.match(store,/row\.status==='failed'\|\|row\.status==='conflict'/);
+  assert.match(store,/operation\.status==='failed'\|\|operation\.status==='conflict'/);
   assert.match(server,/CREATE TABLE IF NOT EXISTS sync_changes/);
   assert.match(server,/idx_sync_changes_user_revision/);
   assert.match(server,/function pullSyncChanges/);

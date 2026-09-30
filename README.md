@@ -180,6 +180,7 @@ Then open `http://localhost:4173`.
 npm test                 # Full suite
 npm run test:lane-d      # Lane D release gate
 npm run test:wave14      # Full phone/tablet/desktop light/dark visual audit
+npm run test:wave15      # Final blocker-only release-candidate sign-off gate
 npm run accounting:check # Money, ledger, migration, reporting, Wave 0, PDF and XLSX regressions
 ```
 
@@ -224,4 +225,4 @@ Highlights:
 - ETag/304 static delivery;
 - dedicated Lane D regression and release gates in CI.
 
-See `docs/LANE_D_WAVES_11_12_15.md` for the full contract and release checklist.
+See `docs/LANE_D_WAVES_11_12_15.md` for the Lane D contract and `docs/WAVE_15_FINAL_RELEASE_CANDIDATE.md` for the final 100/100 release checklist.

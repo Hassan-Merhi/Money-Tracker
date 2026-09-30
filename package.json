@@ -17,6 +17,7 @@
     "test:wave8-9": "node --test tests/wave8-security.test.js tests/wave9-recovery.test.js",
     "test:wave11-12": "node --test tests/release-wave-11-accessibility.test.js tests/release-wave-12-scale.test.js",
     "test:wave13": "node --test tests/release-wave-13-production-smoke.test.js",
+    "test:wave14": "playwright test e2e/visual-audit-matrix.spec.mjs e2e/visual-audit-states.spec.mjs e2e/visual-audit-overlays.spec.mjs --workers=1",
     "test:wave5": "node --test tests/release-wave-5-pwa.test.js",
     "test:wave10": "playwright test"
   },

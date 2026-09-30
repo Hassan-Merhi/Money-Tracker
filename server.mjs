@@ -1201,6 +1201,7 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
       if(Number(q.personCount.get(a.user_id)?.count||0)>=DATA_LIMITS.people)return fail(res,400,`You can keep up to ${DATA_LIMITS.people.toLocaleString('en-US')} people.`);
       const person=cleanPersonInput(body);
+      if(syncQ.tombstoneByEntity.get(a.user_id,'person',person.id))return fail(res,409,'This person was deleted before. Create a new person instead.');
       if(q.personById.get(a.user_id,person.id))return fail(res,409,'That person id already exists.');
       withLedgerMutation(a.user_id,expected,()=>{
         q.insertPerson.run(a.user_id,person.id,person.name,person.note,person.createdAt);
@@ -1223,7 +1224,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const id=decodeURIComponent(url.pathname.slice('/api/people/'.length));
       if(!idOk(id,'person'))return fail(res,400,'Invalid person.');
-      const existing=q.personById.get(a.user_id,id);if(!existing)return fail(res,404,'Person not found.');
+      const existing=q.personById.get(a.user_id,id);if(!existing){if(syncQ.tombstoneByEntity.get(a.user_id,'person',id))return fail(res,409,'This person was deleted on another device.');return fail(res,404,'Person not found.');}
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),person=cleanPersonInput({...body,id},{existing});
         withLedgerMutation(a.user_id,expected,()=>{
@@ -1238,6 +1239,7 @@ export const server=http.createServer(async(req,res)=>{
           assertPersonDeletable(a.user_id,id);
           const changed=q.deletePersonRow.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+          syncQ.upsertTombstone.run(a.user_id,'person',id,expected+1,nowIso());
         });
         return json(res,200,loadState(a.user_id));
       }
@@ -1248,6 +1250,7 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
       if(Number(q.accountCount.get(a.user_id)?.count||0)>=DATA_LIMITS.accounts)return fail(res,400,`You can keep up to ${DATA_LIMITS.accounts.toLocaleString('en-US')} accounts.`);
       const account=cleanAccountInput(body,{defaultCurrency:a.default_currency});
+      if(syncQ.tombstoneByEntity.get(a.user_id,'account',account.id))return fail(res,409,'This account was deleted before. Create a new account instead.');
       if(q.accountById.get(a.user_id,account.id))return fail(res,409,'That account id already exists.');
       withLedgerMutation(a.user_id,expected,()=>{
         const storage=accountToStorage(account);
@@ -1259,7 +1262,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const id=decodeURIComponent(url.pathname.slice('/api/accounts/'.length));
       if(!idOk(id,'account'))return fail(res,400,'Invalid account.');
-      const raw=q.accountById.get(a.user_id,id);if(!raw)return fail(res,404,'Account not found.');
+      const raw=q.accountById.get(a.user_id,id);if(!raw){if(syncQ.tombstoneByEntity.get(a.user_id,'account',id))return fail(res,409,'This account was deleted on another device.');return fail(res,404,'Account not found.');}
       const existing=accountFromStorage(raw);
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),account=cleanAccountInput({...body,id},{existing,defaultCurrency:a.default_currency,userId:a.user_id});
@@ -1276,6 +1279,7 @@ export const server=http.createServer(async(req,res)=>{
           assertAccountDeletable(a.user_id,id);
           const changed=q.deleteAccountRow.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+          syncQ.upsertTombstone.run(a.user_id,'account',id,expected+1,nowIso());
         });
         return json(res,200,loadState(a.user_id));
       }
@@ -1286,6 +1290,7 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
       if(Number(q.entryCount.get(a.user_id)?.count||0)>=DATA_LIMITS.entries)return fail(res,400,`You can keep up to ${DATA_LIMITS.entries.toLocaleString('en-US')} transactions.`);
       const entry=cleanLedgerEntry(a,body);
+      if(syncQ.tombstoneByEntity.get(a.user_id,'entry',entry.id))return fail(res,409,'This transaction was deleted before. Create a new transaction instead.');
       if(q.entryExists.get(a.user_id,entry.id))return fail(res,409,'That transaction id already exists.');
       withLedgerMutation(a.user_id,expected,()=>insertLedgerEntry(a.user_id,entry));
       return json(res,201,loadState(a.user_id));
@@ -1294,7 +1299,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const id=decodeURIComponent(url.pathname.slice('/api/entries/'.length));
       if(!idOk(id,'entry'))return fail(res,400,'Invalid transaction.');
-      const existing=currentEntry(a.user_id,id);if(!existing)return fail(res,404,'Transaction not found.');
+      const existing=currentEntry(a.user_id,id);if(!existing){if(syncQ.tombstoneByEntity.get(a.user_id,'entry',id))return fail(res,409,'This transaction was deleted on another device.');return fail(res,404,'Transaction not found.');}
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),entry=cleanLedgerEntry(a,{...body,id},{existing});
         let reopenedFeedItems=[];withLedgerMutation(a.user_id,expected,()=>{updateLedgerEntryRow(a.user_id,entry);reopenedFeedItems=bankFeed.revalidatePosted(a.user_id,id);});
@@ -1307,6 +1312,7 @@ export const server=http.createServer(async(req,res)=>{
           q.deleteEntryAttachments.run(a.user_id,id);
           const changed=q.deleteEntry.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
+          syncQ.upsertTombstone.run(a.user_id,'entry',id,expected+1,nowIso());
           reopenedFeedItems=bankFeed.reopenOrphans(a.user_id);
         });
         return json(res,200,{...loadState(a.user_id),reopenedFeedItems});

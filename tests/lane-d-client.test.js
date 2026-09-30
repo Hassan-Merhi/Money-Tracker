@@ -28,9 +28,10 @@ test('Lane D makes dashboard cards keyboard reachable',()=>{
   assert.match(app,/event\.key==='Enter'\|\|event\.key===' '/);
 });
 
-test('Lane D PWA v16 keeps stale-while-revalidate work alive',()=>{
+test('Lane D fingerprinted PWA keeps safe stale-while-revalidate work alive',()=>{
   const sw=read('service-worker.js');
-  assert.match(sw,/money-tracker-debt-v16/);
+  assert.match(sw,/const ASSET_VERSION='__ASSET_VERSION__'/);
+  assert.match(sw,/requestVersion!==ASSET_VERSION/);
   assert.match(sw,/event\.waitUntil\(revalidatePromise/);
   assert.match(sw,/staleWhileRevalidate\(event\.request,revalidatePromise\)/);
 });

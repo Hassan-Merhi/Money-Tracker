@@ -221,34 +221,27 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
 });
 
 
-test('Offline Block B: connected core writes fall back to atomic HTTP when IndexedDB reads fail',async({browser})=>{
+test('Offline Block B: connected login and core writes work when IndexedDB is unusable from startup',async({browser})=>{
   const context=await browser.newContext({viewport:{width:390,height:844}});
+  await context.addInitScript(()=>{
+    IDBFactory.prototype.open=function(){throw new DOMException('IndexedDB blocked','InvalidStateError');};
+  });
   const page=await context.newPage();
   await page.goto('/');
 
-  await page.evaluate(async({email,password})=>{
+  const result=await page.evaluate(async({email,password})=>{
     const store=await import('/lib/store.js');
     await store.login(email,password);
+    const before=await store.loadState();
+    const saved=await store.updateSettings({defaultCurrency:'EUR'},before.version);
+    const response=await fetch('/api/state',{credentials:'same-origin'});
+    const after=await response.json();
+    return {
+      savedCurrency:saved.settings.defaultCurrency,
+      serverCurrency:after.settings.defaultCurrency,
+      version:after.version
+    };
   },{email:EMAIL,password:PASSWORD});
-  await page.reload({waitUntil:'domcontentloaded'});
-  await expectHeading(page,'Dashboard');
-
-  const result=await page.evaluate(async()=>{
-    const store=await import('/lib/store.js');
-    const beforeResponse=await fetch('/api/state',{credentials:'same-origin'});
-    const before=await beforeResponse.json();
-
-    const original=IDBDatabase.prototype.transaction;
-    IDBDatabase.prototype.transaction=function(){throw new DOMException('IndexedDB transaction blocked','InvalidStateError');};
-    try{
-      const saved=await store.updateSettings({defaultCurrency:'EUR'},before.version);
-      const afterResponse=await fetch('/api/state',{credentials:'same-origin'});
-      const after=await afterResponse.json();
-      return {savedCurrency:saved.settings.defaultCurrency,serverCurrency:after.settings.defaultCurrency,version:after.version};
-    }finally{
-      IDBDatabase.prototype.transaction=original;
-    }
-  });
 
   expect(result.savedCurrency).toBe('EUR');
   expect(result.serverCurrency).toBe('EUR');

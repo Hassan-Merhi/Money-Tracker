@@ -29,6 +29,7 @@ export const ROUTES=[
 let api;
 let csrfToken='';
 let customExpenseCategoryId='';
+let authenticatedStorageState=null;
 
 function fileSlug(value=''){return String(value).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
 
@@ -51,6 +52,7 @@ export async function setupApi(){
     headers:{'x-csrf-token':csrfToken},
     data:{password:OWNER_PASSWORD}
   }),'reset Wave 14 workspace');
+  authenticatedStorageState=await api.storageState();
   await seedEmptyAdvancedState();
 }
 export async function disposeApi(){await api?.dispose();}
@@ -63,20 +65,25 @@ async function post(path,data,label=path){
 }
 
 export async function newPage(browser,view,theme,{authScreenshot=false}={}){
-  const context=await browser.newContext({
+  const contextOptions={
     viewport:view.viewport,
     deviceScaleFactor:view.deviceScaleFactor,
     isMobile:view.isMobile||false,
     hasTouch:view.hasTouch||false
-  });
+  };
+  if(authScreenshot){
+    const authContext=await browser.newContext(contextOptions);
+    const authPage=await authContext.newPage();
+    await authPage.addInitScript(({theme})=>localStorage.setItem('mot-theme',theme),{theme});
+    await authPage.goto('/');
+    await expect(authPage.locator('#authForm')).toBeVisible();
+    await capture(authPage,'auth',view.name,theme,'auth');
+    await authContext.close();
+  }
+  const context=await browser.newContext({...contextOptions,storageState:authenticatedStorageState||undefined});
   const page=await context.newPage(),browserErrors=[];
   await page.addInitScript(({theme})=>localStorage.setItem('mot-theme',theme),{theme});
   await page.goto('/');
-  await expect(page.locator('#authForm')).toBeVisible();
-  if(authScreenshot)await capture(page,'auth',view.name,theme,'auth');
-  const login=await context.request.post('/api/auth/login',{data:{email:OWNER_EMAIL,password:OWNER_PASSWORD}});
-  expect(login.ok(),'visual audit browser login').toBeTruthy();
-  await page.reload();
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
   page.on('pageerror',error=>browserErrors.push('pageerror: '+error.message));
   page.on('console',message=>{if(message.type()==='error')browserErrors.push('console: '+message.text());});

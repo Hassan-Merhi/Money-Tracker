@@ -12,7 +12,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,6 +22,8 @@ jobs:
         run: npm test
       - name: Run Lane D release gate
         run: npm run test:lane-d
+      - name: Run Wave 5 PWA integrity gate
+        run: npm run test:wave5
       - name: Run Waves 11-12 release gate
         run: npm run test:wave11-12
       - name: Run accounting reconciliation gate
@@ -63,3 +65,29 @@ jobs:
           node --check scripts/restore-db-snapshot.mjs
           node --check scripts/accounting-check.mjs
           node --check scripts/accounting-bank-feed-check.mjs
+
+
+  browser-e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.1'
+      - name: Install browser test dependency
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run Wave 10 browser E2E
+        run: npm run test:wave10
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wave10-playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore

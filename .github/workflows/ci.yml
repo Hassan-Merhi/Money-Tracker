@@ -107,7 +107,7 @@ jobs:
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wave14-visual-audit

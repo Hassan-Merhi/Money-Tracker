@@ -8,6 +8,8 @@ import { currencyExponent } from './lib/money.js';
 let state=null,preview=null,sheetIndex=0,legacyAnalysis=null,manualMode=false,importerReturnFocus=null;
 const q=s=>document.querySelector(s);
 
+function publishImportedState(next){state=next;window.dispatchEvent(new CustomEvent('moneytracker:state-replaced',{detail:next}));return next;}
+
 function activateImporterDialog(wrap){
   const dialog=wrap.querySelector('.imp-shell');
   if(!dialog)return;
@@ -58,7 +60,7 @@ async function reviewQuickPaste(){
   if(!r.entries && !r.updated){alert(`Nothing to import.${issues.length?`\n\n${issues.join('\n')}`:''}`);return;}
   if(!confirm(`Import these pasted rows?\n\n${parts.join(', ')}.${issues.length?`\n\nRows with issues will be skipped:\n${issues.join('\n')}`:''}\n\nEach valid row will appear on that person's statement.`))return;
   const btn=q('#impQuickApply'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
-  try{state=await saveState(prepared.state);alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
+  try{publishImportedState(await saveState(prepared.state));alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the paste importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
@@ -130,7 +132,7 @@ async function reviewLegacy(){
     }
   }
   const btn=q('#impLegacyReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
-  try{state=await saveState(prepared.state);alert(`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
+  try{publishImportedState(await saveState(prepared.state));alert(`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
@@ -156,7 +158,7 @@ async function review(){
   if(!r.people&&!r.accounts&&!r.entries&&!r.updated){alert(`Nothing to import.${parts.length?' '+parts.join(', '):''}${issues?`\n\n${issues}`:''}`);return;}
   if(!confirm(`Apply import?\n\n${parts.join(', ')}.${issues?`\n\nFirst issues:\n${issues}`:''}\n\nThis appends to your current ledger.`))return;
   const btn=q('#impReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Applying…';
-  try{state=await saveState(prepared.state);alert(`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
+  try{publishImportedState(await saveState(prepared.state));alert(`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }

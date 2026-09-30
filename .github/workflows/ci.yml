@@ -30,6 +30,8 @@ jobs:
         run: npm run test:wave11-12
       - name: Run Wave 13 production smoke gate
         run: npm run test:wave13
+      - name: Run Wave 14 visual contract
+        run: node --test tests/release-wave-14-visual-audit.test.js
       - name: Run accounting reconciliation gate
         run: npm run accounting:check
       - name: Check browser JavaScript syntax
@@ -74,13 +76,17 @@ jobs:
           node --check scripts/production-smoke.mjs
           node --check playwright.config.mjs
           node --check e2e/release-critical.spec.mjs
+          node --check e2e/wave14-fixture.mjs
+          node --check e2e/visual-audit-matrix.spec.mjs
+          node --check e2e/visual-audit-states.spec.mjs
+          node --check e2e/visual-audit-overlays.spec.mjs
           node --check pwa-version.js
 
 
   browser-e2e:
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,6 +98,15 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run Wave 10 browser E2E
         run: npm run test:wave10
+      - name: Run Wave 14 visual audit
+        run: npm run test:wave14
+      - name: Upload Wave 14 visual audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wave14-visual-audit
+          path: test-results/wave14-visual
+          if-no-files-found: error
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

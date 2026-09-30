@@ -787,6 +787,219 @@ function assertAccountDeletable(userId,id){
   if(db.prepare('SELECT 1 FROM bank_feed_items WHERE user_id=? AND (account_id=? OR suggested_target_account_id=?) LIMIT 1').get(userId,id,id)||db.prepare('SELECT 1 FROM bank_rules WHERE user_id=? AND target_account_id=? LIMIT 1').get(userId,id))throw ledgerError('Bank Feed data still uses this account. Remove or reclassify it first.');
 }
 
+
+const SYNC_ENTITIES=new Set(['settings','person','account','entry']);
+const SYNC_OPERATIONS=new Set(['create','update','delete']);
+
+function cleanSyncOperation(raw){
+  const operationId=String(raw?.operationId||'');
+  const entity=String(raw?.entity||'');
+  const operation=String(raw?.operation||'');
+  const entityId=String(raw?.entityId||'');
+  const baseRevision=Number(raw?.baseRevision);
+  if(!idOk(operationId,'op')||!SYNC_ENTITIES.has(entity)||!SYNC_OPERATIONS.has(operation)||!Number.isInteger(baseRevision))throw ledgerError('Invalid sync operation.');
+  if(entity==='settings'&&(operation!=='update'||entityId!=='settings'))throw ledgerError('Invalid settings sync operation.');
+  if(entity==='person'&&!idOk(entityId,'person'))throw ledgerError('Invalid person sync operation.');
+  if(entity==='account'&&!idOk(entityId,'account'))throw ledgerError('Invalid account sync operation.');
+  if(entity==='entry'&&!idOk(entityId,'entry'))throw ledgerError('Invalid transaction sync operation.');
+  return {operationId,entity,entityId,operation,baseRevision,payload:raw?.payload&&typeof raw.payload==='object'?raw.payload:{}};
+}
+
+function syncChange(entity,entityId,operation,payload=null){
+  return {entity,entityId,operation,payload};
+}
+
+function applySyncOperation(user,raw){
+  const op=cleanSyncOperation(raw);
+  const requestHash=sha256(JSON.stringify({
+    operationId:op.operationId,
+    entity:op.entity,
+    entityId:op.entityId,
+    operation:op.operation,
+    payload:op.payload,
+    baseRevision:op.baseRevision
+  }));
+
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const prior=syncQ.processedById.get(user.user_id,op.operationId);
+    if(prior){
+      if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
+      const result=JSON.parse(prior.resultJson||'{}');
+      db.exec('COMMIT');
+      return {...result,alreadyProcessed:true};
+    }
+
+    const current=Number(q.userById.get(user.user_id)?.revision);
+    if(current!==op.baseRevision)throw ledgerError('This ledger changed before the offline change could sync.',409);
+
+    const changes=[];
+
+    if(op.entity==='settings'){
+      const currentUser=q.userById.get(user.user_id);
+      const displayName=safeStr(op.payload.displayName??currentUser.display_name,80)||'My Ledger';
+      const defaultCurrency=String(op.payload.defaultCurrency??currentUser.default_currency).toUpperCase();
+      const appMode=['simple','advanced'].includes(String(op.payload.appMode??currentUser.app_mode))
+        ?String(op.payload.appMode??currentUser.app_mode)
+        :'simple';
+      const timezone=safeTimeZone(op.payload.timezone??currentUser.timezone??'UTC');
+      if(!validCurrency(defaultCurrency))throw ledgerError('Invalid default currency.');
+      q.updateUserSettingsValues.run(displayName,defaultCurrency,appMode,timezone,user.user_id);
+      changes.push(syncChange('settings','settings','update',{displayName,defaultCurrency,appMode,timezone}));
+    }else if(op.entity==='person'){
+      if(op.operation==='create'){
+        if(Number(q.personCount.get(user.user_id)?.count||0)>=DATA_LIMITS.people)throw ledgerError('You can keep up to '+DATA_LIMITS.people.toLocaleString('en-US')+' people.');
+        const person=cleanPersonInput({...op.payload,id:op.entityId});
+        if(q.personById.get(user.user_id,person.id))throw ledgerError('That person id already exists.',409);
+        q.insertPerson.run(user.user_id,person.id,person.name,person.note,person.createdAt);
+        changes.push(syncChange('person',person.id,'create',person));
+
+        const opening=finite(op.payload.openingBalance??op.payload.opening??0);
+        if(opening===null||opening<0)throw ledgerError('Opening balance must be zero or greater.');
+        if(opening>0){
+          if(Number(q.entryCount.get(user.user_id)?.count||0)>=DATA_LIMITS.entries)throw ledgerError('You can keep up to '+DATA_LIMITS.entries.toLocaleString('en-US')+' transactions.');
+          const currency=String(op.payload.currency||user.default_currency||'USD').toUpperCase();
+          if(!validCurrency(currency))throw ledgerError('Choose a valid currency.');
+          const amount=exactMoney(opening,currency,{allowNegative:false,allowZero:false});
+          const signedAmount=(op.payload.direction==='i_owe'?-1:1)*amount;
+          const date=validDate(op.payload.openingDate)?op.payload.openingDate:new Date().toISOString().slice(0,10);
+          const openingEntry=cleanLedgerEntry(user,{
+            id:idOk(op.payload.openingEntryId,'entry')?op.payload.openingEntryId:undefined,
+            type:'person_adjustment',
+            personId:person.id,
+            accountId:null,
+            amount,
+            currency,
+            signedAmount,
+            date,
+            merchant:'',
+            description:'Opening balance',
+            splits:[]
+          });
+          insertLedgerEntry(user.user_id,openingEntry);
+          changes.push(syncChange('entry',openingEntry.id,'create',openingEntry));
+        }
+      }else{
+        const existing=q.personById.get(user.user_id,op.entityId);
+        if(!existing)throw ledgerError('Person not found.',404);
+        if(op.operation==='update'){
+          const person=cleanPersonInput({...op.payload,id:op.entityId},{existing});
+          const changed=q.updatePerson.run(person.name,person.note,user.user_id,op.entityId);
+          if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+          changes.push(syncChange('person',person.id,'update',person));
+        }else{
+          assertPersonDeletable(user.user_id,op.entityId);
+          const changed=q.deletePersonRow.run(user.user_id,op.entityId);
+          if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+          changes.push(syncChange('person',op.entityId,'delete',null));
+        }
+      }
+    }else if(op.entity==='account'){
+      if(op.operation==='create'){
+        if(Number(q.accountCount.get(user.user_id)?.count||0)>=DATA_LIMITS.accounts)throw ledgerError('You can keep up to '+DATA_LIMITS.accounts.toLocaleString('en-US')+' accounts.');
+        const account=cleanAccountInput({...op.payload,id:op.entityId},{defaultCurrency:user.default_currency});
+        if(q.accountById.get(user.user_id,account.id))throw ledgerError('That account id already exists.',409);
+        const storage=accountToStorage(account);
+        q.insertAccount.run(user.user_id,account.id,account.name,account.type,account.currency,storage.openingBalanceMinor,account.createdAt);
+        changes.push(syncChange('account',account.id,'create',account));
+      }else{
+        const rawAccount=q.accountById.get(user.user_id,op.entityId);
+        if(!rawAccount)throw ledgerError('Account not found.',404);
+        const existing=accountFromStorage(rawAccount);
+        if(op.operation==='update'){
+          const account=cleanAccountInput({...op.payload,id:op.entityId},{existing,defaultCurrency:user.default_currency,userId:user.user_id});
+          const storage=accountToStorage(account);
+          const changed=q.updateAccount.run(account.name,account.type,storage.openingBalanceMinor,user.user_id,op.entityId);
+          if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+          changes.push(syncChange('account',account.id,'update',account));
+        }else{
+          assertAccountDeletable(user.user_id,op.entityId);
+          const changed=q.deleteAccountRow.run(user.user_id,op.entityId);
+          if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+          changes.push(syncChange('account',op.entityId,'delete',null));
+        }
+      }
+    }else if(op.entity==='entry'){
+      if(op.payload?.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
+      if(op.operation==='create'){
+        if(Number(q.entryCount.get(user.user_id)?.count||0)>=DATA_LIMITS.entries)throw ledgerError('You can keep up to '+DATA_LIMITS.entries.toLocaleString('en-US')+' transactions.');
+        const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId});
+        if(q.entryExists.get(user.user_id,entry.id))throw ledgerError('That transaction id already exists.',409);
+        insertLedgerEntry(user.user_id,entry);
+        changes.push(syncChange('entry',entry.id,'create',entry));
+      }else{
+        const existing=currentEntry(user.user_id,op.entityId);
+        if(!existing)throw ledgerError('Transaction not found.',404);
+        if(op.operation==='update'){
+          const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId},{existing});
+          if(entry.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
+          updateLedgerEntryRow(user.user_id,entry);
+          bankFeed.revalidatePosted(user.user_id,op.entityId);
+          changes.push(syncChange('entry',entry.id,'update',entry));
+        }else{
+          q.deleteEntryAttachments.run(user.user_id,op.entityId);
+          const changed=q.deleteEntry.run(user.user_id,op.entityId);
+          if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
+          bankFeed.reopenOrphans(user.user_id);
+          changes.push(syncChange('entry',op.entityId,'delete',null));
+        }
+      }
+    }
+
+    const bumped=q.bumpRevision.run(user.user_id,op.baseRevision);
+    if(Number(bumped.changes)!==1)throw ledgerError('This ledger changed before the offline change could sync.',409);
+    const revision=op.baseRevision+1;
+    const stamp=nowIso();
+    for(const change of changes){
+      syncQ.insertChange.run(
+        user.user_id,
+        revision,
+        change.entity,
+        change.entityId,
+        change.operation,
+        change.payload===null?null:JSON.stringify(change.payload),
+        stamp
+      );
+    }
+    const result={operationId:op.operationId,status:'accepted',revision};
+    syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
+    db.exec('COMMIT');
+    return result;
+  }catch(error){
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function pullSyncChanges(userId,sinceRevision){
+  const current=Number(q.userById.get(userId)?.revision);
+  if(!Number.isInteger(sinceRevision)||sinceRevision<0)throw ledgerError('Invalid sync cursor.');
+  if(sinceRevision>current)throw ledgerError('Sync cursor is ahead of the server ledger.',409);
+  if(sinceRevision===current)return {sinceRevision,currentRevision:current,cursor:current,changes:[],requiresFullRefresh:false};
+
+  const rows=syncQ.changesSince.all(userId,sinceRevision);
+  const revisionCoverage=new Set(rows.map(row=>Number(row.revision)));
+  if(revisionCoverage.size!==current-sinceRevision){
+    return {sinceRevision,currentRevision:current,cursor:current,changes:[],requiresFullRefresh:true};
+  }
+
+  return {
+    sinceRevision,
+    currentRevision:current,
+    cursor:current,
+    requiresFullRefresh:false,
+    changes:rows.map(row=>({
+      seq:Number(row.seq),
+      revision:Number(row.revision),
+      entity:row.entity,
+      entityId:row.entityId,
+      operation:row.operation,
+      payload:row.payloadJson?JSON.parse(row.payloadJson):null,
+      createdAt:row.createdAt
+    }))
+  };
+}
+
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon'};
 function staticFile(req,res,url){
   let p=decodeURIComponent(url.pathname); if(p==='/'||!extname(p))p='/index.html';

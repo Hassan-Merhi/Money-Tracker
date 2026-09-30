@@ -219,8 +219,17 @@ async function health(){
   return await evaluate(`fetch('/api/health',{cache:'no-store'}).then(r=>r.json())`);
 }
 async function waitState(predicate,label,timeout=12000){
-  const source=typeof predicate==='function'?predicate.toString():String(predicate);
-  return waitFor(`fetch('/api/state',{cache:'no-store'}).then(r=>r.json()).then(s=>(${source})(s))`,label,{timeout});
+  const started=Date.now();
+  let last;
+  while(Date.now()-started<timeout){
+    try{
+      const current=await state();
+      last=current;
+      if(predicate(current))return current;
+    }catch(error){last=error;}
+    await sleep(80);
+  }
+  throw new Error(`Timed out waiting for ${label}. Last: ${last instanceof Error?last.message:JSON.stringify(last)}`);
 }
 async function setFile(selector,path){
   const doc=await cdp.send('DOM.getDocument',{depth:-1,pierce:true});
@@ -455,7 +464,13 @@ try{
   process.exitCode=1;
 } finally {
   try{cdp?.close();}catch{}
-  if(chrome?.exitCode===null)chrome.kill('SIGTERM');
+  if(chrome){
+    if(chrome.exitCode===null)chrome.kill('SIGTERM');
+    try{await waitExit(chrome,5000);}catch{if(chrome.exitCode===null)chrome.kill('SIGKILL');await waitExit(chrome,3000).catch(()=>{});}
+  }
   await stopApp().catch(()=>{});
-  rmSync(work,{recursive:true,force:true});
+  for(let attempt=0;attempt<5;attempt++){
+    try{rmSync(work,{recursive:true,force:true,maxRetries:3,retryDelay:100});break;}
+    catch(error){if(attempt===4)console.error('E2E cleanup warning:',error.message);await sleep(150);}
+  }
 }

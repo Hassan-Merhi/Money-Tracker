@@ -40,6 +40,8 @@ test('Offline Block B O4 preserves unsynced changes across identity and cache bo
   assert.match(offline,/OFFLINE_PENDING_CHANGES/);
   assert.match(offline,/pendingOperationCount/);
   assert.match(store,/You have unsynced offline changes\. Reconnect and sync them before signing out\./);
+  assert.doesNotMatch(store,/try \{ await api\('\/api\/auth\/logout',[\s\S]*?finally/);
+  assert.match(store,/if\(error\.status!==401\) throw error/);
   assert.match(store,/Sync or discard the offline changes on this device before deleting the account\./);
   assert.match(store,/if\(!pending\)await clearOfflineData\(requestIdentity\)/);
   assert.match(store,/await publishSyncStatus\(\{authRequired:true\}\)/);

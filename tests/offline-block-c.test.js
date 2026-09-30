@@ -9,7 +9,7 @@ const read=path=>readFileSync(join(ROOT,path),'utf8');
 
 test('Offline Block C documents O7-O10 and keeps the server authoritative',()=>{
   const doc=read('docs/OFFLINE_BLOCK_C.md');
-  for(const marker of ['O7','O8','O9','O10','baseRecord','tombstones','atomic offline transfers','attachmentQueue','Keep mine','Use server']) {
+  for(const marker of ['O7','O8','O9','O10','baseRecord','tombstones','Atomic offline transfers','attachmentQueue','Keep mine','Use server']) {
     assert.ok(doc.includes(marker),marker);
   }
   assert.match(doc,/server authoritative|authoritative server/i);

@@ -112,6 +112,27 @@ html[data-theme="dark"] .entry-menu-popover{background:var(--panel);border-color
   .recurring-card-top>div,.g-dashboard-budget>div,.dashboard-reminder>div{flex:1 1 180px}
   .recurring-title-row{align-items:flex-start}
   .recurring-title-row h3{flex:1 1 180px}
+  .bank-import,.bank-feed-section,.bank-rules,.bank-reconciliation,.bank-feed-list{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+  }
+  .bank-rules{overflow:hidden}
+  .bank-rule-form{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+  }
+  .bank-rule-form>*,
+  .bank-rules .input,
+  .bank-rules .select{
+    width:100%!important;
+    min-width:0!important;
+    max-width:100%!important;
+  }
+  .bank-rule-item,.bank-rule-item>div{width:100%;min-width:0;max-width:100%}
+  .bank-rule-item strong,.bank-rule-item small{max-width:100%}
+  .reconcile-row>*{min-width:0;max-width:100%;overflow-wrap:anywhere}
   .bank-row-main{min-width:0}
   .bank-description{min-width:0}
   .bank-amount{max-width:46vw;overflow-wrap:anywhere}

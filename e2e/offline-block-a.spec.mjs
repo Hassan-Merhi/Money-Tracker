@@ -34,9 +34,6 @@ test('Offline Block A: cached ledger reopens and renders without a network',asyn
     if(!('serviceWorker' in navigator))throw new Error('Service worker unavailable');
     await navigator.serviceWorker.ready;
   });
-
-  await page.reload({waitUntil:'domcontentloaded'});
-  await expectHeading(page,'Dashboard');
   await expect.poll(()=>page.evaluate(()=>Boolean(navigator.serviceWorker.controller))).toBe(true);
 
   await context.setOffline(true);
@@ -54,5 +51,42 @@ test('Offline Block A: cached ledger reopens and renders without a network',asyn
   await expect(page.locator('#main')).toBeVisible();
 
   await context.setOffline(false);
+
+  await context.clearCookies();
+  const unauthorizedStatus=await page.evaluate(async()=>{
+    const {updateSettings}=await import('/lib/store.js');
+    try{await updateSettings({defaultCurrency:'USD'},1);return 200;}
+    catch(error){return Number(error?.status||0);}
+  });
+  expect(unauthorizedStatus).toBe(401);
+  await expect.poll(()=>page.evaluate(async()=>Boolean(await (await import('/lib/offline-db.js')).loadAuthorizedUser()))).toBe(false);
+
+  await context.setOffline(true);
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expect(page.getByRole('heading',{name:'Money Owed Tracker'})).toBeVisible();
+  await expect(page.getByRole('link',{name:/Offline Alice/})).toHaveCount(0);
+
+  await context.setOffline(false);
+  await context.close();
+});
+
+test('Offline Block A: stale state cannot cross an active user boundary',async({browser})=>{
+  const context=await browser.newContext();
+  const page=await context.newPage();
+  await page.goto('/');
+  const result=await page.evaluate(async()=>{
+    const db=await import('/lib/offline-db.js');
+    await db.clearOfflineData();
+    const base=settings=>({version:1,settings:{displayName:settings,defaultCurrency:'USD',appMode:'simple',timezone:'UTC'},people:[],accounts:[],entries:[],categories:[],budgets:[]});
+    await db.saveAuthorizedUser({id:'user_A',email:'a@example.test'});
+    await db.saveStateSnapshot({...base('A ledger'),people:[{id:'person_A',name:'A Person'}]},'user_A');
+    await db.saveAuthorizedUser({id:'user_B',email:'b@example.test'});
+    const savedB=await db.saveStateSnapshot({...base('B ledger'),people:[{id:'person_B',name:'B Person'}]},'user_B');
+    const staleA=await db.saveStateSnapshot({...base('STALE A'),people:[{id:'person_leak',name:'Leaked A'}]},'user_A');
+    const active=await db.loadAuthorizedUser();
+    const snapshot=await db.loadStateSnapshot();
+    return {savedB,staleA,activeId:active?.id,displayName:snapshot?.settings?.displayName,people:snapshot?.people?.map(row=>row.id)};
+  });
+  expect(result).toEqual({savedB:true,staleA:false,activeId:'user_B',displayName:'B ledger',people:['person_B']});
   await context.close();
 });

@@ -67,7 +67,10 @@ test('O10 has a separate durable idempotent attachment outbox',()=>{
   assert.match(offline,/queueOfflineAttachmentCreate/);
   assert.match(offline,/queueOfflineAttachmentDelete/);
   assert.match(offline,/create may already have committed remotely/);
+  assert.match(offline,/if\(pendingCreates\.length\)/);
+  assert.doesNotMatch(offline,/if\(!attachment\.synced&&pendingCreates\.length\)/);
   assert.match(offline,/pendingCreates[\s\S]*?for\(const pendingCreate of pendingCreates\)queueStore\.delete\(pendingCreate\.operationId\)[\s\S]*?operation:'delete'/);
+  assert.match(offline,/row\.operation==='create'[\s\S]*?item\.operation==='delete'[\s\S]*?store\.delete\(operationId\)/);
   assert.match(offline,/pendingOperationCount[\s\S]*?attachmentQueuedRows/);
   assert.match(store,/syncAttachmentOperations/);
   assert.match(store,/\/api\/sync\/attachments/);

@@ -1,0 +1,452 @@
+/* Wave 4 — desktop & tablet polish
+   Loaded after page-specific styles. Phone behavior remains owned by mobile.css. */
+
+@media (min-width: 761px) {
+  html, body { min-width: 0; overflow-x: hidden; }
+  body { font-size: 14px; }
+  .layout, .content, .main,
+  .dashboard, .reports-page, .settings-grid, .people-page,
+  .bank-feed-section, .g-manage-grid, .g-insight-grid, .recurring-grid {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* Shell: preserve useful workspace width on iPad/tablet while retaining labels. */
+  .layout { min-height: 100dvh; }
+  .sidebar { width: auto; min-width: 0; }
+  .brand { padding-bottom: 28px; }
+  .brand h1 { line-height: 1.2; }
+  .nav button { min-width: 0; }
+  .nav button > :not(.nav-icon) { min-width: 0; }
+  .sidebar-foot { font-size: 11px; }
+
+  .topbar {
+    min-width: 0;
+    min-height: 76px;
+    padding-block: 14px;
+  }
+  .topbar-title { overflow: hidden; }
+  .topbar-title h2,
+  .topbar-title p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .top-actions {
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .main {
+    width: 100%;
+    min-width: 0;
+    margin-inline: auto;
+  }
+
+  /* Consistent visual rhythm and type hierarchy across feature pages. */
+  .card, .panel, .settings-card {
+    min-width: 0;
+  }
+  .panel-head {
+    align-items: flex-start;
+  }
+  .panel-head > * { min-width: 0; }
+  .panel-head h3 {
+    line-height: 1.3;
+    letter-spacing: -.2px;
+  }
+  .panel-head p {
+    line-height: 1.45;
+    max-width: 72ch;
+  }
+  .detail-header,
+  .g-page-head {
+    min-width: 0;
+  }
+  .detail-title { min-width: 0; }
+  .detail-title > div { min-width: 0; }
+  .detail-title h2,
+  .detail-title p {
+    overflow-wrap: anywhere;
+  }
+
+  /* Filters/actions should wrap intentionally instead of squeezing controls. */
+  .filters,
+  .page-actions,
+  .recurring-toolbar-actions {
+    min-width: 0;
+    align-items: end;
+  }
+  .filters > *,
+  .page-actions > *,
+  .recurring-toolbar-actions > * {
+    min-width: 0;
+  }
+  .filters .field {
+    flex: 1 1 170px;
+  }
+  .filters .search {
+    flex: 1.4 1 240px;
+  }
+  .page-actions .btn,
+  .filters .btn {
+    white-space: nowrap;
+  }
+  .input, .select, .textarea {
+    min-width: 0;
+  }
+
+  /* Desktop/tablet tables: contained scrolling, calmer density, sticky headers. */
+  .table-wrap,
+  .imp-table {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table { min-width: 640px; }
+  .table th,
+  .table td {
+    padding: 11px 12px;
+    line-height: 1.4;
+  }
+  .table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .table td {
+    overflow-wrap: anywhere;
+  }
+  .table td.actions {
+    position: sticky;
+    right: 0;
+    background: var(--panel);
+  }
+  .table th:last-child {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+  }
+
+  /* Dialogs: comfortable laptop width without oversized empty space. */
+  .modal-backdrop {
+    padding: 28px;
+  }
+  .modal {
+    width: min(720px, calc(100vw - 56px));
+    max-height: calc(100dvh - 56px);
+    border: 1px solid var(--line);
+  }
+  .modal-head {
+    padding: 18px 22px;
+  }
+  .modal-body {
+    padding: 20px 22px 22px;
+  }
+  .modal-foot {
+    padding: 15px 22px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .modal-foot .btn {
+    min-width: 96px;
+  }
+  .account-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  /* Popovers and compact menus stay on-screen and share one surface treatment. */
+  .entry-menu,
+  .report-export-menu {
+    max-width: min(300px, calc(100vw - 40px));
+    border-color: var(--line);
+    background: var(--panel);
+    box-shadow: 0 18px 50px rgba(17, 24, 39, .14);
+  }
+  .quick-menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .quick-menu .quick {
+    min-width: 0;
+  }
+
+  /* Dashboard balance and content grids. */
+  .dashboard-intro {
+    margin-bottom: 24px;
+  }
+  .dashboard .debt-stats {
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .dashboard .stat {
+    padding: 18px 20px;
+  }
+  .dashboard .stat-value {
+    font-size: clamp(22px, 2.2vw, 32px);
+  }
+  .dashboard-columns {
+    gap: 20px;
+  }
+  .dashboard-primary,
+  .dashboard-secondary {
+    gap: 20px;
+  }
+  .dashboard .panel {
+    padding: 20px;
+  }
+
+  /* Reports: balanced filter density, readable tables, consistent cards. */
+  .reports-page {
+    gap: 16px;
+  }
+  .report-filter-card {
+    padding: 16px;
+  }
+  .report-filter-row,
+  .report-more-grid,
+  .report-custom-dates {
+    min-width: 0;
+  }
+  .report-filter-field {
+    min-width: 0;
+  }
+  .report-table-wrap {
+    max-width: 100%;
+  }
+  .report-table-wrap .table {
+    min-width: 600px;
+  }
+  .report-section-grid {
+    gap: 16px;
+  }
+
+  /* Feature pages with desktop assumptions that get cramped on tablets. */
+  .bank-import-grid,
+  .mapping-grid,
+  .bank-review,
+  .bank-rule-form,
+  .g-insight-grid,
+  .g-manage-grid,
+  .recurring-grid {
+    min-width: 0;
+  }
+  .bank-row,
+  .recurring-card,
+  .g-manage-card {
+    min-width: 0;
+  }
+  .bank-row-main > *,
+  .bank-review > *,
+  .bank-rule-form > * {
+    min-width: 0;
+  }
+  .bank-description strong,
+  .bank-description span,
+  .bank-description small {
+    max-width: 100%;
+  }
+  .recurring-card-top,
+  .g-budget-top,
+  .g-budget-bottom,
+  .g-category-row {
+    min-width: 0;
+  }
+
+  /* Importer is a desktop dialog, but should still fit 768–1024px tablets. */
+  .imp-backdrop {
+    padding: 28px;
+  }
+  .imp-shell {
+    width: min(1040px, calc(100vw - 56px));
+    max-height: calc(100dvh - 56px);
+    border-color: var(--line);
+  }
+  .imp-head {
+    padding: 20px 22px;
+  }
+  .imp-body {
+    padding: 18px;
+  }
+  .imp-card,
+  .imp-sub {
+    padding: 18px;
+  }
+  .imp-table table {
+    min-width: 580px;
+  }
+
+  /* Theme parity for feature styles that otherwise hard-code light surfaces. */
+  html[data-theme="dark"] {
+    color-scheme: dark;
+  }
+  html[data-theme="dark"] .modal-head,
+  html[data-theme="dark"] .modal-foot,
+  html[data-theme="dark"] .imp-head,
+  html[data-theme="dark"] .imp-card,
+  html[data-theme="dark"] .imp-sub,
+  html[data-theme="dark"] .imp-drop,
+  html[data-theme="dark"] .imp-preview-head select,
+  html[data-theme="dark"] .imp-field select,
+  html[data-theme="dark"] .imp-quick-paste,
+  html[data-theme="dark"] .imp-close,
+  html[data-theme="dark"] .bank-rule-item,
+  html[data-theme="dark"] .g-category-row,
+  html[data-theme="dark"] .g-budget-row {
+    background: var(--panel);
+    color: var(--text);
+    border-color: var(--line);
+  }
+  html[data-theme="dark"] .imp-shell {
+    background: var(--bg);
+    color: var(--text);
+  }
+  html[data-theme="dark"] .imp-table th,
+  html[data-theme="dark"] .imp-quick-columns span,
+  html[data-theme="dark"] .imp-quick-summary,
+  html[data-theme="dark"] .imp-legacy-stat,
+  html[data-theme="dark"] .bank-reconciliation,
+  html[data-theme="dark"] .g-category-icon,
+  html[data-theme="dark"] .g-progress,
+  html[data-theme="dark"] .g-breakdown-bar {
+    background: var(--panel-2);
+    color: var(--text);
+    border-color: var(--line);
+  }
+  html[data-theme="dark"] .imp-legacy-stat strong,
+  html[data-theme="dark"] .imp-quick-summary strong {
+    color: var(--text);
+  }
+  html[data-theme="dark"] .imp-note {
+    background: var(--blue-bg);
+    color: var(--blue);
+  }
+  html[data-theme="dark"] .entry-menu,
+  html[data-theme="dark"] .report-export-menu {
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .34);
+  }
+}
+
+@media (min-width: 761px) and (max-width: 900px) {
+  .layout {
+    grid-template-columns: 188px minmax(0, 1fr);
+  }
+  .sidebar {
+    padding: 24px 10px 16px;
+  }
+  .brand {
+    padding-inline: 8px;
+    padding-bottom: 24px;
+  }
+  .brand small {
+    display: none;
+  }
+  .nav-caption {
+    margin-inline: 10px;
+  }
+  .nav button {
+    padding-inline: 10px;
+    gap: 9px;
+    font-size: 12px;
+  }
+  .sidebar-foot strong {
+    display: none;
+  }
+  .topbar {
+    padding-inline: 18px;
+  }
+  .topbar-title p {
+    display: none;
+  }
+  .main {
+    padding: 22px 18px 48px;
+  }
+
+  .dashboard .debt-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dashboard .debt-stats > .stat:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .dashboard-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .people-grid,
+  .accounts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .report-filter-row .report-reset {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .report-custom-dates {
+    grid-template-columns: 1fr 1fr;
+  }
+  .report-custom-dates > .btn {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .report-more-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bank-import-grid {
+    grid-template-columns: 1fr;
+  }
+  .mapping-grid,
+  .bank-review,
+  .bank-rule-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .bank-row-main {
+    grid-template-columns: 90px minmax(0, 1fr) 130px;
+  }
+  .bank-row-main > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .imp-legacy-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1199px) {
+  .layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+  .main {
+    padding-inline: 24px;
+  }
+  .topbar {
+    padding-inline: 24px;
+  }
+  .dashboard-columns {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .main {
+    padding-inline: clamp(30px, 3vw, 46px);
+  }
+  .topbar {
+    padding-inline: clamp(30px, 3vw, 46px);
+  }
+  .dashboard-columns {
+    grid-template-columns: minmax(0, 1.55fr) minmax(300px, .85fr);
+  }
+}

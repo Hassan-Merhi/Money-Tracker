@@ -20,6 +20,8 @@ jobs:
           node-version: '22.13.1'
       - name: Run test suite
         run: npm test
+      - name: Run Wave 4 desktop/tablet gate
+        run: npm run test:wave4
       - name: Run Lane D release gate
         run: npm run test:lane-d
       - name: Run Wave 5 PWA integrity gate

@@ -52,6 +52,12 @@ html,body{max-width:100%;overflow-x:hidden}
 .input,.select,.textarea{max-width:100%}
 .split-row>*{min-width:0}
 
+/* Insights management rows must let long category names shrink beside actions at all widths. */
+.g-category-row{min-width:0;max-width:100%;flex-wrap:wrap}
+.g-category-name{min-width:0;max-width:100%;flex:1 1 240px}
+.g-category-name>div{min-width:0;max-width:100%;flex:1 1 auto}
+.g-category-row .page-actions{min-width:0;max-width:100%;flex:0 1 auto}
+
 /* Theme parity at every width, including mobile. */
 html[data-theme="dark"]{color-scheme:dark}
 html[data-theme="dark"] .imp-shell{background:var(--bg);color:var(--text);border-color:var(--line)}

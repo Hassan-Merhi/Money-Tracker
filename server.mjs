@@ -864,6 +864,7 @@ function applySyncOperation(user,raw){
       if(op.operation==='create'){
         if(Number(q.personCount.get(user.user_id)?.count||0)>=DATA_LIMITS.people)throw ledgerError('You can keep up to '+DATA_LIMITS.people.toLocaleString('en-US')+' people.');
         const person=cleanPersonInput({...op.payload,id:op.entityId});
+        if(syncQ.tombstoneByEntity.get(user.user_id,'person',person.id))throw ledgerError('This person was deleted on another device. Create a new person instead.',409);
         if(q.personById.get(user.user_id,person.id))throw ledgerError('That person id already exists.',409);
         q.insertPerson.run(user.user_id,person.id,person.name,person.note,person.createdAt);
         changes.push(syncChange('person',person.id,'create',person));
@@ -895,7 +896,10 @@ function applySyncOperation(user,raw){
         }
       }else{
         const existing=q.personById.get(user.user_id,op.entityId);
-        if(!existing)throw ledgerError('Person not found.',404);
+        if(!existing){
+          if(syncQ.tombstoneByEntity.get(user.user_id,'person',op.entityId))throw ledgerError('This person was deleted on another device.',409);
+          throw ledgerError('Person not found.',404);
+        }
         if(op.operation==='update'){
           const person=cleanPersonInput({...op.payload,id:op.entityId},{existing});
           const changed=q.updatePerson.run(person.name,person.note,user.user_id,op.entityId);
@@ -905,6 +909,7 @@ function applySyncOperation(user,raw){
           assertPersonDeletable(user.user_id,op.entityId);
           const changed=q.deletePersonRow.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+          syncQ.upsertTombstone.run(user.user_id,'person',op.entityId,op.baseRevision+1,nowIso());
           changes.push(syncChange('person',op.entityId,'delete',null));
         }
       }
@@ -912,13 +917,17 @@ function applySyncOperation(user,raw){
       if(op.operation==='create'){
         if(Number(q.accountCount.get(user.user_id)?.count||0)>=DATA_LIMITS.accounts)throw ledgerError('You can keep up to '+DATA_LIMITS.accounts.toLocaleString('en-US')+' accounts.');
         const account=cleanAccountInput({...op.payload,id:op.entityId},{defaultCurrency:user.default_currency});
+        if(syncQ.tombstoneByEntity.get(user.user_id,'account',account.id))throw ledgerError('This account was deleted on another device. Create a new account instead.',409);
         if(q.accountById.get(user.user_id,account.id))throw ledgerError('That account id already exists.',409);
         const storage=accountToStorage(account);
         q.insertAccount.run(user.user_id,account.id,account.name,account.type,account.currency,storage.openingBalanceMinor,account.createdAt);
         changes.push(syncChange('account',account.id,'create',account));
       }else{
         const rawAccount=q.accountById.get(user.user_id,op.entityId);
-        if(!rawAccount)throw ledgerError('Account not found.',404);
+        if(!rawAccount){
+          if(syncQ.tombstoneByEntity.get(user.user_id,'account',op.entityId))throw ledgerError('This account was deleted on another device.',409);
+          throw ledgerError('Account not found.',404);
+        }
         const existing=accountFromStorage(rawAccount);
         if(op.operation==='update'){
           const account=cleanAccountInput({...op.payload,id:op.entityId},{existing,defaultCurrency:user.default_currency,userId:user.user_id});
@@ -930,24 +939,26 @@ function applySyncOperation(user,raw){
           assertAccountDeletable(user.user_id,op.entityId);
           const changed=q.deleteAccountRow.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+          syncQ.upsertTombstone.run(user.user_id,'account',op.entityId,op.baseRevision+1,nowIso());
           changes.push(syncChange('account',op.entityId,'delete',null));
         }
       }
     }else if(op.entity==='entry'){
-      if(op.payload?.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
       if(op.operation==='create'){
         if(Number(q.entryCount.get(user.user_id)?.count||0)>=DATA_LIMITS.entries)throw ledgerError('You can keep up to '+DATA_LIMITS.entries.toLocaleString('en-US')+' transactions.');
         const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId});
+        if(syncQ.tombstoneByEntity.get(user.user_id,'entry',entry.id))throw ledgerError('This transaction was deleted on another device. Create a new transaction instead.',409);
         if(q.entryExists.get(user.user_id,entry.id))throw ledgerError('That transaction id already exists.',409);
         insertLedgerEntry(user.user_id,entry);
         changes.push(syncChange('entry',entry.id,'create',entry));
       }else{
         const existing=currentEntry(user.user_id,op.entityId);
-        if(!existing)throw ledgerError('Transaction not found.',404);
-        if(existing.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
+        if(!existing){
+          if(syncQ.tombstoneByEntity.get(user.user_id,'entry',op.entityId))throw ledgerError('This transaction was deleted on another device.',409);
+          throw ledgerError('Transaction not found.',404);
+        }
         if(op.operation==='update'){
           const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId},{existing});
-          if(entry.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
           updateLedgerEntryRow(user.user_id,entry);
           reopenedFeedItems+=bankFeed.revalidatePosted(user.user_id,op.entityId).length;
           changes.push(syncChange('entry',entry.id,'update',entry));
@@ -955,6 +966,7 @@ function applySyncOperation(user,raw){
           q.deleteEntryAttachments.run(user.user_id,op.entityId);
           const changed=q.deleteEntry.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
+          syncQ.upsertTombstone.run(user.user_id,'entry',op.entityId,op.baseRevision+1,nowIso());
           reopenedFeedItems+=bankFeed.reopenOrphans(user.user_id);
           changes.push(syncChange('entry',op.entityId,'delete',null));
         }

@@ -102,3 +102,26 @@ test('Offline Block B has a dedicated CI and browser gate and bumps the PWA cach
   assert.match(version,/version:23/);
   assert.match(version,/money-tracker-debt-v23/);
 });
+
+
+test('Offline Block B hardening keeps auth failures retryable and connected writes resilient to IndexedDB errors',()=>{
+  const store=read('lib/store.js');
+  assert.match(store,/async function localSnapshot\(\)/);
+  assert.match(store,/catch\{return null;\}/);
+  assert.match(store,/if\(error\.status===401\)\{[\s\S]*?status:'pending'[\s\S]*?authRequired:true/);
+  assert.match(store,/const snapshot=await localSnapshot\(\)/);
+  assert.match(store,/if\(!snapshot\)\{[\s\S]*?browserOnline\(\)[\s\S]*?directCoreMutation/);
+});
+
+test('Offline Block B hardening blocks transfer deletion from the offline queue and propagates Bank Feed reopen counts',()=>{
+  const store=read('lib/store.js');
+  const server=read('server.mjs');
+  const bank=read('lib/bank-server.js');
+  assert.match(store,/existing\?\.type==='account_transfer'/);
+  assert.match(store,/Reconnect to delete this transfer/);
+  assert.match(server,/if\(existing\.type==='account_transfer'\)throw ledgerError/);
+  assert.match(server,/reopenedFeedItems\+=bankFeed\.revalidatePosted/);
+  assert.match(server,/reopenedFeedItems\+=bankFeed\.reopenOrphans/);
+  assert.match(server,/reopenedFeedItems\};/);
+  assert.match(bank,/reopenOrphans\(userId\)\{return Number\(q\.reopenOrphans\.run/);
+});

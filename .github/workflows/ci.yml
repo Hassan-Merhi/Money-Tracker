@@ -22,6 +22,8 @@ jobs:
         run: npm test
       - name: Run Lane D release gate
         run: npm run test:lane-d
+      - name: Run Waves 11-12 release gate
+        run: npm run test:wave11-12
       - name: Run accounting reconciliation gate
         run: npm run accounting:check
       - name: Check browser JavaScript syntax

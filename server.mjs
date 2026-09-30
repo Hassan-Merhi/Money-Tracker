@@ -187,6 +187,9 @@ const q = {
   entries: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
     amount_minor AS amountMinor,currency,from_amount_minor AS fromAmountMinor,to_amount_minor AS toAmountMinor,signed_amount_minor AS signedAmountMinor,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
     FROM entries WHERE user_id=? ORDER BY date, created_at`),
+  entryById: db.prepare(`SELECT id,type,person_id AS personId,account_id AS accountId,from_account_id AS fromAccountId,to_account_id AS toAccountId,
+    amount_minor AS amountMinor,currency,from_amount_minor AS fromAmountMinor,to_amount_minor AS toAmountMinor,signed_amount_minor AS signedAmountMinor,date,merchant,description,category_id AS categoryId,split_json AS splitJson,created_at AS createdAt,updated_at AS updatedAt
+    FROM entries WHERE user_id=? AND id=?`),
   deleteEntries: db.prepare('DELETE FROM entries WHERE user_id=?'),
   deletePeople: db.prepare('DELETE FROM people WHERE user_id=?'),
   deleteAccounts: db.prepare('DELETE FROM accounts WHERE user_id=?'),
@@ -709,7 +712,17 @@ function updateLedgerEntryRow(userId,entry){
   const result=q.updateEntry.run(entry.type,entry.personId,entry.accountId,entry.fromAccountId,entry.toAccountId,storage.amountMinor,entry.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,entry.date,entry.merchant,entry.description,entry.categoryId||null,storage.splitJson,entry.updatedAt,userId,entry.id);
   if(Number(result.changes)!==1)throw ledgerError('Transaction not found.',404);
 }
-function currentEntry(userId,id){return loadState(userId).entries.find(entry=>entry.id===id)||null;}
+function currentEntry(userId,id){
+  const row=q.entryById.get(userId,id);if(!row)return null;
+  const accountIds=[row.accountId,row.fromAccountId,row.toAccountId].filter(Boolean),accountById=new Map();
+  for(const accountId of new Set(accountIds)){
+    const stored=q.accountById.get(userId,accountId);
+    if(stored)accountById.set(accountId,accountFromStorage(stored));
+  }
+  const api=entryFromStorage(row,accountById);
+  const {splitJson,amountMinor,fromAmountMinor,toAmountMinor,signedAmountMinor,...entry}=api;
+  return entry;
+}
 function personUsedByEntry(userId,id){
   return loadState(userId).entries.some(entry=>entry.personId===id||(entry.type==='split_paid_for_people'&&(entry.splits||[]).some(split=>split.personId===id)));
 }
@@ -1228,7 +1241,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res); if(!a)return; return json(res,200,loadState(a.user_id));
     }
     if(url.pathname==='/api/state'&&req.method==='PUT'){
-      const a=requireAuth(req,res,{csrf:true}); if(!a)return; const b=await bodyJson(req); const state=saveState(a,b); return json(res,200,state);
+      const a=requireAuth(req,res,{csrf:true}); if(!a)return; const b=await bodyJson(req,DATA_LIMITS.stateBodyBytes); const state=saveState(a,b); return json(res,200,state);
     }
     if(url.pathname==='/api/state/reset'&&req.method==='POST'){
       const a=requireAuth(req,res,{csrf:true}); if(!a)return;

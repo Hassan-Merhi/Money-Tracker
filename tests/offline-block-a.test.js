@@ -57,10 +57,11 @@ test('Offline Block A O2: IndexedDB schema has normalized core ledger stores and
   assert.match(source,/STATE_HEAD_KEY='state-head'/);
   assert.match(source,/schemaVersion:OFFLINE_DB\.version/);
   assert.match(source,/saveStateSnapshot\(state,expectedIdentity=''/);
-  assert.match(source,/userRecord\.identity!==identity/);
+  assert.match(source,/db\.transaction\(OFFLINE_DB\.stores,'readwrite'\)/);
+  assert.match(source,/activeRequest\.result\?\.identity!==identity/);
+  assert.match(source,/identityMismatch=true;[\s\S]*?tx\.abort\(\)/);
   assert.match(source,/loadStateSnapshot/);
   assert.match(source,/clearOfflineData\(expectedIdentity=''/);
-  assert.match(source,/current\.identity!==identity/);
 });
 
 test('Offline Block A O3: authenticated reads are identity-bound and 401 responses invalidate matching local data',()=>{

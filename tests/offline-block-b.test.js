@@ -99,8 +99,8 @@ test('Offline Block B has a dedicated CI and browser gate and bumps the PWA cach
   assert.equal(pkg.scripts['test:offline-b-e2e'],'playwright test e2e/offline-block-b.spec.mjs --workers=1');
   assert.match(ci,/Run Offline Block B contract gate/);
   assert.match(ci,/Run Offline Block B browser gate/);
-  assert.match(version,/version:23/);
-  assert.match(version,/money-tracker-debt-v23/);
+  assert.match(version,/version:24/);
+  assert.match(version,/money-tracker-debt-v24/);
 });
 
 

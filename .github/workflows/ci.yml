@@ -65,6 +65,10 @@ jobs:
           node --check scripts/restore-db-snapshot.mjs
           node --check scripts/accounting-check.mjs
           node --check scripts/accounting-bank-feed-check.mjs
+          node --check scripts/e2e-server.mjs
+          node --check playwright.config.mjs
+          node --check e2e/release-critical.spec.mjs
+          node --check pwa-version.js
 
 
   browser-e2e:

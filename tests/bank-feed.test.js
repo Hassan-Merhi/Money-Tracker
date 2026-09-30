@@ -74,3 +74,19 @@ test('reconcileFeed exposes edited-entry amount mismatches',async()=>{
   const [result]=reconcileFeed([{accountId:'a',status:'posted',signedAmount:-45}],[{type:'account_expense',accountId:'a',amount:60}],[{id:'a',name:'Bank',currency:'USD'}]);
   assert.equal(result.postedAmount,-45);assert.equal(result.ledgerAmount,-60);assert.notEqual(result.postedAmount,result.ledgerAmount);
 });
+
+test('generic Amount maps once while explicit Debit/Credit columns stay split',()=>{
+  const generic=suggestBankMapping(['Date','Description','Amount']);
+  assert.equal(generic.date,'Date');
+  assert.equal(generic.description,'Description');
+  assert.equal(generic.amount,'Amount');
+  assert.equal(generic.debit,'');
+  assert.equal(generic.credit,'');
+
+  const split=suggestBankMapping(['Transaction Date','Details','Debit Amount','Credit Amount']);
+  assert.equal(split.date,'Transaction Date');
+  assert.equal(split.description,'Details');
+  assert.equal(split.amount,'');
+  assert.equal(split.debit,'Debit Amount');
+  assert.equal(split.credit,'Credit Amount');
+});

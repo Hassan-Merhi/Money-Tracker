@@ -179,10 +179,11 @@ Then open `http://localhost:4173`.
 ```bash
 npm test                 # Full suite
 npm run test:lane-d      # Lane D release gate
+npm run test:wave14      # Full phone/tablet/desktop light/dark visual audit
 npm run accounting:check # Money, ledger, migration, reporting, Wave 0, PDF and XLSX regressions
 ```
 
-The automated suite covers core ledger math, exact-money storage, account-only income/expenses, categories/budgets, recurring schedules/reminders, Bank Feed import/history/undo, full backup/restore, session lifecycle, security-event behavior, cross-site mutation rejection, runtime diagnostics, server snapshots, PWA install/offline/update contracts, reporting/PDF/XLSX round-trips, imports, attachments, user isolation, and production release regressions.
+The automated suite covers core ledger math, exact-money storage, account-only income/expenses, categories/budgets, recurring schedules/reminders, Bank Feed import/history/undo, full backup/restore, session lifecycle, security-event behavior, cross-site mutation rejection, runtime diagnostics, server snapshots, PWA install/offline/update contracts, reporting/PDF/XLSX round-trips, imports, attachments, user isolation, production release regressions, and the Wave 14 final visual matrix across mobile/tablet/desktop, light/dark, empty/extreme data, async states, dialogs and menus. See `docs/WAVE_14_VISUAL_AUDIT.md`.
 
 ## Render
 

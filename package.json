@@ -23,7 +23,7 @@
     "test:wave15": "node --test tests/release-wave-15-final-rc.test.js tests/release-wave-7-import-export.test.js tests/wave8-security.test.js tests/wave9-recovery.test.js tests/release-wave-5-pwa.test.js tests/release-wave-13-production-smoke.test.js tests/release-wave-14-visual-audit.test.js",
     "test:offline-a": "node --test tests/offline-block-a.test.js tests/release-wave-5-pwa.test.js",
     "test:offline-a-e2e": "playwright test e2e/offline-block-a.spec.mjs --workers=1",
-    "test:offline-b": "node --test tests/offline-block-b.test.js tests/offline-block-b-server.test.js",
+    "test:offline-b": "node --test tests/offline-block-b.test.js tests/offline-block-b-server.test.js tests/offline-block-b-storage-fallback.test.js",
     "test:offline-b-e2e": "playwright test e2e/offline-block-b.spec.mjs --workers=1"
   },
   "devDependencies": {

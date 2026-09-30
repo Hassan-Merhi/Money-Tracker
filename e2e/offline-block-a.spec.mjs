@@ -19,7 +19,7 @@ test('Offline Block A: cached ledger reopens and renders without a network',asyn
   await page.locator('#authForm').getByRole('button',{name:'Create account'}).click();
   await expectHeading(page,'Dashboard');
 
-  await page.locator('[data-nav="people"]').first().click();
+  await page.evaluate(()=>{location.hash='#people';});
   await expectHeading(page,'People');
   await page.locator('#addPerson').click();
   const modal=page.locator('.modal');

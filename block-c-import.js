@@ -160,3 +160,5 @@ async function review(){
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
+window.addEventListener('moneytracker:open-import',()=>openImporter());
+window.addEventListener('moneytracker:open-quick-import',()=>openQuickImporter());

@@ -40,7 +40,7 @@ test('Offline Block A: cached ledger reopens and renders without a network',asyn
   await page.reload({waitUntil:'domcontentloaded'});
   await expectHeading(page,'Dashboard');
   await expect(page.locator('.connection-pill')).toContainText('Offline');
-  await expect(page.locator('.connection-pill')).toContainText('read only');
+  await expect(page.locator('.connection-pill')).toContainText('changes save locally');
 
   await page.evaluate(()=>{location.hash='#people';});
   await expectHeading(page,'People');
@@ -54,8 +54,8 @@ test('Offline Block A: cached ledger reopens and renders without a network',asyn
 
   await context.clearCookies();
   const unauthorizedStatus=await page.evaluate(async()=>{
-    const {updateSettings}=await import('/lib/store.js');
-    try{await updateSettings({defaultCurrency:'USD'},1);return 200;}
+    const {listSessions}=await import('/lib/store.js');
+    try{await listSessions();return 200;}
     catch(error){return Number(error?.status||0);}
   });
   expect(unauthorizedStatus).toBe(401);

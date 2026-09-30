@@ -20,6 +20,8 @@ jobs:
           node-version: '22.13.1'
       - name: Run test suite
         run: npm test
+      - name: Run Offline Block B contract gate
+        run: npm run test:offline-b
       - name: Run Wave 4 desktop/tablet gate
         run: npm run test:wave4
       - name: Run Lane D release gate
@@ -80,6 +82,7 @@ jobs:
           node --check playwright.config.mjs
           node --check e2e/release-critical.spec.mjs
           node --check e2e/offline-block-a.spec.mjs
+          node --check e2e/offline-block-b.spec.mjs
           node --check e2e/wave14-fixture.mjs
           node --check e2e/visual-audit-matrix.spec.mjs
           node --check e2e/visual-audit-states.spec.mjs
@@ -104,6 +107,8 @@ jobs:
         run: npm run test:wave10
       - name: Run Offline Block A browser gate
         run: npm run test:offline-a-e2e
+      - name: Run Offline Block B browser gate
+        run: npm run test:offline-b-e2e
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit

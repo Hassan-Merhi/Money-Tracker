@@ -1,0 +1,179 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const dir=mkdtempSync(join(tmpdir(),'mot-offline-b-'));
+process.env.DB_PATH=join(dir,'test.sqlite');
+process.env.NODE_ENV='test';
+
+const {server,db}=await import('../server.mjs?offlineb='+Date.now());
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const base='http://127.0.0.1:'+server.address().port;
+let cookie='',csrf='',initialRevision=0,syncRevision=0;
+const email='offline-b-'+Date.now()+'@example.test';
+const password='correct horse battery staple';
+
+async function request(path,{method='GET',body,cookie:useCookie=cookie,csrf:useCsrf=csrf}={}){
+  const headers={};
+  if(body!==undefined)headers['content-type']='application/json';
+  if(useCookie)headers.cookie=useCookie;
+  if(useCsrf&&method!=='GET')headers['x-csrf-token']=useCsrf;
+  const res=await fetch(base+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+  const data=await res.json().catch(()=>({}));
+  return {res,data,cookie:res.headers.get('set-cookie')?.split(';')[0]||''};
+}
+
+test.after(async()=>{
+  await new Promise(resolve=>server.close(resolve));
+  try{db.close();}catch{}
+  rmSync(dir,{recursive:true,force:true});
+});
+
+test('Offline Block B server registers a ledger and exposes sync capability',async()=>{
+  const registered=await request('/api/auth/register',{
+    method:'POST',
+    body:{email,password},
+    cookie:'',
+    csrf:''
+  });
+  assert.equal(registered.res.status,201);
+  cookie=registered.cookie;
+  csrf=registered.data.csrfToken;
+
+  const state=(await request('/api/state')).data;
+  initialRevision=state.version;
+  assert.ok(Number.isInteger(initialRevision));
+
+  const health=await request('/api/health');
+  assert.equal(health.res.status,200);
+  assert.equal(health.data.offlineBlockBVersion,1);
+});
+
+const personOperation=()=>({
+  operationId:'op_offline_person_1',
+  entity:'person',
+  entityId:'person_offline_alice',
+  operation:'create',
+  baseRevision:initialRevision,
+  payload:{
+    id:'person_offline_alice',
+    name:'Offline Alice',
+    note:'Created without a network',
+    openingBalance:25,
+    currency:'USD',
+    direction:'to_me',
+    openingEntryId:'entry_offline_opening',
+    openingDate:'2026-09-30'
+  }
+});
+
+test('O4/O5 push applies a queued person plus opening balance atomically',async()=>{
+  const pushed=await request('/api/sync/push',{method:'POST',body:{operation:personOperation()}});
+  assert.equal(pushed.res.status,201);
+  assert.equal(pushed.data.status,'accepted');
+  assert.equal(pushed.data.revision,initialRevision+1);
+  syncRevision=pushed.data.revision;
+
+  const state=(await request('/api/state')).data;
+  assert.equal(state.version,syncRevision);
+  assert.equal(state.people.filter(row=>row.id==='person_offline_alice').length,1);
+  const opening=state.entries.filter(row=>row.id==='entry_offline_opening');
+  assert.equal(opening.length,1);
+  assert.equal(opening[0].type,'person_adjustment');
+  assert.equal(opening[0].amount,25);
+  assert.equal(opening[0].signedAmount,25);
+});
+
+test('O6 retrying the same operation after a lost response is idempotent',async()=>{
+  const replay=await request('/api/sync/push',{method:'POST',body:{operation:personOperation()}});
+  assert.equal(replay.res.status,200);
+  assert.equal(replay.data.alreadyProcessed,true);
+  assert.equal(replay.data.revision,syncRevision);
+
+  const state=(await request('/api/state')).data;
+  assert.equal(state.version,syncRevision);
+  assert.equal(state.people.filter(row=>row.id==='person_offline_alice').length,1);
+  assert.equal(state.entries.filter(row=>row.id==='entry_offline_opening').length,1);
+});
+
+test('O6 rejects reuse of an operation id for different data',async()=>{
+  const changed=personOperation();
+  changed.payload={...changed.payload,name:'Different Alice'};
+  const reused=await request('/api/sync/push',{method:'POST',body:{operation:changed}});
+  assert.equal(reused.res.status,409);
+  assert.match(reused.data.error,/already used for different data/i);
+
+  const state=(await request('/api/state')).data;
+  assert.equal(state.version,syncRevision);
+  assert.equal(state.people.find(row=>row.id==='person_offline_alice').name,'Offline Alice');
+});
+
+test('O5 pull returns complete incremental changes for sync-managed revisions',async()=>{
+  const pulled=await request('/api/sync/pull?sinceRevision='+initialRevision);
+  assert.equal(pulled.res.status,200);
+  assert.equal(pulled.data.requiresFullRefresh,false);
+  assert.equal(pulled.data.currentRevision,syncRevision);
+  assert.equal(pulled.data.cursor,syncRevision);
+
+  const person=pulled.data.changes.find(row=>row.entity==='person'&&row.entityId==='person_offline_alice');
+  const opening=pulled.data.changes.find(row=>row.entity==='entry'&&row.entityId==='entry_offline_opening');
+  assert.equal(person.operation,'create');
+  assert.equal(person.payload.name,'Offline Alice');
+  assert.equal(opening.operation,'create');
+  assert.equal(opening.payload.amount,25);
+  assert.equal(person.revision,syncRevision);
+  assert.equal(opening.revision,syncRevision);
+});
+
+test('O5 rejects stale queued revisions without mutating the ledger',async()=>{
+  const stale={
+    operationId:'op_stale_person_1',
+    entity:'person',
+    entityId:'person_stale',
+    operation:'create',
+    baseRevision:initialRevision,
+    payload:{id:'person_stale',name:'Stale Person',note:''}
+  };
+  const response=await request('/api/sync/push',{method:'POST',body:{operation:stale}});
+  assert.equal(response.res.status,409);
+  assert.match(response.data.error,/changed before the offline change could sync/i);
+
+  const state=(await request('/api/state')).data;
+  assert.equal(state.version,syncRevision);
+  assert.equal(state.people.some(row=>row.id==='person_stale'),false);
+});
+
+test('O5 keeps server validation failures atomic and revision-stable',async()=>{
+  const invalid={
+    operationId:'op_invalid_person_1',
+    entity:'person',
+    entityId:'person_invalid',
+    operation:'create',
+    baseRevision:syncRevision,
+    payload:{id:'person_invalid',name:'',note:'bad'}
+  };
+  const response=await request('/api/sync/push',{method:'POST',body:{operation:invalid}});
+  assert.equal(response.res.status,400);
+  assert.match(response.data.error,/needs a name/i);
+
+  const state=(await request('/api/state')).data;
+  assert.equal(state.version,syncRevision);
+  assert.equal(state.people.some(row=>row.id==='person_invalid'),false);
+});
+
+test('O5 requests a full refresh when a non-sync server mutation creates a revision gap',async()=>{
+  const settings=await request('/api/settings',{
+    method:'PUT',
+    body:{defaultCurrency:'USD',appMode:'simple',timezone:'UTC',expectedRevision:syncRevision}
+  });
+  assert.equal(settings.res.status,200);
+  assert.equal(settings.data.version,syncRevision+1);
+
+  const pulled=await request('/api/sync/pull?sinceRevision='+syncRevision);
+  assert.equal(pulled.res.status,200);
+  assert.equal(pulled.data.currentRevision,syncRevision+1);
+  assert.equal(pulled.data.requiresFullRefresh,true);
+  assert.deepEqual(pulled.data.changes,[]);
+});

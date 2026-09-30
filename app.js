@@ -1,5 +1,5 @@
 import { icon, mobilePages, recentDebtEntries, activityMarkup, peopleOverviewMarkup } from './lib/dashboard-ui.js';
-import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid } from './lib/store.js';
+import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, uid, getSyncStatus, syncPendingOperations, discardPendingChangesAndReload } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, dateInTimeZone, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
@@ -21,6 +21,7 @@ let modalReturnFocus = null;
 let modalSequence = 0;
 let a11yFieldSequence = 0;
 let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false};
+let syncInfo = {pending:0,failed:0,conflicts:0,online:navigator.onLine};
 
 const app = document.querySelector('#app');
 const advancedMode=()=>state?.settings?.appMode==='advanced';
@@ -47,6 +48,12 @@ function saveThemePreference(preference){
 applyTheme();
 themeMedia?.addEventListener?.('change',()=>{if(themePreference()==='system')applyTheme('system');});
 window.addEventListener('moneytracker:pwa',event=>{pwa=event.detail||pwa;if(state)render();});
+window.addEventListener('moneytracker:sync',event=>{
+  const detail=event.detail||{};
+  syncInfo={...syncInfo,...detail};
+  if(detail.state)state=detail.state;
+  if(state)render();
+});
 window.addEventListener('moneytracker:state-replaced',event=>{if(event.detail){state=event.detail;if(user)render();}});
 
 function parseRoute() {
@@ -65,22 +72,25 @@ document.querySelector('.skip-link')?.addEventListener('click',event=>{
 });
 
 async function runMutation(action,message='') {
-  if (!navigator.onLine) { showToast('Offline mode is read-only for now. Reconnect to save changes.'); return false; }
   if (saving) { showToast('Saving the previous change…'); return false; }
   saving = true;
   try {
     state = await action(state.version);
+    syncInfo = await getSyncStatus().catch(()=>syncInfo);
     if (Number(state?.reopenedFeedItems)>0) showToast('Bank Feed row reopened - the posted amount no longer matches this transaction.');
+    else if (syncInfo.conflicts||syncInfo.failed) showToast('Saved on this device, but sync needs attention.');
+    else if (!navigator.onLine&&syncInfo.pending) showToast(`Saved offline · ${syncInfo.pending} change${syncInfo.pending===1?'':'s'} queued.`);
     else if (message) showToast(message);
     render();
     return true;
   } catch (error) {
     if (error.status === 409) {
       state = await loadState();
+      syncInfo = await getSyncStatus().catch(()=>syncInfo);
       render();
-      showToast('Another tab changed the data. I reloaded the latest version.');
+      showToast('Another tab changed the data. I reloaded the latest safe version.');
     } else if (error.status === 401) {
-      user = null; state = null; showAuth('Your session expired. Sign in again.');
+      user = null; state = null; showAuth('Your session expired. Sign in again. Unsynced device changes were preserved.');
     } else { showToast(error.message || 'Could not save.'); }
     return false;
   } finally { saving = false; }
@@ -135,6 +145,17 @@ function renderOfflineServerFeature(main,title,detail){
   main.innerHTML=`<section class="card panel"><div class="empty"><strong>${escapeHtml(title)} needs a connection</strong>${escapeHtml(detail)}<div class="muted tiny" style="margin-top:8px">Your cached ledger remains available in Dashboard, People, Accounts, Activity, Insights and Reports.</div></div></section>`;
 }
 
+function connectionStatusText(){
+  const pending=Number(syncInfo?.pending||0),issues=Number(syncInfo?.failed||0)+Number(syncInfo?.conflicts||0);
+  if(!pwa.online)return pending?`● Offline · ${pending} queued`:'● Offline · changes save locally';
+  if(issues)return `● Sync issue · ${pending} queued`;
+  if(pending)return `● Syncing · ${pending} queued`;
+  return '● Online · synced';
+}
+function connectionStatusClass(){
+  return !pwa.online||syncInfo?.failed||syncInfo?.conflicts?'offline':'online';
+}
+
 function render() {
   closeAllEntryMenus();
   const hiddenInSimpleMode=['accounts','bank','insights','scheduled'];
@@ -153,7 +174,7 @@ function render() {
       <section class="content">
         <header class="topbar">
           <div class="topbar-title"><h2 id="pageHeading" tabindex="-1">${titleFor(route.page)}</h2><p>${subFor(route.page)}</p></div>
-          <div class="top-actions"><span class="connection-pill ${pwa.online?'online':'offline'}" role="status" aria-live="polite">${pwa.online?'● Online':'● Offline · read only'}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">${icon('plus')} Add activity</button></div>
+          <div class="top-actions"><span class="connection-pill ${connectionStatusClass()}" role="status" aria-live="polite">${connectionStatusText()}</span>${pwa.updateWaiting?'<button class="btn" id="applyUpdate">Update app</button>':''}${advanced?`<button class="btn" id="quickTransfer">⇄ Transfer</button>`:''}<button class="btn primary" id="quickEntry">${icon('plus')} Add activity</button></div>
         </header>
         <main class="main" id="main" aria-labelledby="pageHeading" tabindex="-1"></main>
       </section>
@@ -169,16 +190,16 @@ function render() {
   document.querySelector('#applyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   document.querySelector('#quickEntry')?.addEventListener('click', () => openQuickMenu());
   document.querySelector('#quickTransfer')?.addEventListener('click', () => openTransferModal());
-  document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); } catch {} user=null; state=null; showAuth(); });
+  document.querySelector('#logoutBtn')?.addEventListener('click', async () => { try { await logout(); user=null; state=null; showAuth(); } catch(error) { showToast(error.message||'Could not sign out.'); } });
 
   const main = document.querySelector('#main');
   if (route.page === 'dashboard') renderDashboard(main);
   else if (route.page === 'people') renderPeople(main);
   else if (route.page === 'accounts') renderAccounts(main);
   else if (route.page === 'transactions') renderTransactions(main);
-  else if (route.page === 'bank') pwa.online?renderBankFeedPage(main,state,{showToast,replaceState(next){state=next;render();}}):renderOfflineServerFeature(main,'Bank Feed','Imported bank rows are not part of the Block A offline snapshot yet.');
+  else if (route.page === 'bank') pwa.online?renderBankFeedPage(main,state,{showToast,replaceState(next){state=next;render();}}):renderOfflineServerFeature(main,'Bank Feed','Bank Feed remains server-only while core ledger changes can now be saved offline and synced later.');
   else if (route.page === 'insights') renderInsightsPage(main,state,route,{openModal,closeModal,showToast,replaceState(next){state=next;render();}});
-  else if (route.page === 'scheduled') pwa.online?renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}}):renderOfflineServerFeature(main,'Scheduled & Reminders','Recurring rules and reminder inboxes still require the server.');
+  else if (route.page === 'scheduled') pwa.online?renderRecurringPage(main,state,{openModal,closeModal,showToast,replaceState(next){state=next;render();}}):renderOfflineServerFeature(main,'Scheduled & Reminders','Recurring rules and reminder inboxes remain server-only while core ledger changes can sync offline.');
   else if (route.page === 'reports') renderReports(main,state,route,{money,escapeHtml,today});
   else if (route.page === 'settings') renderSettings(main);
   else if (route.page === 'person') renderPerson(main, route.params.get('id'));
@@ -589,7 +610,7 @@ function renderSettings(main) {
       <div class="field"><label>Appearance</label><select id="settingTheme" class="select"><option value="system" ${themePreference()==='system'?'selected':''}>System</option><option value="light" ${themePreference()==='light'?'selected':''}>Light</option><option value="dark" ${themePreference()==='dark'?'selected':''}>Dark</option></select></div>
       <div class="field"><label>Timezone</label><input class="input" id="settingTimezone" value="${escapeHtml(state.settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}" readonly><span class="muted tiny">Used by server-side recurring reminders.</span></div>
     </div><div class="warning" style="margin-top:12px"><strong>Simple mode</strong> hides accounts, Bank Feed, budgets and schedules without deleting them. Switch back to Advanced at any time.</div><div style="margin-top:14px"><button class="btn primary" id="saveSettings">Save settings</button></div></section>
-    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Money Tracker keeps its interface available offline, but financial changes are only sent when you are online.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div></section>
+    <section class="card settings-card"><h3>App & offline</h3><p class="muted">Core people, account and transaction changes save to this device first. When a connection returns, the durable sync queue sends each change once.</p><div class="pwa-status-grid"><div><span class="pill ${pwa.online?'green':'red'}">${pwa.online?'Online':'Offline'}</span><div class="muted tiny">Connection</div></div><div><span class="pill ${pwa.installed?'green':''}">${pwa.installed?'Installed':'Browser'}</span><div class="muted tiny">App mode</div></div><div><span class="pill ${pwa.updateWaiting?'amber':''}">${pwa.updateWaiting?'Update ready':'Up to date'}</span><div class="muted tiny">PWA version</div></div></div><div class="pwa-status-grid" style="margin-top:12px"><div><span class="pill ${syncInfo.pending?'amber':'green'}">${syncInfo.pending||0} queued</span><div class="muted tiny">Pending sync</div></div><div><span class="pill ${syncInfo.conflicts?'red':''}">${syncInfo.conflicts||0} conflicts</span><div class="muted tiny">Conflicts</div></div><div><span class="pill ${syncInfo.failed?'red':''}">${syncInfo.failed||0} failed</span><div class="muted tiny">Rejected changes</div></div></div><div class="page-actions" style="margin-top:14px">${pwa.online&&syncInfo.pending?'<button class="btn primary" id="syncNow">Sync now</button>':''}${pwa.online&&(syncInfo.conflicts||syncInfo.failed)?'<button class="btn danger" id="discardSync">Discard queued changes & reload server</button>':''}${pwa.installable?'<button class="btn primary" id="installApp">Install Money Tracker</button>':''}${pwa.updateWaiting?'<button class="btn" id="settingsApplyUpdate">Apply update</button>':''}</div></section>
     ${user?.isOwner?`<section class="card settings-card"><h3>User accounts</h3><p class="muted">Public account creation locks after the first owner account. You can reset or delete secondary sign-in accounts here.</p><div id="managedUsers" class="muted">Loading accounts…</div><form id="addUserForm" class="form-grid" style="margin-top:14px"><div class="field"><label>Email</label><input class="input" name="email" type="email" autocomplete="off" required></div><div class="field"><label>Password</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="span-2"><button class="btn primary" type="submit">＋ Create account</button></div></form></section>`:''}
     ${user?.isOwner?'<section class="card settings-card"><h3>Operations & integrity</h3><p class="muted">Owner-only database integrity status and server snapshot controls.</p><div id="runtimeStatus" class="muted">Loading diagnostics…</div><div class="page-actions" style="margin-top:14px"><button class="btn" id="refreshRuntime">Refresh diagnostics</button><button class="btn primary" id="serverSnapshot">Create server snapshot</button></div></section>':''}
     <section class="card settings-card"><h3>Security</h3><p class="muted">Signed in as <strong>${escapeHtml(user?.email||'')}</strong>. Password changes revoke every other session automatically.</p>
@@ -601,6 +622,8 @@ function renderSettings(main) {
   </div>`;
   main.querySelector('#saveSettings')?.addEventListener('click',async()=>{const defaultCurrency=main.querySelector('#settingCurrency').value,appMode=main.querySelector('#settingMode').value,timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||state.settings.timezone||'UTC';saveThemePreference(main.querySelector('#settingTheme').value);const saved=await runMutation(version=>updateSettings({defaultCurrency,appMode,timezone},version),'Settings saved.');if(saved&&appMode==='advanced')showToast('Advanced mode enabled — accounts, Bank Feed, budgets and schedules are now available.');});
   main.querySelector('#settingTheme')?.addEventListener('change',event=>applyTheme(event.target.value));
+  main.querySelector('#syncNow')?.addEventListener('click',async()=>{try{await syncPendingOperations();syncInfo=await getSyncStatus();state=await loadState();render();showToast(syncInfo.pending?'Sync paused. Check the queued change status.':'Everything is synced.');}catch(error){showToast(error.message||'Could not sync.');}});
+  main.querySelector('#discardSync')?.addEventListener('click',async()=>{if(!confirm('Discard every queued offline change on this device and reload the server copy?'))return;try{state=await discardPendingChangesAndReload();syncInfo=await getSyncStatus();render();showToast('Queued device changes were discarded and the server copy was reloaded.');}catch(error){showToast(error.message||'Could not reload the server copy.');}});
   main.querySelector('#installApp')?.addEventListener('click',async()=>{const accepted=await installPwa();showToast(accepted?'Money Tracker installation started.':'Installation was not completed.');});
   main.querySelector('#settingsApplyUpdate')?.addEventListener('click',()=>{if(activatePwaUpdate())showToast('Updating Money Tracker…');});
   main.querySelector('#settingsLogout')?.addEventListener('click',()=>document.querySelector('#logoutBtn')?.click());
@@ -1100,7 +1123,7 @@ function closeAllEntryMenus() {
 async function boot(){
   initEntryMenuListeners();
   app.innerHTML='<div class="boot">Loading Money Tracker…</div>';
-  try{user=await currentUser();if(!user){await showAuth();return;}state=await loadState();render();}catch(error){showAuth(error.message||'Could not load Money Tracker.');}
+  try{user=await currentUser();if(!user){await showAuth();return;}state=await loadState();syncInfo=await getSyncStatus().catch(()=>syncInfo);render();}catch(error){showAuth(error.message||'Could not load Money Tracker.');}
 }
 
 document.addEventListener('keydown',event=>{

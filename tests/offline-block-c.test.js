@@ -28,6 +28,9 @@ test('O7 stores conflict bases and supports automatic rebase plus explicit resol
   assert.match(store,/export async function resolveSyncConflict/);
   assert.match(app,/data-strategy="keep_mine"/);
   assert.match(app,/data-strategy="keep_server"/);
+  assert.match(store,/serverDeleted=queued\.operation==='update'/);
+  assert.match(store,/This record was deleted on another device/);
+  assert.match(app,/canKeepMine=row\.operation!=='create'&&!serverDeleted/);
 });
 
 test('O8 upgrades IndexedDB to durable tombstones and server tombstones',()=>{

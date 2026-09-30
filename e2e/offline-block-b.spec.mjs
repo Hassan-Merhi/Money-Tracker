@@ -161,6 +161,47 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
   await expect(page.locator('.connection-pill')).toContainText('Online · synced');
 
   await context.setOffline(true);
+  const queuedAfterExpiry=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const snapshot=await db.loadStateSnapshot();
+    const person=snapshot.people.find(row=>row.name==='Offline Bob');
+    await store.updatePerson(person.id,{name:person.name,note:'Queued before session expiry'},snapshot.version);
+    return await store.getSyncStatus();
+  });
+  expect(queuedAfterExpiry.pending).toBe(1);
+
+  await context.clearCookies();
+  await context.setOffline(false);
+  const expiredStatus=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    await store.syncPendingOperations();
+    return await store.getSyncStatus();
+  });
+  expect(expiredStatus.pending).toBe(1);
+  expect(expiredStatus.failed).toBe(0);
+  expect(expiredStatus.conflicts).toBe(0);
+
+  const resumed=await page.evaluate(async({email,password})=>{
+    const store=await import('/lib/store.js');
+    await store.login(email,password);
+    await store.syncPendingOperations();
+    const status=await store.getSyncStatus();
+    const response=await fetch('/api/state',{credentials:'same-origin'});
+    const serverState=await response.json();
+    return {
+      pending:status.pending,
+      failed:status.failed,
+      conflicts:status.conflicts,
+      note:serverState.people.find(row=>row.name==='Offline Bob')?.note||''
+    };
+  },{email:EMAIL,password:PASSWORD});
+  expect(resumed.pending).toBe(0);
+  expect(resumed.failed).toBe(0);
+  expect(resumed.conflicts).toBe(0);
+  expect(resumed.note).toBe('Queued before session expiry');
+
+  await context.setOffline(true);
   const failedLogout=await page.evaluate(async()=>{
     const store=await import('/lib/store.js');
     const db=await import('/lib/offline-db.js');
@@ -176,5 +217,41 @@ test('Offline Block B: local writes survive reload and a lost sync response retr
   await expectHeading(page,'People');
 
   await context.setOffline(false);
+  await context.close();
+});
+
+
+test('Offline Block B: connected core writes fall back to atomic HTTP when IndexedDB reads fail',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:390,height:844}});
+  const page=await context.newPage();
+  await page.goto('/');
+
+  await page.evaluate(async({email,password})=>{
+    const store=await import('/lib/store.js');
+    await store.login(email,password);
+  },{email:EMAIL,password:PASSWORD});
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expectHeading(page,'Dashboard');
+
+  const result=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const beforeResponse=await fetch('/api/state',{credentials:'same-origin'});
+    const before=await beforeResponse.json();
+
+    const original=IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction=function(){throw new DOMException('IndexedDB transaction blocked','InvalidStateError');};
+    try{
+      const saved=await store.updateSettings({defaultCurrency:'EUR'},before.version);
+      const afterResponse=await fetch('/api/state',{credentials:'same-origin'});
+      const after=await afterResponse.json();
+      return {savedCurrency:saved.settings.defaultCurrency,serverCurrency:after.settings.defaultCurrency,version:after.version};
+    }finally{
+      IDBDatabase.prototype.transaction=original;
+    }
+  });
+
+  expect(result.savedCurrency).toBe('EUR');
+  expect(result.serverCurrency).toBe('EUR');
+  expect(result.version).toBeGreaterThan(1);
   await context.close();
 });

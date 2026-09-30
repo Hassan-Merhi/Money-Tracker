@@ -28,6 +28,8 @@ jobs:
         run: npm run test:wave5
       - name: Run Waves 11-12 release gate
         run: npm run test:wave11-12
+      - name: Run Wave 13 production smoke gate
+        run: npm run test:wave13
       - name: Run accounting reconciliation gate
         run: npm run accounting:check
       - name: Check browser JavaScript syntax
@@ -50,6 +52,7 @@ jobs:
           node --check lib/pwa.js
           node --check lib/security-ops.js
           node --check lib/runtime-ops.js
+          node --check lib/production-smoke.js
           node --check block-f-bank-feed.js
           node --check lib/bank-feed.js
           node --check lib/bank-server.js
@@ -68,6 +71,7 @@ jobs:
           node --check scripts/accounting-check.mjs
           node --check scripts/accounting-bank-feed-check.mjs
           node --check scripts/e2e-server.mjs
+          node --check scripts/production-smoke.mjs
           node --check playwright.config.mjs
           node --check e2e/release-critical.spec.mjs
           node --check pwa-version.js

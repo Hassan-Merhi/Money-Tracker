@@ -16,6 +16,7 @@
     "test:wave4": "node --test tests/release-wave-4-desktop-tablet.test.js",
     "test:wave8-9": "node --test tests/wave8-security.test.js tests/wave9-recovery.test.js",
     "test:wave11-12": "node --test tests/release-wave-11-accessibility.test.js tests/release-wave-12-scale.test.js",
+    "test:wave13": "node --test tests/release-wave-13-production-smoke.test.js",
     "test:wave5": "node --test tests/release-wave-5-pwa.test.js",
     "test:wave10": "playwright test"
   },

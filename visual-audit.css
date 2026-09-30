@@ -189,3 +189,32 @@ html[data-theme="dark"] .entry-menu-popover{background:var(--panel);border-color
   .recurring-actions .btn,.bank-row-actions .btn,.account-detail-actions .btn{flex:1 1 46%}
   .modal-foot .btn{flex-basis:100%}
 }
+
+/* Tablet Bank Feed: rule editor and saved rules must not force the 834px shell wider. */
+@media (min-width:761px) and (max-width:900px){
+  .bank-rules,.bank-rule-form,.bank-rule-list,.bank-rule-item{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+  }
+  .bank-rules,.bank-rule-list{overflow:hidden}
+  .bank-rule-form{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  }
+  .bank-rule-form>*,
+  .bank-rule-form .input,
+  .bank-rule-form .select{
+    min-width:0!important;
+    max-width:100%!important;
+  }
+  .bank-rule-form .input,
+  .bank-rule-form .select,
+  .bank-rule-form button{
+    width:100%!important;
+  }
+  .bank-rule-item>div{
+    min-width:0;
+    max-width:100%;
+    flex:1 1 auto;
+  }
+}

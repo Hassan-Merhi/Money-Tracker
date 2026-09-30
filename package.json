@@ -20,7 +20,8 @@
     "test:wave14": "playwright test e2e/visual-audit-matrix.spec.mjs e2e/visual-audit-states.spec.mjs e2e/visual-audit-overlays.spec.mjs --workers=1",
     "test:wave5": "node --test tests/release-wave-5-pwa.test.js",
     "test:wave10": "playwright test e2e/release-critical.spec.mjs --workers=1",
-    "test:wave15": "node --test tests/release-wave-15-final-rc.test.js tests/release-wave-7-import-export.test.js tests/wave8-security.test.js tests/wave9-recovery.test.js tests/release-wave-5-pwa.test.js tests/release-wave-13-production-smoke.test.js tests/release-wave-14-visual-audit.test.js"
+    "test:wave15": "node --test tests/release-wave-15-final-rc.test.js tests/release-wave-7-import-export.test.js tests/wave8-security.test.js tests/wave9-recovery.test.js tests/release-wave-5-pwa.test.js tests/release-wave-13-production-smoke.test.js tests/release-wave-14-visual-audit.test.js",
+    "test:offline-a": "node --test tests/offline-block-a.test.js tests/release-wave-5-pwa.test.js"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

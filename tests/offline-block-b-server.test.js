@@ -177,3 +177,59 @@ test('O5 requests a full refresh when a non-sync server mutation creates a revis
   assert.equal(pulled.data.requiresFullRefresh,true);
   assert.deepEqual(pulled.data.changes,[]);
 });
+
+
+test('O5 rejects queued deletion of an existing account transfer',async()=>{
+  let state=(await request('/api/state')).data;
+  let response=await request('/api/accounts',{method:'POST',body:{id:'account_sync_a',name:'Sync A',type:'bank',currency:'USD',openingBalance:100,expectedRevision:state.version}});
+  assert.equal(response.res.status,201);state=response.data;
+  response=await request('/api/accounts',{method:'POST',body:{id:'account_sync_b',name:'Sync B',type:'cash',currency:'USD',openingBalance:0,expectedRevision:state.version}});
+  assert.equal(response.res.status,201);state=response.data;
+  response=await request('/api/entries',{method:'POST',body:{
+    id:'entry_sync_transfer',type:'account_transfer',fromAccountId:'account_sync_a',toAccountId:'account_sync_b',
+    amount:10,fromAmount:10,toAmount:10,date:'2026-09-30',expectedRevision:state.version
+  }});
+  assert.equal(response.res.status,201);state=response.data;
+
+  const blocked=await request('/api/sync/push',{method:'POST',body:{operation:{
+    operationId:'op_delete_transfer_blocked',
+    entity:'entry',
+    entityId:'entry_sync_transfer',
+    operation:'delete',
+    baseRevision:state.version,
+    payload:{id:'entry_sync_transfer'}
+  }}});
+  assert.equal(blocked.res.status,400);
+  assert.match(blocked.data.error,/Offline transfers are not enabled/i);
+  const after=(await request('/api/state')).data;
+  assert.equal(after.entries.some(row=>row.id==='entry_sync_transfer'),true);
+  assert.equal(after.version,state.version);
+});
+
+test('O5 sync edit reports Bank Feed rows reopened by reconciliation',async()=>{
+  let state=(await request('/api/state')).data;
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{
+    accountId:'account_sync_a',
+    sourceName:'offline-b-reconcile.csv',
+    rows:[{date:'2026-09-30',description:'Offline B reconcile',signedAmount:-20,currency:'USD',externalId:'offline-b-reconcile-1'}]
+  }});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(row=>row.externalId==='offline-b-reconcile-1');
+  const posted=await request('/api/bank-feed/'+item.id+'/post',{method:'POST',body:{expectedRevision:state.version,classification:'expense'}});
+  assert.equal(posted.res.status,200);state=posted.data.state;
+  const entry=state.entries.find(row=>row.id===posted.data.entryId);
+
+  const pushed=await request('/api/sync/push',{method:'POST',body:{operation:{
+    operationId:'op_reconcile_edit_1',
+    entity:'entry',
+    entityId:entry.id,
+    operation:'update',
+    baseRevision:state.version,
+    payload:{...entry,amount:25}
+  }}});
+  assert.equal(pushed.res.status,201);
+  assert.equal(pushed.data.reopenedFeedItems,1);
+
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(row=>row.id===item.id).status,'pending');
+});

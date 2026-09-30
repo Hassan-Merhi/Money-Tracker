@@ -1146,6 +1146,17 @@ export const server=http.createServer(async(req,res)=>{
       }
       return fail(res,405,'User account action not supported.');
     }
+    if(url.pathname==='/api/sync/push'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req);
+      const result=applySyncOperation(a,body.operation);
+      return json(res,result.alreadyProcessed?200:201,result);
+    }
+    if(url.pathname==='/api/sync/pull'&&req.method==='GET'){
+      const a=requireAuth(req,res);if(!a)return;
+      const sinceRevision=Number(url.searchParams.get('sinceRevision'));
+      return json(res,200,pullSyncChanges(a.user_id,sinceRevision));
+    }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);

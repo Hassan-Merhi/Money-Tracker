@@ -80,12 +80,14 @@ test('O18 publishes update schema metadata and blocks activation around unsynced
   const pwa=read('lib/pwa.js'),sw=read('service-worker.js'),version=read('pwa-version.js'),app=read('app.js');
   assert.match(version,/version:29/);
   assert.match(version,/offlineDbVersion:4/);
+  assert.match(version,/minMigratableOfflineDbVersion:1/);
   assert.match(sw,/GET_UPDATE_INFO/);
   assert.match(sw,/offlineDbVersion:self\.MONEY_TRACKER_PWA\.offlineDbVersion/);
+  assert.match(sw,/minMigratableOfflineDbVersion:self\.MONEY_TRACKER_PWA\.minMigratableOfflineDbVersion/);
   assert.match(pwa,/waitingWorkerInfo/);
   assert.match(pwa,/pendingCount/);
   assert.match(pwa,/Sync or resolve queued offline changes before updating the app/);
-  assert.match(pwa,/target>current/);
+  assert.match(pwa,/current<minimum/);
   assert.match(app,/pendingCount:syncInfo\.pending/);
   assert.match(app,/Sync before update/);
 });

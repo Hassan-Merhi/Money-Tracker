@@ -124,6 +124,8 @@ jobs:
           node --check e2e/wave100f-lifecycle.spec.mjs
           node --check e2e/wave100f-conflict.spec.mjs
           node --check e2e/wave100g-scale-longevity.spec.mjs
+          node --check e2e/wave100h-offline-xlsx.spec.mjs
+          node --check e2e/wave100i-offline-import-migration.spec.mjs
           node --check lib/offline-query.js
           node --check lib/offline-recovery.js
           node --check lib/offline-lifecycle.js

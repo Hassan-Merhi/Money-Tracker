@@ -44,6 +44,8 @@ jobs:
         run: npm run test:wave100f
       - name: Run Wave 100G Scale & Longevity gate
         run: npm run test:wave100g
+      - name: Run Wave 100H Offline Completeness gate
+        run: npm run test:wave100h
       - name: Run Wave 4 desktop/tablet gate
         run: npm run test:wave4
       - name: Run Lane D release gate
@@ -74,6 +76,7 @@ jobs:
           node --check lib/importer.js
           node --check lib/legacy-excel.js
           node --check lib/xlsx-import.js
+          node --check lib/xlsx-browser.js
           node --check block-e-recurring.js
           node --check lib/recurring-rule-form.js
           node --check lib/recurring.js
@@ -170,6 +173,8 @@ jobs:
         run: npm run test:wave100f-e2e
       - name: Run Wave 100G Scale & Longevity browser gate
         run: npm run test:wave100g-e2e
+      - name: Run Wave 100H Offline Completeness browser gate
+        run: npm run test:wave100h-e2e
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit

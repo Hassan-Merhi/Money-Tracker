@@ -201,7 +201,7 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
       worker.postMessage({type:'GET_UPDATE_INFO'},[channel.port2]);
     });
   });
-  expect(workerInfo.version).toBe(37);
+  expect(workerInfo.version).toBeGreaterThanOrEqual(37);
   expect(workerInfo.offlineDbVersion).toBe(8);
   expect(workerInfo.minMigratableOfflineDbVersion).toBe(1);
 
@@ -227,11 +227,11 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
   await page.evaluate(()=>{location.hash='#settings';});
   await expect(page.locator('#pageHeading')).toHaveText('Settings');
 
-  await page.evaluate(async()=>{
+  await page.evaluate(async currentVersion=>{
     const pwa=await import('/lib/pwa.js');
     const current=pwa.pwaStatus();
-    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:37,offlineDbVersion:8,compatible:true,reason:''}}}));
-  });
+    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:currentVersion+1,offlineDbVersion:8,compatible:true,reason:''}}}));
+  },workerInfo.version);
   const updateButton=page.locator('#settingsApplyUpdate');
   await expect(updateButton).toBeVisible();
   await expect(updateButton).toBeDisabled();

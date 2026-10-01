@@ -166,6 +166,11 @@ CREATE TABLE IF NOT EXISTS sync_changes (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sync_changes_user_revision ON sync_changes(user_id, revision, seq);
+CREATE TABLE IF NOT EXISTS sync_metrics (
+  metric TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  last_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_tombstones (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   entity TEXT NOT NULL,
@@ -276,7 +281,10 @@ const syncQ={
   tombstoneByEntity:db.prepare('SELECT revision,deleted_at AS deletedAt FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?'),
   upsertTombstone:db.prepare(`INSERT INTO sync_tombstones(user_id,entity,entity_id,revision,deleted_at) VALUES(?,?,?,?,?)
     ON CONFLICT(user_id,entity,entity_id) DO UPDATE SET revision=excluded.revision,deleted_at=excluded.deleted_at`),
-  deleteTombstone:db.prepare('DELETE FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?')
+  deleteTombstone:db.prepare('DELETE FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?'),
+  bumpMetric:db.prepare(`INSERT INTO sync_metrics(metric,count,last_at) VALUES(?,1,?)
+    ON CONFLICT(metric) DO UPDATE SET count=sync_metrics.count+1,last_at=excluded.last_at`),
+  metricRows:db.prepare('SELECT metric,count,last_at AS lastAt FROM sync_metrics ORDER BY metric')
 };
 
 const bankFeed = createBankFeedService(db);
@@ -849,6 +857,20 @@ function syncChange(entity,entityId,operation,payload=null){
   return {entity,entityId,operation,payload};
 }
 
+const SYNC_METRIC_KEYS=Object.freeze(['pushAccepted','pushReplayed','pushConflict','pushRejected','attachmentAccepted','attachmentReplayed','attachmentConflict','attachmentRejected','pulls','pullFullRefresh']);
+function bumpSyncMetric(metric){
+  if(!SYNC_METRIC_KEYS.includes(metric))return;
+  try{syncQ.bumpMetric.run(metric,nowIso());}catch{}
+}
+function offlineSyncMonitor(){
+  const rows=syncQ.metricRows.all(),byKey=Object.fromEntries(rows.map(row=>[row.metric,{count:Number(row.count)||0,lastAt:row.lastAt||null}]));
+  return {
+    version:1,
+    privacy:'aggregate-only-no-ledger-payloads',
+    metrics:Object.fromEntries(SYNC_METRIC_KEYS.map(key=>[key,byKey[key]||{count:0,lastAt:null}]))
+  };
+}
+
 function applySyncOperation(user,raw){
   const op=cleanSyncOperation(raw);
   const requestHash=sha256(JSON.stringify({
@@ -867,6 +889,7 @@ function applySyncOperation(user,raw){
       if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
       const result=JSON.parse(prior.resultJson||'{}');
       db.exec('COMMIT');
+      bumpSyncMetric('pushReplayed');
       return {...result,alreadyProcessed:true};
     }
 
@@ -1018,9 +1041,11 @@ function applySyncOperation(user,raw){
     const result={operationId:op.operationId,status:'accepted',revision,reopenedFeedItems};
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');
+    bumpSyncMetric('pushAccepted');
     return result;
   }catch(error){
     db.exec('ROLLBACK');
+    bumpSyncMetric(Number(error?.status)===409?'pushConflict':'pushRejected');
     throw error;
   }
 }
@@ -1055,6 +1080,7 @@ function applyAttachmentSyncOperation(user,raw){
       if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
       const result=JSON.parse(prior.resultJson||'{}');
       db.exec('COMMIT');
+      bumpSyncMetric('attachmentReplayed');
       return {...result,alreadyProcessed:true};
     }
 
@@ -1083,14 +1109,17 @@ function applyAttachmentSyncOperation(user,raw){
     const stamp=nowIso();
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');
+    bumpSyncMetric('attachmentAccepted');
     return result;
   }catch(error){
     db.exec('ROLLBACK');
+    bumpSyncMetric(Number(error?.status)===409?'attachmentConflict':'attachmentRejected');
     throw error;
   }
 }
 
 function pullSyncChanges(userId,sinceRevision){
+  bumpSyncMetric('pulls');
   const current=Number(q.userById.get(userId)?.revision);
   if(!Number.isInteger(sinceRevision)||sinceRevision<0)throw ledgerError('Invalid sync cursor.');
   if(sinceRevision>current)throw ledgerError('Sync cursor is ahead of the server ledger.',409);
@@ -1099,6 +1128,7 @@ function pullSyncChanges(userId,sinceRevision){
   const rows=syncQ.changesSince.all(userId,sinceRevision);
   const revisionCoverage=new Set(rows.map(row=>Number(row.revision)));
   if(revisionCoverage.size!==current-sinceRevision){
+    bumpSyncMetric('pullFullRefresh');
     return {sinceRevision,currentRevision:current,cursor:current,changes:[],requiresFullRefresh:true};
   }
 
@@ -1144,7 +1174,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

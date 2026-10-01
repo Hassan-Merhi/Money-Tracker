@@ -28,6 +28,8 @@ jobs:
         run: npm run test:offline-d
       - name: Run Offline Block E contract gate
         run: npm run test:offline-e
+      - name: Run Offline Block F contract gate
+        run: npm run test:offline-f
       - name: Run Wave 4 desktop/tablet gate
         run: npm run test:wave4
       - name: Run Lane D release gate
@@ -93,6 +95,7 @@ jobs:
           node --check e2e/offline-block-c.spec.mjs
           node --check e2e/offline-block-d.spec.mjs
           node --check e2e/offline-block-e.spec.mjs
+          node --check e2e/offline-block-f.spec.mjs
           node --check e2e/wave14-fixture.mjs
           node --check e2e/visual-audit-matrix.spec.mjs
           node --check e2e/visual-audit-states.spec.mjs
@@ -125,6 +128,8 @@ jobs:
         run: npm run test:offline-d-e2e
       - name: Run Offline Block E browser gate
         run: npm run test:offline-e-e2e
+      - name: Run Offline Block F browser gate
+        run: npm run test:offline-f-e2e
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit

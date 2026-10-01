@@ -313,3 +313,79 @@ test('Wave 100A: incompatible remote Bank Feed change becomes a targeted conflic
   await remoteContext.close();
   await localContext.close();
 });
+
+
+test('Wave 100A: save arriving during an active pull gets a guaranteed follow-up sync pass',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:390,height:844}});
+  const page=await context.newPage();
+  await loginStore(page);
+
+  await context.setOffline(true);
+  await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const state=await db.loadStateSnapshot();
+    await store.createPerson({
+      id:'person_wave100a_race_a',name:'Race A',note:'queued before reconnect',
+      openingBalance:0,currency:'USD',direction:'to_me'
+    },state.version);
+  });
+
+  let releasePull;
+  let signalPull;
+  const pullStarted=new Promise(resolve=>{signalPull=resolve;});
+  let held=false;
+  await page.route('**/api/sync/pull?**',async route=>{
+    if(!held){
+      held=true;
+      signalPull();
+      await new Promise(resolve=>{releasePull=resolve;});
+    }
+    await route.continue();
+  });
+
+  await context.setOffline(false);
+  await pullStarted;
+
+  const saveDuringPull=page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const state=await db.loadStateSnapshot();
+    return await store.createPerson({
+      id:'person_wave100a_race_b',name:'Race B',note:'queued during active pull',
+      openingBalance:0,currency:'USD',direction:'to_me'
+    },state.version);
+  });
+
+  await expect.poll(()=>page.evaluate(async()=>{
+    const db=await import('/lib/offline-db.js');
+    const user=await db.loadAuthorizedUser();
+    return (await db.listQueuedOperations(user.id||user.email)).some(row=>row.entityId==='person_wave100a_race_b');
+  }),{timeout:5000}).toBe(true);
+
+  releasePull();
+  await saveDuringPull;
+  await expect.poll(()=>page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    return (await store.getSyncStatus()).pending;
+  }),{timeout:10000}).toBe(0);
+
+  const result=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const local=await db.loadStateSnapshot();
+    const server=await (await fetch('/api/state',{credentials:'same-origin',cache:'no-store'})).json();
+    return {
+      localVersion:local.version,
+      serverVersion:server.version,
+      localIds:local.people.filter(row=>row.id.startsWith('person_wave100a_race_')).map(row=>row.id).sort(),
+      serverIds:server.people.filter(row=>row.id.startsWith('person_wave100a_race_')).map(row=>row.id).sort()
+    };
+  });
+  expect(result.localVersion).toBe(result.serverVersion);
+  expect(result.localIds).toEqual(['person_wave100a_race_a','person_wave100a_race_b']);
+  expect(result.serverIds).toEqual(result.localIds);
+
+  await page.unroute('**/api/sync/pull?**');
+  await context.close();
+});

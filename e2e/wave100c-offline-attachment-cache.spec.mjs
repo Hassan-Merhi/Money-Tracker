@@ -137,7 +137,7 @@ test('Wave 100C: safe eviction preserves pinned and unsynced local-only attachme
   const page=await context.newPage();
   await loginStore(page);
 
-  await page.evaluate(async id=>{const store=await import('/lib/store.js');await store.pinAttachmentOffline(id);},serverAttachmentId);
+  await page.evaluate(async id=>{const store=await import('/lib/store.js');await store.listAttachments('entry_wave100c');await store.pinAttachmentOffline(id);},serverAttachmentId);
   await context.setOffline(true);
 
   const safety=await page.evaluate(async pinnedId=>{

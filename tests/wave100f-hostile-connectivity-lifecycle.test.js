@@ -61,9 +61,10 @@ test('Wave 100F broadcasts payload-free peer working-set signals and defers unsa
 test('Wave 100F PWA, production and CI contracts are wired',()=>{
   const doc=read('docs/WAVE_100F_HOSTILE_CONNECTIVITY_LIFECYCLE.md'),version=read('pwa-version.js'),sw=read('service-worker.js'),server=read('server.mjs'),smoke=read('lib/production-smoke.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml');
   for(const marker of ['slow/throttled','lost after server commit','two tabs','service worker','409','Web Locks','PWA shell **v36**'])assert.ok(doc.toLowerCase().includes(marker.toLowerCase()),marker);
-  assert.match(version,/version:36/);
-  assert.match(version,/cacheName:'money-tracker-debt-v36'/);
-  assert.match(version,/offlineDbVersion:7/);
+  const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0),offlineDbVersion=Number(/offlineDbVersion:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(pwaVersion>=36,`Wave 100F requires PWA v36 or newer; found v${pwaVersion}.`);
+  assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
+  assert.ok(offlineDbVersion>=7,`Wave 100F requires offline DB v7 or newer; found v${offlineDbVersion}.`);
   assert.match(sw,/\/lib\/offline-lifecycle\.js/);
   assert.match(server,/offlineWave100FVersion:1/);
   assert.match(smoke,/offlineWave100FVersion/);

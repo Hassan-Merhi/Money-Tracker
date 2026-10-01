@@ -68,6 +68,7 @@ async function readStatementFile(file,ctx){
       const parsed=parseBankCsv(await file.text());
       draft={filename:file.name,sheets:[{name:'CSV',...parsed}],sheetIndex:0};
     }else if(lower.endsWith('.xlsx')||lower.endsWith('.xlsm')){
+      if(typeof navigator!=='undefined'&&navigator.onLine===false)throw new Error('Excel statement preview needs a connection. Use CSV to import a bank statement while offline.');
       const preview=await previewSpreadsheet(file.name,bytesToBase64(await file.arrayBuffer()));
       draft={filename:file.name,sheets:preview.sheets||[],sheetIndex:0};
     }else throw new Error('Use a CSV, XLSX, or XLSM bank statement.');
@@ -110,14 +111,14 @@ function importMarkup(state){
 }
 
 function feedRowMarkup(item,state){
-  const account=accountName(state,item.accountId),isPending=item.status==='pending',suggested=item.suggestedType||(Number(item.signedAmount)<0?'expense':'income');
+  const account=accountName(state,item.accountId),isPending=item.status==='pending',suggested=item.suggestedType||(Number(item.signedAmount)<0?'expense':'income'),queuedAction=String(item.pendingAction||'');
   const ruleText=merchantRuleText(item);
   return `<article class="card bank-row ${item.status}" data-bank-item="${item.id}">
     <div class="bank-row-main">
       <div class="bank-date">${escapeHtml(item.date)}</div>
       <div class="bank-description"><strong>${escapeHtml(item.merchant||item.description)}</strong>${item.merchant&&item.description!==item.merchant?`<span>${escapeHtml(item.description)}</span>`:''}<small>${escapeHtml(account)}${item.sourceName?` · ${escapeHtml(item.sourceName)}`:''}</small></div>
       <div class="bank-amount ${Number(item.signedAmount)<0?'out':'in'}"><strong>${Number(item.signedAmount)<0?'−':'+'}${money(Math.abs(item.signedAmount),item.currency)}</strong><small>${bankDirectionLabel(item.signedAmount)}</small></div>
-      <div><span class="pill ${item.status==='posted'?'green':item.status==='ignored'?'':'amber'}">${escapeHtml(item.status)}</span></div>
+      <div><span class="pill ${item.status==='posted'?'green':item.status==='ignored'?'':'amber'}">${escapeHtml(queuedAction?`queued: ${queuedAction}`:item.status)}</span></div>
     </div>
     ${isPending?`<div class="bank-review">
       <div class="field"><label>What is this?</label><select class="select bank-action">${actionOptions(suggested)}</select></div>
@@ -126,8 +127,8 @@ function feedRowMarkup(item,state){
       <div class="field bank-category-wrap"><label>Category</label><select class="select bank-category">${categoryOptions(state,suggested,item.suggestedCategoryId||'')}</select></div>
       <div class="field bank-note-wrap"><label>Ledger note</label><input class="input bank-note" maxlength="500" value="${escapeHtml(item.description)}"></div>
       <label class="bank-rule-check"><input type="checkbox" class="bank-save-rule"> Remember a rule for <input class="input bank-rule-text" maxlength="120" value="${escapeHtml(ruleText)}" aria-label="Rule match text"></label>
-      <div class="page-actions"><button class="btn primary bank-post">Post to ledger</button><button class="btn bank-ignore">Ignore</button><button class="btn danger bank-delete">Delete</button></div>
-    </div>`:item.status==='ignored'?`<div class="bank-row-actions"><button class="btn small bank-reopen">Reopen</button><button class="btn small danger bank-delete">Delete</button></div>`:`<div class="bank-row-actions"><span class="muted tiny">Ledger entry: ${escapeHtml(item.postedEntryId||'posted')}</span><button class="btn small danger bank-undo">Undo posting</button></div>`}
+      <div class="page-actions"><button class="btn primary bank-post" ${queuedAction?'disabled':''}>${queuedAction==='post'?'Posting queued':'Post to ledger'}</button><button class="btn bank-ignore" ${queuedAction?'disabled':''}>Ignore</button><button class="btn danger bank-delete" ${queuedAction?'disabled':''}>Delete</button></div>
+    </div>`:item.status==='ignored'?`<div class="bank-row-actions"><button class="btn small bank-reopen">Reopen</button><button class="btn small danger bank-delete">Delete</button></div>`:`<div class="bank-row-actions"><span class="muted tiny">${queuedAction==='undo'?'Undo queued for reconnect':`Ledger entry: ${escapeHtml(item.postedEntryId||'posted')}`}</span><button class="btn small danger bank-undo" ${queuedAction?'disabled':''}>${queuedAction==='undo'?'Undo queued':'Undo posting'}</button></div>`}
   </article>`;
 }
 
@@ -143,7 +144,7 @@ function rulesMarkup(state){
       <input class="input" name="priority" type="number" min="0" max="1000" value="100" aria-label="Rule priority" title="Higher priority wins when several rules match">
       <button class="btn" type="submit">Add rule</button>
     </form>
-    <div class="bank-rule-list">${feed.rules.length?feed.rules.map(rule=>`<div class="bank-rule-item"><div><strong>Contains “${escapeHtml(rule.matchText)}”</strong><small>${escapeHtml(ACTIONS.find(a=>a[0]===rule.classification)?.[1]||rule.classification)}${rule.personId?` · ${escapeHtml(personName(state,rule.personId))}`:''}${rule.targetAccountId?` · ${escapeHtml(accountName(state,rule.targetAccountId))}`:''}${rule.categoryId?` · ${escapeHtml(categoryName(state,rule.categoryId))}`:''} · priority ${Number(rule.priority??100)}</small></div><button class="btn small danger" data-delete-bank-rule="${rule.id}">Delete</button></div>`).join(''):'<div class="empty compact-empty">No rules yet. You can also create one while posting a feed item.</div>'}</div>
+    <div class="bank-rule-list">${feed.rules.length?feed.rules.map(rule=>`<div class="bank-rule-item"><div><strong>Contains “${escapeHtml(rule.matchText)}”</strong><small>${escapeHtml(ACTIONS.find(a=>a[0]===rule.classification)?.[1]||rule.classification)}${rule.personId?` · ${escapeHtml(personName(state,rule.personId))}`:''}${rule.targetAccountId?` · ${escapeHtml(accountName(state,rule.targetAccountId))}`:''}${rule.categoryId?` · ${escapeHtml(categoryName(state,rule.categoryId))}`:''} · priority ${Number(rule.priority??100)}${rule.offlinePending?' · queued':''}</small></div><button class="btn small danger" data-delete-bank-rule="${rule.id}">Delete</button></div>`).join(''):'<div class="empty compact-empty">No rules yet. You can also create one while posting a feed item.</div>'}</div>
   </section>`;
 }
 
@@ -151,6 +152,18 @@ function historyMarkup(state){
   if(!feed.history?.length)return '<section class="card panel" style="margin-top:16px"><div class="panel-head"><div><h3>Import history</h3><p>Every statement import is recorded for reconciliation.</p></div></div><div class="empty compact-empty">No imports yet.</div></section>';
   const rows=feed.history.map(batch=>'<tr><td data-label="Imported" data-mobile-wide="true">'+escapeHtml(String(batch.createdAt||'').replace('T',' ').slice(0,16))+'</td><td data-label="Source">'+escapeHtml(batch.sourceName||'—')+'</td><td data-label="Account">'+escapeHtml(accountName(state,batch.accountId))+'</td><td data-label="Rows" class="right">'+batch.totalRows+'</td><td data-label="Added" class="right">'+batch.importedRows+'</td><td data-label="Duplicates" class="right">'+batch.skippedRows+'</td><td data-label="Invalid" class="right">'+batch.invalidRows+'</td></tr>').join('');
   return '<section class="card panel" style="margin-top:16px"><div class="panel-head"><div><h3>Import history</h3><p>Every statement import is recorded for reconciliation.</p></div></div><div class="table-wrap mobile-card-table-wrap"><table class="table mobile-card-table"><thead><tr><th>Imported</th><th>Source</th><th>Account</th><th class="right">Rows</th><th class="right">Added</th><th class="right">Duplicates</th><th class="right">Invalid</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+}
+
+function offlineBankFeedMarkup(){
+  const status=feed.offline||{};
+  if(!status.cached&&!status.queued&&!status.failed&&!status.conflicts&&!feed.pendingImports)return '';
+  const parts=[];
+  if(status.cached)parts.push('Showing the latest Bank Feed data saved on this device.');
+  if(status.queued)parts.push(`${status.queued} change${status.queued===1?'':'s'} queued for sync.`);
+  if(status.failed)parts.push(`${status.failed} failed.`);
+  if(status.conflicts)parts.push(`${status.conflicts} need attention.`);
+  if(feed.pendingImports)parts.push(`${feed.pendingImports} statement import${feed.pendingImports===1?'':'s'} waiting to upload.`);
+  return `<div class="warning bank-offline-status"><strong>${status.cached?'Offline Bank Feed':'Bank Feed sync'}</strong><span>${escapeHtml(parts.join(' '))}</span></div>`;
 }
 
 function paint(main,state,ctx){
@@ -168,6 +181,7 @@ function paint(main,state,ctx){
       <div class="card stat"><div class="stat-label">IGNORED</div><div class="stat-value">${counts.ignored}</div><div class="stat-note">Rows intentionally skipped</div></div>
       <div class="card stat net"><div class="stat-label">AUTO RULES</div><div class="stat-value">${feed.rules.length}</div><div class="stat-note">Merchant / description matches</div></div>
     </div>
+    ${offlineBankFeedMarkup()}
     ${importMarkup(state)}
     <section class="bank-feed-section">
       <div class="panel-head"><div><h3>Bank feed inbox</h3><p>Nothing touches balances until you post it.</p></div><div class="segmented bank-status-tabs">${['pending','posted','ignored','all'].map(s=>`<button class="${statusFilter===s?'active':''}" data-bank-status="${s}">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</div></div>
@@ -205,7 +219,9 @@ function bind(main,state,ctx){
     if(!normalized.items.length){ctx.showToast(normalized.errors[0]||'No valid rows to import.');return;}
     try{
       const result=await importBankFeed({accountId:account.id,sourceName:`${draft.filename}${draft.sheets.length>1?' · '+sheet.name:''}`,rows:normalized.items});
-      feed={items:result.items||[],rules:result.rules||[],history:result.history||[],stats:result.stats||{},accountStats:result.accountStats||[],page:result.page};draft=null;statusFilter='pending';await reloadFeed(main,state,ctx);
+      draft=null;statusFilter='pending';
+      if(result.queued){await reloadFeed(main,state,ctx);ctx.showToast('Statement import queued. It will be imported when you reconnect.');return;}
+      feed={items:result.items||[],rules:result.rules||[],history:result.history||[],stats:result.stats||{},accountStats:result.accountStats||[],page:result.page};await reloadFeed(main,state,ctx);
       const invalid=result.invalid+(normalized.errors?.length||0);
       const reasons = result.invalidReasons ? Object.entries(result.invalidReasons).map(([r,c])=>`${c}× ${r}`).join(', ') : '';
       const invalidText = invalid ? ` · ${invalid} invalid${reasons?` (${reasons})`:''}` : '';
@@ -220,8 +236,10 @@ function bind(main,state,ctx){
     const payload={expectedRevision:state.version,classification:action,personId:card.querySelector('.bank-person')?.value||null,targetAccountId:card.querySelector('.bank-target')?.value||null,categoryId:card.querySelector('.bank-category')?.value||null,note:card.querySelector('.bank-note')?.value||'',saveRule:!!card.querySelector('.bank-save-rule')?.checked,ruleMatchText:card.querySelector('.bank-rule-text')?.value||''};
     btn.disabled=true;
     try{
-      const result=await postBankFeedItem(id,payload);feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;feed.stats=result.stats||feed.stats;
-      ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');ctx.replaceState(result.state);await reloadFeed(main,state,ctx);
+      const result=await postBankFeedItem(id,payload);
+      if(result.queued){await reloadFeed(main,state,ctx);ctx.showToast('Posting queued. The ledger and balance will update after sync.');return;}
+      feed.items=feed.items.map(i=>i.id===id?result.item:i);feed.rules=result.rules||feed.rules;feed.stats=result.stats||feed.stats;
+      ctx.showToast(result.linkedExistingTransfer?'Matched the other side of an existing transfer; no duplicate was created.':'Bank transaction posted to the ledger.');if(result.state)ctx.replaceState(result.state);await reloadFeed(main,state,ctx);
     }catch(error){
       if(error.status===409){
         try{ctx.replaceState(await loadState());}catch{}
@@ -231,18 +249,18 @@ function bind(main,state,ctx){
       ctx.showToast(error.message||'Could not post this bank transaction.');paint(main,state,ctx);
     }
   }));
-  main.querySelectorAll('.bank-ignore').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await ignoreBankFeedItem(id);feed={items:r.items||feed.items,rules:r.rules||feed.rules,history:r.history||feed.history,stats:r.stats||feed.stats};paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not ignore this row.');}}));
-  main.querySelectorAll('.bank-reopen').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await reopenBankFeedItem(id);feed={items:r.items||feed.items,rules:r.rules||feed.rules,history:r.history||feed.history,stats:r.stats||feed.stats};statusFilter='pending';paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not reopen this row.');}}));
-  main.querySelectorAll('.bank-undo').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Undo this posting? The generated ledger entry will be deleted and all linked statement rows will return to Pending.'))return;btn.disabled=true;try{const r=await undoBankFeedItem(id,{expectedRevision:state.version});feed={items:r.items||[],rules:r.rules||[],history:r.history||feed.history,stats:r.stats||{}};statusFilter='pending';ctx.replaceState(r.state);ctx.showToast('Posting undone · '+(r.reopenedItems||1)+' statement row'+(r.reopenedItems===1?'':'s')+' reopened.');}catch(error){if(error.status===409){try{ctx.replaceState(await loadState());}catch{}}ctx.showToast(error.message||'Could not undo this posting.');}finally{btn.disabled=false;}}));
-  main.querySelectorAll('.bank-delete').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Delete this unposted bank-feed row?'))return;try{await deleteBankFeedItem(id);feed.items=feed.items.filter(i=>i.id!==id);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete this row.');}}));
+  main.querySelectorAll('.bank-ignore').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await ignoreBankFeedItem(id);if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Ignore queued for sync.');return;}feed={items:r.items||feed.items,rules:r.rules||feed.rules,history:r.history||feed.history,stats:r.stats||feed.stats,accountStats:r.accountStats||feed.accountStats,page:r.page||feed.page,offline:r.offline};paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not ignore this row.');}}));
+  main.querySelectorAll('.bank-reopen').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;try{const r=await reopenBankFeedItem(id);statusFilter='pending';if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Reopen queued for sync.');return;}feed={items:r.items||feed.items,rules:r.rules||feed.rules,history:r.history||feed.history,stats:r.stats||feed.stats,accountStats:r.accountStats||feed.accountStats,page:r.page||feed.page,offline:r.offline};paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not reopen this row.');}}));
+  main.querySelectorAll('.bank-undo').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Undo this posting? The generated ledger entry will be deleted and all linked statement rows will return to Pending.'))return;btn.disabled=true;try{const r=await undoBankFeedItem(id,{expectedRevision:state.version});statusFilter='pending';if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Undo queued. The ledger will update after sync.');return;}feed={items:r.items||[],rules:r.rules||[],history:r.history||feed.history,stats:r.stats||{}};if(r.state)ctx.replaceState(r.state);ctx.showToast('Posting undone · '+(r.reopenedItems||1)+' statement row'+(r.reopenedItems===1?'':'s')+' reopened.');}catch(error){if(error.status===409){try{ctx.replaceState(await loadState());}catch{}}ctx.showToast(error.message||'Could not undo this posting.');}finally{btn.disabled=false;}}));
+  main.querySelectorAll('.bank-delete').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.closest('[data-bank-item]').dataset.bankItem;if(!confirm('Delete this unposted bank-feed row?'))return;try{const r=await deleteBankFeedItem(id);if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Delete queued for sync.');return;}feed.items=feed.items.filter(i=>i.id!==id);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete this row.');}}));
   const ruleForm=main.querySelector('#bankRuleForm');
   const syncRuleCategory=()=>{if(!ruleForm)return;const action=ruleForm.elements.classification.value,el=ruleForm.elements.categoryId,selected=el.value;el.innerHTML=['expense','income'].includes(action)?categoryOptions(state,action,selected):'<option value="">No category</option>';el.disabled=!['expense','income'].includes(action);};
   ruleForm?.elements.classification.addEventListener('change',syncRuleCategory);syncRuleCategory();
   main.querySelector('#bankRuleForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const fd=new FormData(e.currentTarget);
-    try{const r=await createBankRule({matchText:fd.get('matchText'),classification:fd.get('classification'),personId:fd.get('personId')||null,targetAccountId:fd.get('targetAccountId')||null,categoryId:fd.get('categoryId')||null,priority:Number(fd.get('priority')||100)});feed.rules.unshift(r.rule);paint(main,state,ctx);ctx.showToast('Bank rule added.');}catch(error){ctx.showToast(error.message||'Could not add that rule.');}
+    try{const r=await createBankRule({matchText:fd.get('matchText'),classification:fd.get('classification'),personId:fd.get('personId')||null,targetAccountId:fd.get('targetAccountId')||null,categoryId:fd.get('categoryId')||null,priority:Number(fd.get('priority')||100)});if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Bank rule queued for sync.');return;}feed.rules.unshift(r.rule);paint(main,state,ctx);ctx.showToast('Bank rule added.');}catch(error){ctx.showToast(error.message||'Could not add that rule.');}
   });
-  main.querySelectorAll('[data-delete-bank-rule]').forEach(btn=>btn.addEventListener('click',async()=>{try{await deleteBankRule(btn.dataset.deleteBankRule);feed.rules=feed.rules.filter(r=>r.id!==btn.dataset.deleteBankRule);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete that rule.');}}));
+  main.querySelectorAll('[data-delete-bank-rule]').forEach(btn=>btn.addEventListener('click',async()=>{try{const r=await deleteBankRule(btn.dataset.deleteBankRule);if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Rule deletion queued for sync.');return;}feed.rules=feed.rules.filter(row=>row.id!==btn.dataset.deleteBankRule);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete that rule.');}}));
 }
 
 async function reloadFeed(main,state,ctx){try{feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not load this bank feed page.');}}

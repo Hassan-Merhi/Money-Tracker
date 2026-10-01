@@ -11,6 +11,10 @@ import {
 import { recurringStatus, shouldRemind, recurrenceLabel } from './lib/recurring.js';
 import { dateInTimeZone, escapeHtml, prettyType } from './lib/utils.js';
 import { openRecurringRuleModal, summarizeRecurringTemplate } from './lib/recurring-rule-form.js';
+import { filterRecurringRules } from './lib/offline-query.js';
+
+let recurringSearch='';
+let recurringStatusFilter='all';
 
 function formatDate(value){
   if(!value) return 'Complete';
@@ -106,6 +110,7 @@ export async function renderRecurringPage(main,state,ctx){
   const reminders=reminderData.reminders||[];
   const attention=Math.max(reminders.length,rules.filter(rule=>shouldRemind(rule,zonedToday(state))).length);
   const active=rules.filter(rule=>rule.isActive).length;
+  const shownRules=filterRecurringRules(rules,{q:recurringSearch,status:recurringStatusFilter},state);
   const reload=()=>renderRecurringPage(main,state,ctx);
   const offline=reminderData.offline||rulesData.offline||{};
   main.innerHTML=`
@@ -117,12 +122,24 @@ export async function renderRecurringPage(main,state,ctx){
       <div class="recurring-toolbar-actions">${browserAlertButton()}<button class="btn primary" id="newRecurring">＋ New schedule</button></div>
     </div>
     <div class="card panel recurring-note"><strong>${offline.cached?'Offline reminders are active on this device.':'Server reminders are active.'}</strong><span>${offline.cached?`Cached schedules use ${escapeHtml(state.settings.timezone||'UTC')} locally. ${Number(offline.queued||0)} change${Number(offline.queued||0)===1?' is':'s are'} queued for reconnect.`:`Money Tracker checks schedules hourly using ${escapeHtml(state.settings.timezone||'UTC')} even while the app is closed.`} Posting remains review-first and atomic.</span></div>
+    <div class="recurring-search-filters">
+      <input class="input search" id="recurringSearch" type="search" inputmode="search" autocomplete="off" placeholder="Search schedules…" value="${escapeHtml(recurringSearch)}" aria-label="Search schedules">
+      <select class="select" id="recurringStatusFilter" aria-label="Filter schedules by status">
+        <option value="all" ${recurringStatusFilter==='all'?'selected':''}>All schedules</option>
+        <option value="active" ${recurringStatusFilter==='active'?'selected':''}>Active</option>
+        <option value="paused" ${recurringStatusFilter==='paused'?'selected':''}>Paused</option>
+        <option value="complete" ${recurringStatusFilter==='complete'?'selected':''}>Complete</option>
+      </select>
+      <span class="muted tiny">${shownRules.length} of ${rules.length}</span>
+    </div>
     ${reminders.length?`<section class="card panel" style="margin-bottom:16px"><div class="panel-head"><div><h3>Reminder inbox</h3><p>${offline.cached?'Generated from cached schedules on this device and reconciled with the server after reconnect.':'Created by the server-side recurring worker.'}</p></div></div><div class="dashboard-reminders">${reminders.map(rem=>`<div class="dashboard-reminder"><div><strong>${escapeHtml(rem.title||'Recurring schedule')}</strong><div class="muted tiny">Occurrence ${escapeHtml(rem.occurrenceDate)} · reminder began ${escapeHtml(rem.remindOnDate)}</div></div><button class="btn small" data-reminder-dismiss="${rem.id}">Dismiss</button></div>`).join('')}</div></section>`:''}
-    ${rules.length?`<div class="recurring-grid">${rules.map(rule=>scheduleCard(rule,state)).join('')}</div>`:`<div class="card hero-empty empty"><div class="big">⏰</div><h3>Create your first recurring schedule</h3><p>Use schedules for repeat repayments, purchases, transfers, and other regular money movements.</p><button class="btn primary" id="emptyRecurring">＋ New schedule</button></div>`}`;
+    ${shownRules.length?`<div class="recurring-grid">${shownRules.map(rule=>scheduleCard(rule,state)).join('')}</div>`:rules.length?`<div class="card empty"><strong>No matching schedules</strong>Change the search or status filter.</div>`:`<div class="card hero-empty empty"><div class="big">⏰</div><h3>Create your first recurring schedule</h3><p>Use schedules for repeat repayments, purchases, transfers, and other regular money movements.</p><button class="btn primary" id="emptyRecurring">＋ New schedule</button></div>`}`;
   const openNew=()=>openRecurringRuleModal(null,state,ctx,reload);
   main.querySelector('#newRecurring')?.addEventListener('click',openNew);
   main.querySelector('#emptyRecurring')?.addEventListener('click',openNew);
   main.querySelector('#recurringNotify')?.addEventListener('click',async()=>{ if(!('Notification' in window))return; const p=await Notification.requestPermission(); if(p==='granted'){ctx.showToast('Browser alerts enabled while Money Tracker is open.');maybeNotify(rules,state);} reload(); });
+  main.querySelector('#recurringSearch')?.addEventListener('input',event=>{recurringSearch=event.currentTarget.value;clearTimeout(event.currentTarget._filterTimer);event.currentTarget._filterTimer=setTimeout(reload,180);});
+  main.querySelector('#recurringStatusFilter')?.addEventListener('change',event=>{recurringStatusFilter=event.currentTarget.value;reload();});
   main.querySelectorAll('[data-reminder-dismiss]').forEach(btn=>btn.addEventListener('click',async()=>{try{const result=await acknowledgeRecurringReminder(btn.dataset.reminderDismiss);ctx.showToast(result.queued?'Reminder dismissal queued for sync.':'Reminder dismissed.');await reload();}catch(error){ctx.showToast(error.message||'Could not dismiss reminder.');}}));
   main.querySelectorAll('[data-rule-edit]').forEach(b=>b.addEventListener('click',()=>openRecurringRuleModal(rules.find(r=>r.id===b.dataset.ruleEdit),state,ctx,reload)));
   main.querySelectorAll('[data-rule-post]').forEach(b=>b.addEventListener('click',()=>postRule(rules.find(r=>r.id===b.dataset.rulePost),state,ctx)));

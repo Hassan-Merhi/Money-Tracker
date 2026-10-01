@@ -5,7 +5,7 @@ Money Tracker supports two persisted user modes:
 - **Simple mode** keeps the debt-first experience focused on money people owe you and money you owe people.
 - **Advanced mode** exposes accounts and cash, transfers, account income/expenses, Bank Feed, categories/budgets, recurring schedules, reminders, and the full reporting stack.
 
-Switching modes never deletes hidden financial data. The app also runs as an installable PWA with an offline shell; financial changes remain server-authoritative and require a live connection.
+Switching modes never deletes hidden financial data. The app also runs as an installable offline-first PWA: authorized devices keep a durable local working set and outbox, while the server remains authoritative after synchronization.
 
 ## Responsive dashboard
 

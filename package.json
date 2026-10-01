@@ -44,7 +44,9 @@
     "test:wave100e": "node --test tests/wave100e-offline-recovery-restore.test.js",
     "test:wave100e-e2e": "playwright test e2e/wave100e-offline-recovery-restore.spec.mjs --workers=1",
     "test:wave100f": "node --test tests/wave100f-hostile-connectivity-lifecycle.test.js",
-    "test:wave100f-e2e": "playwright test e2e/wave100f-connectivity.spec.mjs e2e/wave100f-lifecycle.spec.mjs e2e/wave100f-conflict.spec.mjs --workers=1"
+    "test:wave100f-e2e": "playwright test e2e/wave100f-connectivity.spec.mjs e2e/wave100f-lifecycle.spec.mjs e2e/wave100f-conflict.spec.mjs --workers=1",
+    "test:wave100g": "node --test tests/wave100g-scale-longevity.test.js tests/wave100g-scale-server.test.js",
+    "test:wave100g-e2e": "playwright test e2e/wave100g-scale-longevity.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

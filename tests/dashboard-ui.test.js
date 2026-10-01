@@ -97,13 +97,13 @@ test('transactions page preserves category filters and defaults date filtering t
   assert.match(transactions,/route.params.get\('period'\)\|\|'this_month'/);
   assert.match(transactions,/route.params.get\('from'\)/);
   assert.match(transactions,/route.params.get\('to'\)/);
-  assert.match(transactions,/filterTransactionList\(visible,\{type,personId:person,categoryId:category,people:state.people,from:range.from,to:range.to\}\)/);
+  assert.match(transactions,/filterTransactionList\(visible,\{type,personId:person,categoryId:category,people:state.people,accounts:state.accounts,categories:state.categories\|\|\[\],from:range.from,to:range.to,q:textQuery\}\)/);
   assert.match(transactions,/id=['"]filterPeriod['"]/);
   assert.match(transactions,/This month/);
   assert.match(transactions,/Custom dates/);
   assert.match(transactions,/id=['"]filterCategory['"]/);
   assert.match(transactions,/c.archived\?' \(archived\)'/);
-  for(const key of ['type','person','category'])assert.ok(transactions.includes(`q.set('${key}'`));
+  for(const key of ['q','type','person','category'])assert.ok(transactions.includes(`q.set('${key}'`));
   assert.ok(transactions.includes("q.set('period'"));
   assert.ok(transactions.includes("q.set('from'"));
   assert.ok(transactions.includes("q.set('to'"));

@@ -130,6 +130,7 @@ test('Wave 100G: a 250-operation durable offline queue survives reload, drains, 
   const page=await context.newPage();
   await ensureOwner(page);
   await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
+  await expect.poll(()=>page.evaluate(()=>Boolean(navigator.serviceWorker.controller))).toBe(true);
   await context.setOffline(true);
 
   const staged=await page.evaluate(async()=>{

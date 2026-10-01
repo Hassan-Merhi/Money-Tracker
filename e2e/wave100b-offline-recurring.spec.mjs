@@ -110,7 +110,7 @@ test('Wave 100B: schedules and reminders survive airplane-mode edits, dismissals
     const store=await import('/lib/store.js');
     await store.syncPendingOperations({source:'wave100b-offline-actions'});
   });
-  await expect.poll(()=>page.evaluate(async()=>{const store=await import('/lib/store.js');return (await store.getSyncStatus()).pending;}),{timeout:10000}).toBe(0);
+  await expect.poll(()=>page.evaluate(async()=>{const store=await import('/lib/store.js');const status=await store.getSyncStatus();return JSON.stringify((status.recurringQueue||[]).map(row=>({action:row.action,ruleId:row.ruleId,status:row.status,error:row.lastError||''})));}),{timeout:10000}).toBe('[]');
 
   const converged=await page.evaluate(async reminderId=>{
     const store=await import('/lib/store.js');

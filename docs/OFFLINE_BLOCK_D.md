@@ -36,7 +36,7 @@ Recovery is explicit and data-loss resistant:
 
 - failed (non-conflict) ledger and attachment operations can be reset to pending and retried;
 - conflicts retain the O7 explicit resolution flow;
-- users can export a private JSON recovery file before destructive discard;
+- users can export a private JSON recovery file before destructive discard; this original Block D file is an audit/reconstruction artifact, while Wave 100E later adds a separately checksummed, same-account **device recovery archive** that can transactionally restore the local working set;
 - recovery exports include the current offline snapshot, ledger queue, attachment queue (including pending attachment payloads), tombstones, authorization metadata, and sync metadata;
 - discard remains an explicit destructive action and reloads the authoritative server copy.
 

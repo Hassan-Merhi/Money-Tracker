@@ -113,7 +113,9 @@ jobs:
           node --check e2e/wave100c-offline-attachment-cache.spec.mjs
           node --check e2e/wave100d-offline-search-filters.spec.mjs
           node --check e2e/wave100e-offline-recovery-restore.spec.mjs
-          node --check e2e/wave100f-hostile-connectivity-lifecycle.spec.mjs
+          node --check e2e/wave100f-connectivity.spec.mjs
+          node --check e2e/wave100f-lifecycle.spec.mjs
+          node --check e2e/wave100f-conflict.spec.mjs
           node --check lib/offline-query.js
           node --check lib/offline-recovery.js
           node --check lib/offline-lifecycle.js

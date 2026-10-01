@@ -278,6 +278,79 @@ test('Offline Block C: later queued remote edits are detected before they can be
   await contextB.close();await contextA.close();
 });
 
+test('Offline Block C: server-generated updatedAt does not create a false queued conflict',async({browser})=>{
+  const contextA=await browser.newContext({viewport:{width:390,height:844}});
+  const contextB=await browser.newContext({viewport:{width:390,height:844}});
+  const pageA=await contextA.newPage(),pageB=await contextB.newPage();
+  await pageA.goto('/');await pageB.goto('/');
+  let stateA=await moduleCall(pageA,'login',{email:EMAIL,password:PASSWORD});
+  await moduleCall(pageB,'login',{email:EMAIL,password:PASSWORD});
+
+  if(!stateA.accounts.some(row=>row.id==='account_conflict_timestamp')){
+    stateA=await pageA.evaluate(async state=>{
+      const store=await import('/lib/store.js');
+      return await store.createAccount({id:'account_conflict_timestamp',name:'Conflict Timestamp',type:'cash',currency:'USD',openingBalance:100},state.version);
+    },stateA);
+  }
+  if(!stateA.entries.some(row=>row.id==='entry_conflict_timestamp')){
+    stateA=await pageA.evaluate(async state=>{
+      const store=await import('/lib/store.js');
+      return await store.createEntry({
+        id:'entry_conflict_timestamp',type:'account_expense',accountId:'account_conflict_timestamp',
+        amount:10,currency:'USD',date:'2026-09-30',merchant:'Timestamp Shop',description:'base timestamp record',splits:[]
+      },state.version);
+    },stateA);
+  }
+  await pageB.evaluate(async()=>{const store=await import('/lib/store.js');await store.loadState();});
+
+  await contextA.setOffline(true);
+  await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    let state=await db.loadStateSnapshot();
+    let entry=state.entries.find(row=>row.id==='entry_conflict_timestamp');
+    state=await store.updateEntry(entry.id,{...entry,description:'offline timestamp edit one'},state.version);
+    entry=state.entries.find(row=>row.id==='entry_conflict_timestamp');
+    await store.updateEntry(entry.id,{...entry,description:'offline timestamp edit two'},state.version);
+  });
+
+  let pushCount=0;
+  await pageA.route('**/api/sync/push',async route=>{
+    pushCount+=1;
+    if(pushCount===1){
+      const response=await route.fetch();
+      await pageB.evaluate(async()=>{
+        const store=await import('/lib/store.js');
+        let state=await store.loadState();
+        if(!state.people.some(row=>row.id==='person_timestamp_unrelated')){
+          state=await store.createPerson({
+            id:'person_timestamp_unrelated',name:'Timestamp Unrelated',note:'',
+            openingBalance:0,currency:'USD',direction:'to_me'
+          },state.version);
+        }
+        return state.version;
+      });
+      await route.fulfill({response});
+      return;
+    }
+    await route.continue();
+  });
+
+  await contextA.setOffline(false);
+  await expect.poll(()=>pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const status=await store.getSyncStatus();
+    return {pending:status.pending,conflicts:status.conflicts};
+  }),{timeout:10000}).toEqual({pending:0,conflicts:0});
+  await pageA.unroute('**/api/sync/push');
+
+  const server=await pageA.evaluate(async()=>await (await fetch('/api/state',{credentials:'same-origin'})).json());
+  expect(server.entries.find(row=>row.id==='entry_conflict_timestamp').description).toBe('offline timestamp edit two');
+  expect(server.people.some(row=>row.id==='person_timestamp_unrelated')).toBe(true);
+
+  await contextB.close();await contextA.close();
+});
+
 test('Offline Block C: transfers and attachments survive offline reload and converge',async({browser})=>{
   const context=await browser.newContext({viewport:{width:390,height:844}});
   const page=await context.newPage();

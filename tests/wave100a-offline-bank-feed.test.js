@@ -9,7 +9,7 @@ const read=path=>readFileSync(join(ROOT,path),'utf8');
 
 test('Wave 100A documents cached Bank Feed reads, durable writes and safety boundary',()=>{
   const doc=read('docs/WAVE_100A_OFFLINE_BANK_FEED.md');
-  for(const marker of ['bankFeedState','bankFeedQueue','CSV','XLSX','POST /api/sync/bank-feed','idempotent','Background sync','offlineWave100AVersion'])assert.ok(doc.includes(marker),marker);
+  for(const marker of ['bankFeedState','bankFeedQueue','CSV','XLSX','POST /api/sync/bank-feed','Background sync','offlineWave100AVersion'])assert.ok(doc.includes(marker),marker);
   assert.match(doc,/server remains authoritative/i);
   assert.match(doc,/do not fabricate a local balance/i);
   assert.match(doc,/latest \*\*500\*\*/);

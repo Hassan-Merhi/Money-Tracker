@@ -46,6 +46,8 @@ jobs:
         run: npm run test:wave100g
       - name: Run Wave 100H Offline Completeness gate
         run: npm run test:wave100h
+      - name: Run Wave 100I Offline Import & Migration gate
+        run: npm run test:wave100i
       - name: Run Wave 4 desktop/tablet gate
         run: npm run test:wave4
       - name: Run Lane D release gate
@@ -122,6 +124,8 @@ jobs:
           node --check e2e/wave100f-lifecycle.spec.mjs
           node --check e2e/wave100f-conflict.spec.mjs
           node --check e2e/wave100g-scale-longevity.spec.mjs
+          node --check e2e/wave100h-offline-xlsx.spec.mjs
+          node --check e2e/wave100i-offline-import-migration.spec.mjs
           node --check lib/offline-query.js
           node --check lib/offline-recovery.js
           node --check lib/offline-lifecycle.js
@@ -175,6 +179,8 @@ jobs:
         run: npm run test:wave100g-e2e
       - name: Run Wave 100H Offline Completeness browser gate
         run: npm run test:wave100h-e2e
+      - name: Run Wave 100I Offline Import & Migration browser gate
+        run: npm run test:wave100i-e2e
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit

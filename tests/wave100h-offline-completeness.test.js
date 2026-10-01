@@ -38,8 +38,9 @@ test('Wave 100H Bank Feed Excel preview is device-local and offline-capable',()=
 test('Wave 100H parser is part of the controlled PWA shell',()=>{
   const sw=read('service-worker.js'),version=read('pwa-version.js');
   assert.ok(sw.includes("'/lib/xlsx-browser.js'"));
-  assert.match(version,/version:38/);
-  assert.match(version,/cacheName:'money-tracker-debt-v38'/);
+  const shellVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(shellVersion>=38,'Wave 100H requires PWA shell v38 or newer.');
+  assert.match(version,/cacheName:'money-tracker-debt-v\d+'/);
   assert.match(version,/offlineDbVersion:8/);
 });
 
@@ -47,7 +48,8 @@ test('Wave 100H production and CI contracts are wired',()=>{
   const server=read('server.mjs'),smoke=read('lib/production-smoke.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml'),doc=read('docs/WAVE_100H_OFFLINE_COMPLETENESS.md');
   assert.match(server,/offlineWave100HVersion:1/);
   assert.match(smoke,/offlineWave100HVersion/);
-  assert.match(smoke,/pwaCacheVersion\|\|0\)>=38/);
+  const smokeFloor=Number(/pwaCacheVersion\|\|0\)>=([0-9]+)/.exec(smoke)?.[1]||0);
+  assert.ok(smokeFloor>=38,'Wave 100H requires production smoke to enforce PWA v38 or newer.');
   assert.equal(pkg.scripts['test:wave100h'],'node --test tests/wave100h-offline-completeness.test.js');
   assert.equal(pkg.scripts['test:wave100h-e2e'],'playwright test e2e/wave100h-offline-xlsx.spec.mjs --workers=1');
   assert.match(ci,/Run Wave 100H Offline Completeness gate/);

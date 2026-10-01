@@ -7,15 +7,15 @@ import { runProductionSmoke } from '../lib/production-smoke.js';
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
 
 function fixtureServer({commit='abc123',brokenAsset=false}={}){
-  const version=38;
+  const version=39;
   const html='<!doctype html><title>Money Owed Tracker</title><link rel="stylesheet" href="./styles.css"><script type="module" src="./app.js?v=mobile-v3"></script>';
   return http.createServer((req,res)=>{
     const path=new URL(req.url,'http://localhost').pathname;
     if(path==='/api/health'){
       res.setHeader('content-type','application/json');
       res.end(JSON.stringify({
-        ok:true,wave13Version:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineWave100CVersion:1,offlineWave100DVersion:1,offlineWave100EVersion:1,offlineWave100FVersion:1,offlineWave100GVersion:1,offlineWave100HVersion:1,buildVersion:'pwa-38+'+commit.slice(0,12),
-        pwaCacheVersion:version,pwaCacheName:'money-tracker-debt-v38',
+        ok:true,wave13Version:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineWave100CVersion:1,offlineWave100DVersion:1,offlineWave100EVersion:1,offlineWave100FVersion:1,offlineWave100GVersion:1,offlineWave100HVersion:1,offlineWave100IVersion:1,buildVersion:'pwa-39+'+commit.slice(0,12),
+        pwaCacheVersion:version,pwaCacheName:'money-tracker-debt-v39',
         deployment:{provider:'test',gitCommit:commit},
         dataLimits:{entries:50000,syncChangeRevisions:10000},runtime:{ok:true,sqliteQuickCheck:'ok',foreignKeyViolations:0,dbBytes:123}
       }));return;
@@ -24,7 +24,7 @@ function fixtureServer({commit='abc123',brokenAsset=false}={}){
     if(path==='/api/auth/me'||path==='/api/state'){res.statusCode=401;res.setHeader('content-type','application/json');res.end(JSON.stringify({error:'Sign in required.'}));return;}
     if(path==='/'){res.setHeader('content-type','text/html; charset=utf-8');res.end(html);return;}
     if(path==='/service-worker.js'){res.setHeader('service-worker-allowed','/');res.setHeader('content-type','text/javascript');res.end("importScripts('/pwa-version.js');");return;}
-    if(path==='/pwa-version.js'){res.setHeader('content-type','text/javascript');res.end("self.MONEY_TRACKER_PWA=Object.freeze({version:38,cacheName:'money-tracker-debt-v38'});");return;}
+    if(path==='/pwa-version.js'){res.setHeader('content-type','text/javascript');res.end("self.MONEY_TRACKER_PWA=Object.freeze({version:39,cacheName:'money-tracker-debt-v39'});");return;}
     if(path==='/manifest.webmanifest'){res.setHeader('content-type','application/manifest+json');res.end(JSON.stringify({name:'Money Owed Tracker',start_url:'/'}));return;}
     if(brokenAsset&&path==='/styles.css'){res.statusCode=404;res.end('missing');return;}
     if(['/styles.css','/dashboard.css','/mobile.css','/activity.css','/desktop-tablet.css','/app.js','/assets/icon.svg'].includes(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/plain');res.end('ok');return;}

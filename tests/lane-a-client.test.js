@@ -68,9 +68,10 @@ test('daily app code no longer imports or calls whole-state save',()=>{
   assert.match(app,/createEntry\(/);
 });
 
-test('bulk spreadsheet import intentionally keeps compatibility state save',()=>{
+test('bulk spreadsheet import uses the offline-aware import commit boundary',()=>{
   const importer=readFileSync(new URL('../block-c-import.js',import.meta.url),'utf8');
-  assert.match(importer,/saveState\(prepared\.state\)/);
+  assert.match(importer,/commitImportedState\(prepared\.state\)/);
+  assert.doesNotMatch(importer,/saveState\(prepared\.state\)/);
 });
 
 test('service worker forces Lane A client refresh and caches exact-money dependency',()=>{

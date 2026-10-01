@@ -179,7 +179,7 @@ test('O5 requests a full refresh when a non-sync server mutation creates a revis
 });
 
 
-test('O5 hardening rejects queued deletion of an existing account transfer',async()=>{
+test('O5/O9 compatibility: queued transfer deletion is now accepted atomically',async()=>{
   let state=(await request('/api/state')).data;
   if(state.settings.appMode!=='advanced'){
     const settings=await request('/api/settings',{method:'PUT',body:{appMode:'advanced',defaultCurrency:state.settings.defaultCurrency||'USD',timezone:state.settings.timezone||'UTC',expectedRevision:state.version}});
@@ -194,12 +194,12 @@ test('O5 hardening rejects queued deletion of an existing account transfer',asyn
   response=await request('/api/entries',{method:'POST',body:{
     expectedRevision:state.version,id:'entry_offline_transfer_guard',type:'account_transfer',
     fromAccountId:'account_offline_transfer_a',toAccountId:'account_offline_transfer_b',
-    amount:10,fromAmount:10,toAmount:10,date:'2026-09-30',merchant:'',description:'Guarded transfer'
+    amount:10,fromAmount:10,toAmount:10,date:'2026-09-30',merchant:'',description:'Atomic offline transfer'
   }});
   assert.equal(response.res.status,201);state=response.data;
 
   const revisionBefore=state.version;
-  const blocked=await request('/api/sync/push',{method:'POST',body:{operation:{
+  const accepted=await request('/api/sync/push',{method:'POST',body:{operation:{
     operationId:'op_transfer_delete_guard',
     entity:'entry',
     entityId:'entry_offline_transfer_guard',
@@ -207,12 +207,11 @@ test('O5 hardening rejects queued deletion of an existing account transfer',asyn
     baseRevision:revisionBefore,
     payload:{id:'entry_offline_transfer_guard'}
   }}});
-  assert.equal(blocked.res.status,400);
-  assert.match(blocked.data.error,/atomic-transfer phase/i);
+  assert.equal(accepted.res.status,201);
 
   const after=(await request('/api/state')).data;
-  assert.equal(after.version,revisionBefore);
-  assert.equal(after.entries.some(row=>row.id==='entry_offline_transfer_guard'),true);
+  assert.equal(after.version,revisionBefore+1);
+  assert.equal(after.entries.some(row=>row.id==='entry_offline_transfer_guard'),false);
 });
 
 test('O5 hardening reports Bank Feed rows reopened by a synced entry edit',async()=>{

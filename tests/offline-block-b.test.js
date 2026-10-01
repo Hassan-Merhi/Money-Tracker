@@ -19,7 +19,7 @@ test('Offline Block B documents O4-O6 scope and safety boundaries',()=>{
 
 test('Offline Block B O4 upgrades IndexedDB without replacing the Block A ledger stores',()=>{
   const source=read('lib/offline-db.js');
-  assert.match(source,/version: 2/);
+  assert.match(source,/version: [3-9][0-9]*/);
   for(const store of ['meta','people','accounts','entries','categories','budgets','syncQueue','syncState']) {
     assert.ok(source.includes("'"+store+"'"),store);
   }
@@ -47,7 +47,7 @@ test('Offline Block B O4 preserves unsynced changes across identity and cache bo
   assert.match(store,/await publishSyncStatus\(\{authRequired:true\}\)/);
 });
 
-test('Offline Block B O4 makes core ledger writes local-first while keeping transfers guarded',()=>{
+test('Offline Block B O4 core local-first guarantees remain after Block C expands supported writes',()=>{
   const store=read('lib/store.js');
   const app=read('app.js');
   assert.match(store,/async function queueCoreMutation/);
@@ -57,7 +57,6 @@ test('Offline Block B O4 makes core ledger writes local-first while keeping tran
   assert.doesNotMatch(app,/Offline mode is read-only for now/);
   assert.match(app,/Saved offline ·/);
   assert.match(app,/Offline · changes save locally/);
-  assert.match(store,/Offline transfers are reserved for the atomic-transfer phase/);
   assert.match(store,/opening>0&&!person\.openingEntryId/);
   assert.match(store,/id:payload\.openingEntryId/);
 });
@@ -68,7 +67,7 @@ test('Offline Block B O5 implements ordered revision push/pull with safe full-re
   assert.match(store,/export async function syncPendingOperations/);
   assert.match(store,/\/api\/sync\/push/);
   assert.match(store,/\/api\/sync\/pull\?sinceRevision=/);
-  assert.match(store,/row\.status==='failed'\|\|row\.status==='conflict'/);
+  assert.match(store,/operation\.status==='failed'\|\|operation\.status==='conflict'/);
   assert.match(server,/CREATE TABLE IF NOT EXISTS sync_changes/);
   assert.match(server,/idx_sync_changes_user_revision/);
   assert.match(server,/function pullSyncChanges/);
@@ -99,8 +98,8 @@ test('Offline Block B has a dedicated CI and browser gate and bumps the PWA cach
   assert.equal(pkg.scripts['test:offline-b-e2e'],'playwright test e2e/offline-block-b.spec.mjs --workers=1');
   assert.match(ci,/Run Offline Block B contract gate/);
   assert.match(ci,/Run Offline Block B browser gate/);
-  assert.match(version,/version:25/);
-  assert.match(version,/money-tracker-debt-v25/);
+  assert.match(version,/version:(?:2[5-9]|[3-9][0-9])/);
+  assert.match(version,/money-tracker-debt-v(?:2[5-9]|[3-9][0-9])/);
 });
 
 
@@ -116,14 +115,9 @@ test('Offline Block B hardening keeps auth failures retryable and connected writ
   assert.match(store,/if\(!snapshot\)\{[\s\S]*?browserOnline\(\)[\s\S]*?directCoreMutation/);
 });
 
-test('Offline Block B hardening blocks transfer deletion from the offline queue and propagates Bank Feed reopen counts',()=>{
-  const store=read('lib/store.js');
+test('Offline Block B hardening still propagates Bank Feed reopen counts',()=>{
   const server=read('server.mjs');
   const bank=read('lib/bank-server.js');
-  assert.match(store,/existing\?\.type==='account_transfer'/);
-  assert.match(store,/Reconnect to edit this transfer/);
-  assert.match(store,/Reconnect to delete this transfer/);
-  assert.match(server,/if\(existing\.type==='account_transfer'\)throw ledgerError/);
   assert.match(server,/reopenedFeedItems\+=bankFeed\.revalidatePosted/);
   assert.match(server,/reopenedFeedItems\+=bankFeed\.reopenOrphans/);
   assert.match(server,/reopenedFeedItems\};/);

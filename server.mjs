@@ -166,6 +166,15 @@ CREATE TABLE IF NOT EXISTS sync_changes (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sync_changes_user_revision ON sync_changes(user_id, revision, seq);
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  deleted_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, entity, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_tombstones_user_revision ON sync_tombstones(user_id, revision);
 `);
 const sessionColumns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map(row=>row.name));
 if (!sessionColumns.has('last_seen_at')) db.exec("ALTER TABLE sessions ADD COLUMN last_seen_at TEXT");
@@ -263,7 +272,11 @@ const syncQ={
   processedById:db.prepare('SELECT request_hash AS requestHash,result_json AS resultJson FROM sync_operations WHERE user_id=? AND operation_id=?'),
   insertProcessed:db.prepare('INSERT INTO sync_operations(user_id,operation_id,request_hash,result_json,created_at) VALUES(?,?,?,?,?)'),
   insertChange:db.prepare('INSERT INTO sync_changes(user_id,revision,entity,entity_id,operation,payload_json,created_at) VALUES(?,?,?,?,?,?,?)'),
-  changesSince:db.prepare('SELECT seq,revision,entity,entity_id AS entityId,operation,payload_json AS payloadJson,created_at AS createdAt FROM sync_changes WHERE user_id=? AND revision>? ORDER BY revision,seq')
+  changesSince:db.prepare('SELECT seq,revision,entity,entity_id AS entityId,operation,payload_json AS payloadJson,created_at AS createdAt FROM sync_changes WHERE user_id=? AND revision>? ORDER BY revision,seq'),
+  tombstoneByEntity:db.prepare('SELECT revision,deleted_at AS deletedAt FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?'),
+  upsertTombstone:db.prepare(`INSERT INTO sync_tombstones(user_id,entity,entity_id,revision,deleted_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(user_id,entity,entity_id) DO UPDATE SET revision=excluded.revision,deleted_at=excluded.deleted_at`),
+  deleteTombstone:db.prepare('DELETE FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?')
 };
 
 const bankFeed = createBankFeedService(db);
@@ -665,11 +678,37 @@ function loadState(userId) {
   return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency,appMode:u.app_mode||'simple',timezone:u.timezone||'UTC'},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};
 }
 
+
+function currentLedgerEntityIds(userId){
+  return {
+    person:new Set(q.people.all(userId).map(row=>row.id)),
+    account:new Set(q.accounts.all(userId).map(row=>row.id)),
+    entry:new Set(q.entries.all(userId).map(row=>row.id))
+  };
+}
+function stateLedgerEntityIds(state){
+  return {
+    person:new Set((state?.people||[]).map(row=>row.id)),
+    account:new Set((state?.accounts||[]).map(row=>row.id)),
+    entry:new Set((state?.entries||[]).map(row=>row.id))
+  };
+}
+function reconcileServerTombstones(userId,before,after,revision){
+  const stamp=nowIso();
+  for(const entity of ['person','account','entry']){
+    for(const id of after[entity]||[])syncQ.deleteTombstone.run(userId,entity,id);
+    for(const id of before[entity]||[]){
+      if(!(after[entity]||new Set()).has(id))syncQ.upsertTombstone.run(userId,entity,id,revision,stamp);
+    }
+  }
+}
+
 function saveState(user, input) {
   const expected=Number(input.version); if(!Number.isInteger(expected)) throw Object.assign(new Error('Missing ledger version.'),{status:400});
   let clean; try{clean=validateState(input,user);assertRecurringReferences(user.user_id,clean);}catch(error){throw Object.assign(error,{status:400});}
   db.exec('BEGIN IMMEDIATE');
   try{
+    const before=currentLedgerEntityIds(user.user_id);
     const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,user.user_id,expected);
     if(Number(upd.changes)!==1) throw Object.assign(new Error('This ledger changed in another tab. Refresh and try again.'),{status:409});
     q.deleteEntries.run(user.user_id); q.deletePeople.run(user.user_id); q.deleteAccounts.run(user.user_id);
@@ -684,6 +723,7 @@ function saveState(user, input) {
     }
     q.deleteOrphanAttachments.run(user.user_id,user.user_id);
     bankFeed.reopenOrphans(user.user_id);bankFeed.reconcileReferences(user.user_id);
+    reconcileServerTombstones(user.user_id,before,stateLedgerEntityIds(clean),expected+1);
     db.exec('COMMIT');
   }catch(err){db.exec('ROLLBACK');throw err;}
   return loadState(user.user_id);
@@ -851,6 +891,7 @@ function applySyncOperation(user,raw){
       if(op.operation==='create'){
         if(Number(q.personCount.get(user.user_id)?.count||0)>=DATA_LIMITS.people)throw ledgerError('You can keep up to '+DATA_LIMITS.people.toLocaleString('en-US')+' people.');
         const person=cleanPersonInput({...op.payload,id:op.entityId});
+        if(syncQ.tombstoneByEntity.get(user.user_id,'person',person.id))throw ledgerError('This person was deleted on another device. Create a new person instead.',409);
         if(q.personById.get(user.user_id,person.id))throw ledgerError('That person id already exists.',409);
         q.insertPerson.run(user.user_id,person.id,person.name,person.note,person.createdAt);
         changes.push(syncChange('person',person.id,'create',person));
@@ -882,7 +923,10 @@ function applySyncOperation(user,raw){
         }
       }else{
         const existing=q.personById.get(user.user_id,op.entityId);
-        if(!existing)throw ledgerError('Person not found.',404);
+        if(!existing){
+          if(syncQ.tombstoneByEntity.get(user.user_id,'person',op.entityId))throw ledgerError('This person was deleted on another device.',409);
+          throw ledgerError('Person not found.',404);
+        }
         if(op.operation==='update'){
           const person=cleanPersonInput({...op.payload,id:op.entityId},{existing});
           const changed=q.updatePerson.run(person.name,person.note,user.user_id,op.entityId);
@@ -892,6 +936,7 @@ function applySyncOperation(user,raw){
           assertPersonDeletable(user.user_id,op.entityId);
           const changed=q.deletePersonRow.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+          syncQ.upsertTombstone.run(user.user_id,'person',op.entityId,op.baseRevision+1,nowIso());
           changes.push(syncChange('person',op.entityId,'delete',null));
         }
       }
@@ -899,13 +944,17 @@ function applySyncOperation(user,raw){
       if(op.operation==='create'){
         if(Number(q.accountCount.get(user.user_id)?.count||0)>=DATA_LIMITS.accounts)throw ledgerError('You can keep up to '+DATA_LIMITS.accounts.toLocaleString('en-US')+' accounts.');
         const account=cleanAccountInput({...op.payload,id:op.entityId},{defaultCurrency:user.default_currency});
+        if(syncQ.tombstoneByEntity.get(user.user_id,'account',account.id))throw ledgerError('This account was deleted on another device. Create a new account instead.',409);
         if(q.accountById.get(user.user_id,account.id))throw ledgerError('That account id already exists.',409);
         const storage=accountToStorage(account);
         q.insertAccount.run(user.user_id,account.id,account.name,account.type,account.currency,storage.openingBalanceMinor,account.createdAt);
         changes.push(syncChange('account',account.id,'create',account));
       }else{
         const rawAccount=q.accountById.get(user.user_id,op.entityId);
-        if(!rawAccount)throw ledgerError('Account not found.',404);
+        if(!rawAccount){
+          if(syncQ.tombstoneByEntity.get(user.user_id,'account',op.entityId))throw ledgerError('This account was deleted on another device.',409);
+          throw ledgerError('Account not found.',404);
+        }
         const existing=accountFromStorage(rawAccount);
         if(op.operation==='update'){
           const account=cleanAccountInput({...op.payload,id:op.entityId},{existing,defaultCurrency:user.default_currency,userId:user.user_id});
@@ -917,24 +966,26 @@ function applySyncOperation(user,raw){
           assertAccountDeletable(user.user_id,op.entityId);
           const changed=q.deleteAccountRow.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+          syncQ.upsertTombstone.run(user.user_id,'account',op.entityId,op.baseRevision+1,nowIso());
           changes.push(syncChange('account',op.entityId,'delete',null));
         }
       }
     }else if(op.entity==='entry'){
-      if(op.payload?.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
       if(op.operation==='create'){
         if(Number(q.entryCount.get(user.user_id)?.count||0)>=DATA_LIMITS.entries)throw ledgerError('You can keep up to '+DATA_LIMITS.entries.toLocaleString('en-US')+' transactions.');
         const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId});
+        if(syncQ.tombstoneByEntity.get(user.user_id,'entry',entry.id))throw ledgerError('This transaction was deleted on another device. Create a new transaction instead.',409);
         if(q.entryExists.get(user.user_id,entry.id))throw ledgerError('That transaction id already exists.',409);
         insertLedgerEntry(user.user_id,entry);
         changes.push(syncChange('entry',entry.id,'create',entry));
       }else{
         const existing=currentEntry(user.user_id,op.entityId);
-        if(!existing)throw ledgerError('Transaction not found.',404);
-        if(existing.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
+        if(!existing){
+          if(syncQ.tombstoneByEntity.get(user.user_id,'entry',op.entityId))throw ledgerError('This transaction was deleted on another device.',409);
+          throw ledgerError('Transaction not found.',404);
+        }
         if(op.operation==='update'){
           const entry=cleanLedgerEntry(user,{...op.payload,id:op.entityId},{existing});
-          if(entry.type==='account_transfer')throw ledgerError('Offline transfers are not enabled until the atomic-transfer phase.');
           updateLedgerEntryRow(user.user_id,entry);
           reopenedFeedItems+=bankFeed.revalidatePosted(user.user_id,op.entityId).length;
           changes.push(syncChange('entry',entry.id,'update',entry));
@@ -942,6 +993,7 @@ function applySyncOperation(user,raw){
           q.deleteEntryAttachments.run(user.user_id,op.entityId);
           const changed=q.deleteEntry.run(user.user_id,op.entityId);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
+          syncQ.upsertTombstone.run(user.user_id,'entry',op.entityId,op.baseRevision+1,nowIso());
           reopenedFeedItems+=bankFeed.reopenOrphans(user.user_id);
           changes.push(syncChange('entry',op.entityId,'delete',null));
         }
@@ -964,6 +1016,71 @@ function applySyncOperation(user,raw){
       );
     }
     const result={operationId:op.operationId,status:'accepted',revision,reopenedFeedItems};
+    syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
+    db.exec('COMMIT');
+    return result;
+  }catch(error){
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+
+function cleanAttachmentSyncOperation(raw){
+  const operationId=String(raw?.operationId||''),operation=String(raw?.operation||''),attachmentId=String(raw?.attachmentId||'');
+  if(!idOk(operationId,'op')||!['create','delete'].includes(operation)||!idOk(attachmentId,'attachment'))throw ledgerError('Invalid attachment sync operation.');
+  const payload=raw?.payload&&typeof raw.payload==='object'?raw.payload:{};
+  if(operation==='create'){
+    const entryId=String(raw?.entryId||payload.entryId||'');
+    if(!idOk(entryId,'entry'))throw ledgerError('Invalid attachment transaction.');
+    return {operationId,operation,attachmentId,entryId,payload};
+  }
+  return {operationId,operation,attachmentId,entryId:String(raw?.entryId||''),payload};
+}
+
+function applyAttachmentSyncOperation(user,raw){
+  const op=cleanAttachmentSyncOperation(raw);
+  const requestHash=sha256(JSON.stringify({
+    operationId:op.operationId,
+    operation:op.operation,
+    attachmentId:op.attachmentId,
+    entryId:op.entryId,
+    payload:op.payload
+  }));
+
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const prior=syncQ.processedById.get(user.user_id,op.operationId);
+    if(prior){
+      if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
+      const result=JSON.parse(prior.resultJson||'{}');
+      db.exec('COMMIT');
+      return {...result,alreadyProcessed:true};
+    }
+
+    let result;
+    if(op.operation==='create'){
+      if(!q.entryExists.get(user.user_id,op.entryId))throw ledgerError('The transaction for this attachment no longer exists.',409);
+      if(syncQ.tombstoneByEntity.get(user.user_id,'attachment',op.attachmentId))throw ledgerError('This attachment was deleted before. Add the file again as a new attachment.',409);
+      if(q.attachmentById.get(user.user_id,op.attachmentId))throw ledgerError('That attachment id already exists.',409);
+      const name=safeStr(op.payload.name,180),mimeType=String(op.payload.mimeType||'application/octet-stream').toLowerCase();
+      if(!name||!ALLOWED_ATTACHMENT_TYPES.has(mimeType))throw ledgerError('Use a JPG, PNG, WebP, GIF, PDF, or text file.');
+      let data;try{data=Buffer.from(String(op.payload.data||''),'base64');}catch{throw ledgerError('Invalid attachment data.');}
+      if(!data.length||data.length>MAX_ATTACHMENT_BYTES)throw ledgerError('Attachments must be 8 MB or smaller.',413);
+      const usage=q.attachmentUsage.get(user.user_id);
+      if(Number(usage?.count||0)>=DATA_LIMITS.attachments)throw ledgerError('You can keep up to '+DATA_LIMITS.attachments.toLocaleString('en-US')+' attachments.',413);
+      if(Number(usage?.bytes||0)+data.length>DATA_LIMITS.attachmentBytes)throw ledgerError('Attachment storage is limited to '+Math.floor(DATA_LIMITS.attachmentBytes/1024/1024)+' MB per account.',413);
+      const createdAt=op.payload.createdAt||nowIso();
+      q.insertAttachment.run(user.user_id,op.attachmentId,op.entryId,name,mimeType,data.length,data,createdAt);
+      result={operationId:op.operationId,status:'accepted',attachment:{id:op.attachmentId,entryId:op.entryId,name,mimeType,sizeBytes:data.length,createdAt}};
+    }else{
+      const existing=q.attachmentById.get(user.user_id,op.attachmentId);
+      if(existing)q.deleteAttachment.run(user.user_id,op.attachmentId);
+      syncQ.upsertTombstone.run(user.user_id,'attachment',op.attachmentId,Number(q.userById.get(user.user_id)?.revision)||0,nowIso());
+      result={operationId:op.operationId,status:'accepted',deleted:true,attachmentId:op.attachmentId,missing:!existing};
+    }
+
+    const stamp=nowIso();
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');
     return result;
@@ -1027,7 +1144,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -1159,6 +1276,12 @@ export const server=http.createServer(async(req,res)=>{
       const sinceRevision=Number(url.searchParams.get('sinceRevision'));
       return json(res,200,pullSyncChanges(a.user_id,sinceRevision));
     }
+    if(url.pathname==='/api/sync/attachments'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req,ATTACHMENT_BODY_LIMIT);
+      const result=applyAttachmentSyncOperation(a,body.operation);
+      return json(res,result.alreadyProcessed?200:201,result);
+    }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
@@ -1176,6 +1299,7 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
       if(Number(q.personCount.get(a.user_id)?.count||0)>=DATA_LIMITS.people)return fail(res,400,`You can keep up to ${DATA_LIMITS.people.toLocaleString('en-US')} people.`);
       const person=cleanPersonInput(body);
+      if(syncQ.tombstoneByEntity.get(a.user_id,'person',person.id))return fail(res,409,'This person was deleted before. Create a new person instead.');
       if(q.personById.get(a.user_id,person.id))return fail(res,409,'That person id already exists.');
       withLedgerMutation(a.user_id,expected,()=>{
         q.insertPerson.run(a.user_id,person.id,person.name,person.note,person.createdAt);
@@ -1198,7 +1322,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const id=decodeURIComponent(url.pathname.slice('/api/people/'.length));
       if(!idOk(id,'person'))return fail(res,400,'Invalid person.');
-      const existing=q.personById.get(a.user_id,id);if(!existing)return fail(res,404,'Person not found.');
+      const existing=q.personById.get(a.user_id,id);if(!existing){if(syncQ.tombstoneByEntity.get(a.user_id,'person',id))return fail(res,409,'This person was deleted on another device.');return fail(res,404,'Person not found.');}
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),person=cleanPersonInput({...body,id},{existing});
         withLedgerMutation(a.user_id,expected,()=>{
@@ -1213,6 +1337,7 @@ export const server=http.createServer(async(req,res)=>{
           assertPersonDeletable(a.user_id,id);
           const changed=q.deletePersonRow.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Person not found.',404);
+          syncQ.upsertTombstone.run(a.user_id,'person',id,expected+1,nowIso());
         });
         return json(res,200,loadState(a.user_id));
       }
@@ -1223,6 +1348,7 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
       if(Number(q.accountCount.get(a.user_id)?.count||0)>=DATA_LIMITS.accounts)return fail(res,400,`You can keep up to ${DATA_LIMITS.accounts.toLocaleString('en-US')} accounts.`);
       const account=cleanAccountInput(body,{defaultCurrency:a.default_currency});
+      if(syncQ.tombstoneByEntity.get(a.user_id,'account',account.id))return fail(res,409,'This account was deleted before. Create a new account instead.');
       if(q.accountById.get(a.user_id,account.id))return fail(res,409,'That account id already exists.');
       withLedgerMutation(a.user_id,expected,()=>{
         const storage=accountToStorage(account);
@@ -1234,7 +1360,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const id=decodeURIComponent(url.pathname.slice('/api/accounts/'.length));
       if(!idOk(id,'account'))return fail(res,400,'Invalid account.');
-      const raw=q.accountById.get(a.user_id,id);if(!raw)return fail(res,404,'Account not found.');
+      const raw=q.accountById.get(a.user_id,id);if(!raw){if(syncQ.tombstoneByEntity.get(a.user_id,'account',id))return fail(res,409,'This account was deleted on another device.');return fail(res,404,'Account not found.');}
       const existing=accountFromStorage(raw);
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),account=cleanAccountInput({...body,id},{existing,defaultCurrency:a.default_currency,userId:a.user_id});
@@ -1251,6 +1377,7 @@ export const server=http.createServer(async(req,res)=>{
           assertAccountDeletable(a.user_id,id);
           const changed=q.deleteAccountRow.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Account not found.',404);
+          syncQ.upsertTombstone.run(a.user_id,'account',id,expected+1,nowIso());
         });
         return json(res,200,loadState(a.user_id));
       }
@@ -1261,6 +1388,7 @@ export const server=http.createServer(async(req,res)=>{
       const body=await bodyJson(req),expected=expectedLedgerRevision(body);
       if(Number(q.entryCount.get(a.user_id)?.count||0)>=DATA_LIMITS.entries)return fail(res,400,`You can keep up to ${DATA_LIMITS.entries.toLocaleString('en-US')} transactions.`);
       const entry=cleanLedgerEntry(a,body);
+      if(syncQ.tombstoneByEntity.get(a.user_id,'entry',entry.id))return fail(res,409,'This transaction was deleted before. Create a new transaction instead.');
       if(q.entryExists.get(a.user_id,entry.id))return fail(res,409,'That transaction id already exists.');
       withLedgerMutation(a.user_id,expected,()=>insertLedgerEntry(a.user_id,entry));
       return json(res,201,loadState(a.user_id));
@@ -1269,7 +1397,7 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const id=decodeURIComponent(url.pathname.slice('/api/entries/'.length));
       if(!idOk(id,'entry'))return fail(res,400,'Invalid transaction.');
-      const existing=currentEntry(a.user_id,id);if(!existing)return fail(res,404,'Transaction not found.');
+      const existing=currentEntry(a.user_id,id);if(!existing){if(syncQ.tombstoneByEntity.get(a.user_id,'entry',id))return fail(res,409,'This transaction was deleted on another device.');return fail(res,404,'Transaction not found.');}
       if(req.method==='PUT'){
         const body=await bodyJson(req),expected=expectedLedgerRevision(body),entry=cleanLedgerEntry(a,{...body,id},{existing});
         let reopenedFeedItems=[];withLedgerMutation(a.user_id,expected,()=>{updateLedgerEntryRow(a.user_id,entry);reopenedFeedItems=bankFeed.revalidatePosted(a.user_id,id);});
@@ -1282,6 +1410,7 @@ export const server=http.createServer(async(req,res)=>{
           q.deleteEntryAttachments.run(a.user_id,id);
           const changed=q.deleteEntry.run(a.user_id,id);
           if(Number(changed.changes)!==1)throw ledgerError('Transaction not found.',404);
+          syncQ.upsertTombstone.run(a.user_id,'entry',id,expected+1,nowIso());
           reopenedFeedItems=bankFeed.reopenOrphans(a.user_id);
         });
         return json(res,200,{...loadState(a.user_id),reopenedFeedItems});
@@ -1319,6 +1448,7 @@ export const server=http.createServer(async(req,res)=>{
       const id=decodeURIComponent(url.pathname.slice('/api/attachments/'.length));
       const result=q.deleteAttachment.run(a.user_id,id);
       if(!Number(result.changes))return fail(res,404,'Attachment not found.');
+      syncQ.upsertTombstone.run(a.user_id,'attachment',id,Number(q.userById.get(a.user_id)?.revision)||0,nowIso());
       return json(res,200,{ok:true});
     }
 
@@ -1490,6 +1620,7 @@ export const server=http.createServer(async(req,res)=>{
       if(!body||typeof body!=='object'||!Array.isArray(body.people)||!Array.isArray(body.accounts)||!Array.isArray(body.entries))return fail(res,400,'That file is not a valid ledger backup.');
       db.exec('BEGIN IMMEDIATE');
       try{
+        const before=currentLedgerEntityIds(a.user_id);
         insights.replace(a.user_id,Array.isArray(body.categories)?body.categories:[],Array.isArray(body.budgets)?body.budgets:[]);
         const clean=validateState({...body,version:a.revision},a);assertRecurringReferences(a.user_id,clean);
         const upd=q.updateUserState.run(clean.settings.displayName,clean.settings.defaultCurrency,clean.settings.appMode,clean.settings.timezone,a.user_id,a.revision);
@@ -1501,6 +1632,7 @@ export const server=http.createServer(async(req,res)=>{
         for(const e of clean.entries){const storage=entryToStorage(e,restoreAccountById);q.insertEntry.run(a.user_id,e.id,e.type,e.personId,e.accountId,e.fromAccountId,e.toAccountId,storage.amountMinor,e.currency,storage.fromAmountMinor,storage.toAmountMinor,storage.signedAmountMinor,e.date,e.merchant,e.description,e.categoryId||null,storage.splitJson,e.createdAt,e.updatedAt);}
         q.deleteOrphanAttachments.run(a.user_id,a.user_id);
         bankFeed.reopenOrphans(a.user_id);bankFeed.reconcileReferences(a.user_id);
+        reconcileServerTombstones(a.user_id,before,stateLedgerEntityIds(clean),a.revision+1);
         db.exec('COMMIT');
         return json(res,200,loadState(a.user_id));
       }catch(error){db.exec('ROLLBACK');throw error;}

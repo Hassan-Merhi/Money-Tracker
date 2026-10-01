@@ -17,7 +17,8 @@ test('Wave 100C documents the offline attachment cache authority and safety boun
 
 test('Wave 100C adds attachment cache policy, quota-safe eviction and local-copy protection',()=>{
   const offline=read('lib/offline-db.js'),store=read('lib/store.js');
-  assert.match(offline,/version: 7/);
+  const dbVersion=Number(/version: (\d+)/.exec(offline)?.[1]||0);
+  assert.ok(dbVersion>=7);
   assert.match(offline,/fromVersion<7/);
   for(const field of ['offlinePinned','offlinePolicy','cachedAt','lastAccessedAt'])assert.ok(offline.includes(field),field);
   for(const fn of ['attachmentCacheInfo','saveAttachmentOfflineCopy','removeAttachmentOfflineCopy','evictAttachmentCache','touchOfflineAttachment'])assert.ok(offline.includes(`export async function ${fn}`),fn);
@@ -52,7 +53,8 @@ test('Wave 100C production/PWA and CI contracts are wired',()=>{
   const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
   assert.ok(pwaVersion>=33,`Wave 100C requires PWA v33 or newer; found v${pwaVersion}.`);
   assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
-  assert.match(version,/offlineDbVersion:7/);
+  const offlineDbVersion=Number(/offlineDbVersion:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(offlineDbVersion>=7);
   assert.match(server,/offlineWave100CVersion:1/);
   assert.match(smoke,/offlineWave100CVersion/);
   assert.equal(pkg.scripts['test:wave100c'],'node --test tests/wave100c-offline-attachment-cache.test.js');

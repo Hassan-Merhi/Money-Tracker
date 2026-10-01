@@ -14,7 +14,7 @@ function fixtureServer({commit='abc123',brokenAsset=false}={}){
     if(path==='/api/health'){
       res.setHeader('content-type','application/json');
       res.end(JSON.stringify({
-        ok:true,wave13Version:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineWave100CVersion:1,offlineWave100DVersion:1,buildVersion:'pwa-19+'+commit.slice(0,12),
+        ok:true,wave13Version:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineWave100CVersion:1,offlineWave100DVersion:1,offlineWave100EVersion:1,buildVersion:'pwa-19+'+commit.slice(0,12),
         pwaCacheVersion:version,pwaCacheName:'money-tracker-debt-v19',
         deployment:{provider:'test',gitCommit:commit},
         runtime:{ok:true,sqliteQuickCheck:'ok',foreignKeyViolations:0,dbBytes:123}

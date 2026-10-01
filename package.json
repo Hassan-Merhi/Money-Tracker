@@ -40,7 +40,9 @@
     "test:wave100c": "node --test tests/wave100c-offline-attachment-cache.test.js",
     "test:wave100c-e2e": "playwright test e2e/wave100c-offline-attachment-cache.spec.mjs --workers=1",
     "test:wave100d": "node --test tests/wave100d-offline-search-filters.test.js",
-    "test:wave100d-e2e": "playwright test e2e/wave100d-offline-search-filters.spec.mjs --workers=1"
+    "test:wave100d-e2e": "playwright test e2e/wave100d-offline-search-filters.spec.mjs --workers=1",
+    "test:wave100e": "node --test tests/wave100e-offline-recovery-restore.test.js",
+    "test:wave100e-e2e": "playwright test e2e/wave100e-offline-recovery-restore.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

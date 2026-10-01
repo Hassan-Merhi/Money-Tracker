@@ -380,3 +380,19 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
   .people-toolbar-actions{gap:7px}
   .people-import-btn{width:44px;min-width:44px}
 }
+
+
+/* Wave 100E — offline recovery preview */
+.recovery-preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.recovery-preview-grid>div{display:grid;gap:3px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2);min-width:0}
+.recovery-preview-grid strong{font-size:18px;line-height:1.1;overflow-wrap:anywhere}
+.recovery-preview-grid span{font-size:11px;color:var(--muted);line-height:1.3}
+.offline-recovery-panel .page-actions{margin-top:10px}
+@media(max-width:620px){
+  .recovery-preview-grid{grid-template-columns:1fr 1fr}
+  .offline-recovery-panel .page-actions{display:grid;grid-template-columns:1fr}
+  .offline-recovery-panel .page-actions .btn{width:100%}
+}
+@media(max-width:380px){
+  .recovery-preview-grid{grid-template-columns:1fr}
+}

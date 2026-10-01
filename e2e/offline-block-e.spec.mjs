@@ -201,7 +201,7 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
       worker.postMessage({type:'GET_UPDATE_INFO'},[channel.port2]);
     });
   });
-  expect(workerInfo.version).toBe(32);
+  expect(workerInfo.version).toBe(33);
   expect(workerInfo.offlineDbVersion).toBe(7);
   expect(workerInfo.minMigratableOfflineDbVersion).toBe(1);
 

@@ -49,21 +49,18 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   expect(slowPushes).toBe(1);
   await expect(pageB.locator('#main')).toContainText('Peer Refresh Person');
 
-  let stage503=true;
-  await pageA.route('**/api/sync/push',async route=>{
-    if(stage503){
-      stage503=false;
-      await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Worker overlap staging outage'})});
-      return;
-    }
-    await route.continue();
-  });
   await pageA.evaluate(async()=>{
-    const store=await import('/lib/store.js');
-    const state=await store.loadState();
-    await store.createPerson({id:'person_wave100f_worker',name:'Worker Lock Person',note:'worker and foreground race',openingBalance:0,currency:'USD',direction:'to_me'},state.version);
+    const db=await import('/lib/offline-db.js');
+    const [state,user]=await Promise.all([db.loadStateSnapshot(),db.loadAuthorizedUser()]);
+    const stamp=new Date().toISOString();
+    await db.enqueueLocalMutation({
+      operationId:'op_wave100f_worker',
+      entity:'person',entityId:'person_wave100f_worker',operation:'create',
+      expectedRevision:state.version,
+      payload:{id:'person_wave100f_worker',name:'Worker Lock Person',note:'worker and foreground race',openingBalance:0,currency:'USD',direction:'to_me'},
+      localRecord:{id:'person_wave100f_worker',name:'Worker Lock Person',note:'worker and foreground race',createdAt:stamp}
+    },user.id||user.email);
   });
-  await pageA.unroute('**/api/sync/push');
 
   const foreground=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-foreground-overlap'});});
   const workerSignal=pageA.evaluate(async()=>{

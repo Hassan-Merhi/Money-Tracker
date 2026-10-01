@@ -72,7 +72,7 @@ test('Offline Block E: cached reports export PDF/XLSX offline and retain recorde
   expect(pdf.download.suggestedFilename()).toMatch(/\.pdf$/);
   expect(pdf.bytes.subarray(0,8).toString('utf8')).toContain('%PDF-1.4');
   expect(pdf.bytes.toString('utf8')).toContain('Recorded FX rates');
-  expect(pdf.bytes.toString('utf8')).toContain('Queued coffee for offline export');
+  expect(pdf.bytes.toString('utf8')).toContain('Offline Cafe');
 
   const xlsx=await downloadBytes(page,'#exportXlsx');
   expect(xlsx.download.suggestedFilename()).toMatch(/\.xlsx$/);
@@ -184,6 +184,7 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
   });
   expect(workerInfo.version).toBe(29);
   expect(workerInfo.offlineDbVersion).toBe(4);
+  expect(workerInfo.minMigratableOfflineDbVersion).toBe(1);
 
   await context.setOffline(true);
   await page.evaluate(async()=>{

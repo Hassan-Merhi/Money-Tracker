@@ -168,7 +168,7 @@ test('Offline Block E: v3 IndexedDB migrates atomically through current schema a
     };
   });
 
-  expect(result.dbVersion).toBe(6);
+  expect(result.dbVersion).toBe(7);
   expect(result.stores).toContain('bankFeedState');
   expect(result.stores).toContain('bankFeedQueue');
   expect(result.stores).toContain('recurringState');
@@ -202,7 +202,7 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
     });
   });
   expect(workerInfo.version).toBe(32);
-  expect(workerInfo.offlineDbVersion).toBe(6);
+  expect(workerInfo.offlineDbVersion).toBe(7);
   expect(workerInfo.minMigratableOfflineDbVersion).toBe(1);
 
   await page.evaluate(()=>{location.hash='#settings';});
@@ -230,7 +230,7 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
   await page.evaluate(async()=>{
     const pwa=await import('/lib/pwa.js');
     const current=pwa.pwaStatus();
-    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:32,offlineDbVersion:6,compatible:true,reason:''}}}));
+    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:33,offlineDbVersion:7,compatible:true,reason:''}}}));
   });
   const updateButton=page.locator('#settingsApplyUpdate');
   await expect(updateButton).toBeVisible();

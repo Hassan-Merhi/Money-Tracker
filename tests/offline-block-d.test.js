@@ -63,7 +63,8 @@ test('O14 has retry, export, and explicit destructive discard recovery paths',()
 test('O15 sync is single-flight and resume/background hooks are installed',()=>{
   const store=read('lib/store.js'),pwa=read('lib/pwa.js'),sw=read('service-worker.js');
   assert.match(store,/let syncInFlight=null/);
-  assert.match(store,/if\(syncInFlight\)return await syncInFlight/);
+  assert.match(store,/if\(syncInFlight\)[\s\S]*syncRerunRequested=true[\s\S]*return await syncInFlight/);
+  assert.match(store,/runCoordinatedSync[\s\S]*while\(syncRerunRequested/);
   assert.match(pwa,/moneytracker:sync-request/);
   for(const reason of ['online','pageshow','focus','visible','service-worker'])assert.ok(pwa.includes(reason),reason);
   assert.match(pwa,/registration\.sync\.register\('money-tracker-sync'\)/);

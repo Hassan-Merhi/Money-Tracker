@@ -27,6 +27,7 @@ test('Wave 100A adds IndexedDB v5 Bank Feed cache and outbox to data-loss guards
   assert.match(offline,/pendingOperationCount[\s\S]*bankFeedRows/);
   assert.match(offline,/queuedRecoveryBundle[\s\S]*bankFeedQueue/);
   assert.match(offline,/clearOfflineData[\s\S]*bankFeedQueueRequest/);
+  assert.match(offline,/Cannot apply remote changes while local changes are still queued[\s\S]*OFFLINE_PENDING_CHANGES/);
 });
 
 test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions foreground-authoritative',()=>{
@@ -37,6 +38,8 @@ test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions fore
   assert.match(server,/offlineWave100AVersion:1/);
   for(const key of ['bankFeedAccepted','bankFeedReplayed','bankFeedConflict','bankFeedRejected'])assert.ok(server.includes(key),key);
   assert.match(store,/syncBankFeedOperations/);
+  assert.match(store,/syncRerunRequested/);
+  assert.match(store,/OFFLINE_PENDING_CHANGES/);
   assert.match(store,/export async function resolveBankFeedConflict/);
   assert.match(store,/expectedRevision:Number\(freshState\.version\)/);
   assert.match(store,/saveBankFeedSnapshot/);

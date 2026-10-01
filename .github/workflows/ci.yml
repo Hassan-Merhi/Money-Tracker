@@ -44,6 +44,8 @@ jobs:
         run: npm run test:wave100f
       - name: Run Wave 100G Scale & Longevity gate
         run: npm run test:wave100g
+      - name: Run Wave 100G Scale & Longevity gate
+        run: npm run test:wave100g
       - name: Run Wave 4 desktop/tablet gate
         run: npm run test:wave4
       - name: Run Lane D release gate
@@ -168,6 +170,8 @@ jobs:
         run: npm run test:wave100e-e2e
       - name: Run Wave 100F Hostile Connectivity & Lifecycle browser gate
         run: npm run test:wave100f-e2e
+      - name: Run Wave 100G Scale & Longevity browser gate
+        run: npm run test:wave100g-e2e
       - name: Run Wave 100G Scale & Longevity browser gate
         run: npm run test:wave100g-e2e
       - name: Run Wave 14 visual audit

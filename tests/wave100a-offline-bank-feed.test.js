@@ -37,6 +37,7 @@ test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions fore
   assert.match(server,/offlineWave100AVersion:1/);
   for(const key of ['bankFeedAccepted','bankFeedReplayed','bankFeedConflict','bankFeedRejected'])assert.ok(server.includes(key),key);
   assert.match(store,/syncBankFeedOperations/);
+  assert.match(store,/export async function resolveBankFeedConflict/);
   assert.match(store,/expectedRevision:Number\(freshState\.version\)/);
   assert.match(store,/saveBankFeedSnapshot/);
   assert.match(store,/pendingAction:'post'/);
@@ -45,6 +46,8 @@ test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions fore
   assert.match(sw,/\/api\/sync\/bank-feed/);
   assert.match(app,/route\.page === 'bank'\) renderBankFeedPage/);
   assert.doesNotMatch(app,/Bank Feed remains server-only/);
+  assert.match(app,/data-resolve-bank-conflict/);
+  assert.match(app,/resolveBankFeedConflict/);
 });
 
 test('Wave 100A PWA schema and CI gates are wired',()=>{

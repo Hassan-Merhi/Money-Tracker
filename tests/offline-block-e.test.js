@@ -80,7 +80,7 @@ test('O18 publishes update schema metadata and blocks activation around unsynced
   const pwa=read('lib/pwa.js'),sw=read('service-worker.js'),version=read('pwa-version.js'),app=read('app.js');
   const shellVersion=Number(version.match(/version:(\d+)/)?.[1]||0);
   assert.ok(shellVersion>=29);
-  assert.match(version,/offlineDbVersion:4/);
+  assert.match(version,/offlineDbVersion:5/);
   assert.match(version,/minMigratableOfflineDbVersion:1/);
   assert.match(sw,/GET_UPDATE_INFO/);
   assert.match(sw,/offlineDbVersion:self\.MONEY_TRACKER_PWA\.offlineDbVersion/);
@@ -97,13 +97,14 @@ test('O18 publishes update schema metadata and blocks activation around unsynced
   assert.match(app,/Update blocked/);
 });
 
-test('O19 uses explicit additive v1-v4 migrations with post-open FX backfill',()=>{
+test('O19 migrations remain intact after the additive v5 Bank Feed extension',()=>{
   const offline=read('lib/offline-db.js');
-  assert.match(offline,/version: 4/);
+  assert.match(offline,/version: 5/);
   assert.match(offline,/fromVersion<1/);
   assert.match(offline,/fromVersion<2/);
   assert.match(offline,/fromVersion<3/);
   assert.match(offline,/fromVersion<4/);
+  assert.match(offline,/fromVersion<5/);
   assert.match(offline,/FX_RATE_STORE='fxRates'/);
   assert.match(offline,/strategy:'additive-atomic'/);
   assert.match(offline,/finishPostOpenMigrations/);

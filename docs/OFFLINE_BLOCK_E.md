@@ -36,6 +36,7 @@ Before activation:
 - the app queries the waiting worker for its PWA version and required offline database version;
 - activation is blocked while any queued/failed/conflicted ledger or attachment work remains;
 - the waiting worker advertises both its target DB schema and the oldest DB schema it can migrate from; unsupported upgrade jumps are blocked;
+- update compatibility fails closed: missing/invalid worker schema metadata or a target schema older than the current device schema blocks activation instead of guessing;
 - the existing controller stays active until the update is safe;
 - successful activation reloads the app through `controllerchange`.
 
@@ -60,7 +61,7 @@ Migration requirements:
 - unsynced queue rows survive;
 - attachment rows and attachment queue rows survive;
 - active-user and state-head metadata survive;
-- FX cache is rebuilt from the preserved ledger;
+- FX cache is rebuilt from the preserved ledger and refreshed after local mutation, pull, full snapshot replacement, and conflict rebase;
 - migrations never clear user data;
 - future tabs close on `versionchange` so a newer schema can proceed.
 

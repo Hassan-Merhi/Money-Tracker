@@ -141,6 +141,19 @@ test('Offline Block E: v3 IndexedDB migrates atomically to v4 and preserves ever
       offline.listOfflineAttachments('fx_migrate','migrator'),
       offline.offlineFxRates('migrator')
     ]);
+    const transfer=state.entries.find(row=>row.id==='fx_migrate');
+    await offline.enqueueLocalMutation({
+      operationId:'op_fx_rebase_e',
+      entity:'entry',
+      entityId:'fx_migrate',
+      operation:'update',
+      expectedRevision:state.version,
+      payload:{...transfer,toAmount:47},
+      localRecord:{...transfer,toAmount:47,updatedAt:'2026-10-01T00:05:00.000Z'}
+    },'migrator');
+    const remoteState={...state,version:state.version+1,entries:state.entries.map(row=>row.id==='fx_migrate'?{...row,toAmount:45,updatedAt:'2026-10-01T00:06:00.000Z'}:row)};
+    await offline.rebaseQueuedOperations(remoteState,'migrator',{operationId:'op_fx_rebase_e',strategy:'keep_server'});
+    const fxAfterRebase=await offline.offlineFxRates('migrator');
     return {
       dbVersion:opened.version,
       stores:Array.from(opened.objectStoreNames),
@@ -150,7 +163,8 @@ test('Offline Block E: v3 IndexedDB migrates atomically to v4 and preserves ever
       queue:queue.map(row=>row.operationId),
       attachmentQueue:attachmentQueue.map(row=>row.operationId),
       attachments:attachments.map(row=>row.id),
-      fx:fx.map(row=>({entryId:row.entryId,pair:row.pair,rate:row.rate,source:row.source}))
+      fx:fx.map(row=>({entryId:row.entryId,pair:row.pair,rate:row.rate,source:row.source})),
+      fxAfterRebase:fxAfterRebase.map(row=>({entryId:row.entryId,rate:row.rate}))
     };
   });
 
@@ -164,6 +178,7 @@ test('Offline Block E: v3 IndexedDB migrates atomically to v4 and preserves ever
   expect(result.attachmentQueue).toEqual(['attop_migrate']);
   expect(result.attachments).toEqual(['att_migrate']);
   expect(result.fx).toEqual([{entryId:'fx_migrate',pair:'USD/EUR',rate:0.92,source:'recorded_transfer'}]);
+  expect(result.fxAfterRebase).toEqual([{entryId:'fx_migrate',rate:0.9}]);
   await context.close();
 });
 
@@ -182,9 +197,21 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
       worker.postMessage({type:'GET_UPDATE_INFO'},[channel.port2]);
     });
   });
-  expect(workerInfo.version).toBe(29);
+  expect(workerInfo.version).toBe(30);
   expect(workerInfo.offlineDbVersion).toBe(4);
   expect(workerInfo.minMigratableOfflineDbVersion).toBe(1);
+
+  await page.evaluate(()=>{location.hash='#settings';});
+  await expect(page.locator('#pageHeading')).toHaveText('Settings');
+  await page.evaluate(async()=>{
+    const pwa=await import('/lib/pwa.js');
+    const current=pwa.pwaStatus();
+    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:null,offlineDbVersion:null,minMigratableOfflineDbVersion:null,compatible:false,reason:'Compatibility metadata unavailable'}}}));
+  });
+  const blockedButton=page.locator('#settingsApplyUpdate');
+  await expect(blockedButton).toBeVisible();
+  await expect(blockedButton).toBeDisabled();
+  await expect(blockedButton).toHaveText('Update blocked');
 
   await context.setOffline(true);
   await page.evaluate(async()=>{

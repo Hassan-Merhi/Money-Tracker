@@ -90,7 +90,7 @@ test('Offline Block E: cached reports export PDF/XLSX offline and retain recorde
   await context.close();
 });
 
-test('Offline Block E: v3 IndexedDB migrates atomically to v4 and preserves every durable queue class',async({browser})=>{
+test('Offline Block E: v3 IndexedDB migrates atomically through current schema and preserves every durable queue class',async({browser})=>{
   const context=await browser.newContext();
   const page=await context.newPage();
   await page.goto('/manifest.webmanifest');
@@ -168,7 +168,9 @@ test('Offline Block E: v3 IndexedDB migrates atomically to v4 and preserves ever
     };
   });
 
-  expect(result.dbVersion).toBe(4);
+  expect(result.dbVersion).toBe(5);
+  expect(result.stores).toContain('bankFeedState');
+  expect(result.stores).toContain('bankFeedQueue');
   expect(result.stores).toContain('fxRates');
   expect(result.schema.migration.fromVersion).toBe(3);
   expect(result.schema.migration.postOpenComplete).toBe(true);
@@ -197,8 +199,8 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
       worker.postMessage({type:'GET_UPDATE_INFO'},[channel.port2]);
     });
   });
-  expect(workerInfo.version).toBe(30);
-  expect(workerInfo.offlineDbVersion).toBe(4);
+  expect(workerInfo.version).toBe(31);
+  expect(workerInfo.offlineDbVersion).toBe(5);
   expect(workerInfo.minMigratableOfflineDbVersion).toBe(1);
 
   await page.evaluate(()=>{location.hash='#settings';});
@@ -226,7 +228,7 @@ test('Offline Block E: update metadata is schema-aware and UI blocks update whil
   await page.evaluate(async()=>{
     const pwa=await import('/lib/pwa.js');
     const current=pwa.pwaStatus();
-    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:30,offlineDbVersion:4,compatible:true,reason:''}}}));
+    window.dispatchEvent(new CustomEvent('moneytracker:pwa',{detail:{...current,updateWaiting:true,update:{version:31,offlineDbVersion:5,compatible:true,reason:''}}}));
   });
   const updateButton=page.locator('#settingsApplyUpdate');
   await expect(updateButton).toBeVisible();

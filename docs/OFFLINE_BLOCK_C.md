@@ -49,7 +49,7 @@ Offline attachment behavior:
 - attachment operations survive reload, participate in logout/account-switch data-loss protection, and retry idempotently;
 - the server uses the same processed-operation table to prevent duplicate file writes after lost responses.
 
-Existing server-only attachments have their metadata cached when listed online. Their binary content still requires a connection unless the device already has a local copy.
+At the Block C milestone, existing server attachments cached metadata only and their binary content required a connection unless the device already had a local copy. Wave 100C later added explicit **Save offline** pinning, quota-safe device caching, and **Remove offline copy** without deleting the server attachment.
 
 ## Safety boundaries
 

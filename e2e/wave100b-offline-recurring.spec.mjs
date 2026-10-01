@@ -74,7 +74,11 @@ test('Wave 100B: schedules and reminders survive airplane-mode edits, dismissals
     rules=(await store.listRecurringRules()).rules;
     const edited=rules.find(r=>r.id==='rule_wave100b_existing');
     await store.skipRecurringRule(edited.id,{occurrenceDate:'2026-10-01'});
-    await store.createRecurringRule(rule('rule_wave100b_created_offline','Created offline',5));
+    await store.createRecurringRule({
+      id:'rule_wave100b_created_offline',title:'Created offline',frequency:'monthly',interval:1,
+      anchorDate:'2026-10-01',nextDueDate:'2026-10-01',endDate:null,remindDaysBefore:30,isActive:true,
+      template:{type:'account_expense',accountId:'account_wave100b',amount:5,merchant:'Created offline',description:'Wave 100B offline recurring'}
+    });
     const user=await db.loadAuthorizedUser();
     const queue=await db.listRecurringQueue(user.id||user.email);
     const view=await store.listRecurringRules();

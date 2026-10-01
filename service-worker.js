@@ -9,7 +9,7 @@ const CORE=[
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg','/assets/icon-192.png','/assets/icon-512.png',
-  '/lib/ledger.js','/lib/money.js','/lib/money-parse.js','/lib/store.js','/lib/offline-db.js','/lib/utils.js','/lib/pwa.js',
+  '/lib/ledger.js','/lib/money.js','/lib/money-parse.js','/lib/fx.js','/lib/store.js','/lib/offline-db.js','/lib/utils.js','/lib/pwa.js',
   '/lib/recurring.js','/lib/recurring-rule-form.js','/lib/bank-feed.js','/lib/insights.js',
   '/lib/reporting.js','/lib/xlsx.js','/lib/importer.js','/lib/legacy-excel.js','/lib/pdf.js','/lib/reports-ui.js'
 ];
@@ -229,6 +229,12 @@ async function runBackgroundSync(source='background-sync'){
 }
 
 self.addEventListener('message',event=>{
+  if(event.data?.type==='GET_UPDATE_INFO'){
+    const payload={type:'MONEY_TRACKER_UPDATE_INFO',version:self.MONEY_TRACKER_PWA.version,offlineDbVersion:self.MONEY_TRACKER_PWA.offlineDbVersion||null,minMigratableOfflineDbVersion:self.MONEY_TRACKER_PWA.minMigratableOfflineDbVersion||null};
+    if(event.ports?.[0])event.ports[0].postMessage(payload);
+    else event.source?.postMessage?.(payload);
+    return;
+  }
   if(event.data?.type==='SKIP_WAITING')self.skipWaiting();
   if(event.data?.type==='RUN_BACKGROUND_SYNC')event.waitUntil(runBackgroundSync('manual-worker'));
 });

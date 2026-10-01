@@ -857,7 +857,7 @@ function syncChange(entity,entityId,operation,payload=null){
   return {entity,entityId,operation,payload};
 }
 
-const SYNC_METRIC_KEYS=Object.freeze(['pushAccepted','pushReplayed','pushConflict','pushRejected','attachmentAccepted','attachmentReplayed','attachmentConflict','attachmentRejected','bankFeedAccepted','bankFeedReplayed','bankFeedConflict','bankFeedRejected','pulls','pullFullRefresh']);
+const SYNC_METRIC_KEYS=Object.freeze(['pushAccepted','pushReplayed','pushConflict','pushRejected','attachmentAccepted','attachmentReplayed','attachmentConflict','attachmentRejected','bankFeedAccepted','bankFeedReplayed','bankFeedConflict','bankFeedRejected','recurringAccepted','recurringReplayed','recurringConflict','recurringRejected','pulls','pullFullRefresh']);
 function bumpSyncMetric(metric){
   if(!SYNC_METRIC_KEYS.includes(metric))return;
   try{syncQ.bumpMetric.run(metric,nowIso());}catch{}
@@ -1162,6 +1162,86 @@ function applyBankFeedSyncOperation(user,raw){
   }
 }
 
+
+function cleanRecurringSyncOperation(raw){
+  const operationId=String(raw?.operationId||''),action=String(raw?.action||''),payload=raw?.payload&&typeof raw.payload==='object'?raw.payload:{};
+  const ruleId=String(raw?.ruleId||payload.id||''),reminderId=String(raw?.reminderId||payload.reminderId||''),baseUpdatedAt=String(raw?.baseUpdatedAt||'');
+  const allowed=new Set(['create','update','delete','post','skip','ack_reminder']);
+  if(!idOk(operationId,'op')||!allowed.has(action))throw ledgerError('Invalid recurring sync operation.');
+  if(action!=='ack_reminder'&&!idOk(ruleId,'rule'))throw ledgerError('Invalid recurring schedule.');
+  if(action==='ack_reminder'&&!/^reminder_[A-Za-z0-9_-]{1,180}$/.test(reminderId))throw ledgerError('Invalid recurring reminder.');
+  return {operationId,action,ruleId,reminderId,baseUpdatedAt,payload};
+}
+
+function recurringRuleChanged(current,op){
+  return Boolean(op.baseUpdatedAt&&String(current?.updatedAt||'')!==op.baseUpdatedAt);
+}
+
+function applyRecurringSyncOperation(user,raw){
+  const op=cleanRecurringSyncOperation(raw);
+  const requestHash=sha256(JSON.stringify({operationId:op.operationId,action:op.action,ruleId:op.ruleId,reminderId:op.reminderId,baseUpdatedAt:op.baseUpdatedAt,payload:op.payload}));
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const prior=syncQ.processedById.get(user.user_id,op.operationId);
+    if(prior){
+      if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
+      const result=JSON.parse(prior.resultJson||'{}');
+      db.exec('COMMIT');bumpSyncMetric('recurringReplayed');return {...result,alreadyProcessed:true};
+    }
+
+    let rule=null,entryId=null,reminderAcknowledged=false;
+    if(op.action==='create'){
+      if(Number(q.recurringCount.get(user.user_id)?.count||0)>=DATA_LIMITS.recurringRules)throw ledgerError('You can keep up to '+DATA_LIMITS.recurringRules.toLocaleString('en-US')+' recurring schedules.');
+      if(q.recurringRuleById.get(user.user_id,op.ruleId))throw ledgerError('That recurring schedule already exists.',409);
+      const clean=cleanRecurringRule({...op.payload,id:op.ruleId},user.user_id,user.default_currency);
+      const stamp=nowIso();
+      q.insertRecurring.run(user.user_id,clean.id,clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(templateToStorage(clean.template,accountCurrencyMap(user.user_id))),null,null,stamp,stamp);
+      rule=recurringRow(q.recurringRuleById.get(user.user_id,op.ruleId),user.user_id);
+    }else if(op.action==='ack_reminder'){
+      recurringReminders.process();
+      reminderAcknowledged=recurringReminders.acknowledge(user.user_id,op.reminderId);
+    }else{
+      const current=q.recurringRuleById.get(user.user_id,op.ruleId);
+      if(!current)throw ledgerError('Recurring schedule not found.',404);
+      if(recurringRuleChanged(current,op))throw ledgerError('This recurring schedule changed on another device.',409);
+
+      if(op.action==='update'){
+        const clean=cleanRecurringRule({...op.payload,id:op.ruleId},user.user_id,user.default_currency,{existing:current});
+        q.updateRecurring.run(clean.title,clean.frequency,clean.interval,clean.anchorDate,clean.nextDueDate,clean.endDate,clean.remindDaysBefore,clean.isActive?1:0,JSON.stringify(templateToStorage(clean.template,accountCurrencyMap(user.user_id))),nowIso(),user.user_id,op.ruleId);
+      }else if(op.action==='delete'){
+        q.deleteRecurring.run(user.user_id,op.ruleId);recurringReminders.deleteRule(user.user_id,op.ruleId);
+      }else if(op.action==='skip'){
+        const occurrenceDate=String(op.payload.occurrenceDate||'');
+        if(!validDate(occurrenceDate))throw ledgerError('Invalid recurring occurrence.');
+        if(!current.isActive)throw ledgerError('This recurring schedule is paused or complete.');
+        advanceRecurringRule(user.user_id,current,occurrenceDate,{posted:false});
+        recurringReminders.acknowledgeOccurrence(user.user_id,op.ruleId,occurrenceDate);
+      }else if(op.action==='post'){
+        const expected=Number(op.payload.expectedRevision),occurrenceDate=String(op.payload.occurrenceDate||''),transactionDate=String(op.payload.transactionDate||occurrenceDate);
+        if(!Number.isInteger(expected)||!validDate(occurrenceDate)||!validDate(transactionDate))throw ledgerError('Invalid recurring post request.');
+        if(!current.isActive)throw ledgerError('This recurring schedule is paused or complete.');
+        if(current.nextDueDate!==occurrenceDate)throw ledgerError('This occurrence was already handled on another device.',409);
+        if(Number(q.entryCount.get(user.user_id)?.count||0)>=DATA_LIMITS.entries)throw ledgerError('You can keep up to '+DATA_LIMITS.entries.toLocaleString('en-US')+' transactions.');
+        const storedTemplate=JSON.parse(current.templateJson||'{}');
+        const template=cleanRecurringTemplate(templateFromStorage(storedTemplate,accountCurrencyMap(user.user_id)),user.user_id,user.default_currency);
+        const bumped=q.bumpRevision.run(user.user_id,expected);
+        if(Number(bumped.changes)!==1)throw ledgerError('This ledger changed in another tab. Refresh and try again.',409);
+        const entry=recurringEntryFromTemplate(template,transactionDate);insertLedgerEntry(user.user_id,entry);entryId=entry.id;
+        advanceRecurringRule(user.user_id,current,occurrenceDate,{posted:true});
+        recurringReminders.acknowledgeOccurrence(user.user_id,op.ruleId,occurrenceDate);
+        syncQ.insertChange.run(user.user_id,expected+1,'entry',entry.id,'create',JSON.stringify(entry),nowIso());
+      }
+      if(op.action!=='delete')rule=recurringRow(q.recurringRuleById.get(user.user_id,op.ruleId),user.user_id);
+    }
+
+    const result={operationId:op.operationId,status:'accepted',action:op.action,ruleId:op.ruleId||null,reminderId:op.reminderId||null,rule,entryId,reminderAcknowledged,revision:Number(q.userById.get(user.user_id)?.revision)||0};
+    syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),nowIso());
+    db.exec('COMMIT');bumpSyncMetric('recurringAccepted');return result;
+  }catch(error){
+    db.exec('ROLLBACK');bumpSyncMetric(Number(error?.status)===409?'recurringConflict':'recurringRejected');throw error;
+  }
+}
+
 function pullSyncChanges(userId,sinceRevision){
   bumpSyncMetric('pulls');
   const current=Number(q.userById.get(userId)?.revision);
@@ -1218,7 +1298,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineWave100AVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -1360,6 +1440,12 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req,12_000_000);
       const result=applyBankFeedSyncOperation(a,body.operation);
+      return json(res,result.alreadyProcessed?200:201,result);
+    }
+    if(url.pathname==='/api/sync/recurring'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req);
+      const result=applyRecurringSyncOperation(a,body.operation);
       return json(res,result.alreadyProcessed?200:201,result);
     }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){

@@ -95,8 +95,9 @@ test('Wave 100G uses indexed offline schema v8 and bounded sync delta history',(
 test('Wave 100G production and CI contracts are wired',()=>{
   const doc=read('docs/WAVE_100G_SCALE_LONGEVITY.md'),version=read('pwa-version.js'),server=read('server.mjs'),smoke=read('lib/production-smoke.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml');
   for(const marker of ['50,000 ledger transactions','10,000 attachments','IndexedDB v8','10,000 ledger revisions','full refresh'])assert.ok(doc.includes(marker),marker);
-  assert.match(version,/version:37/);
-  assert.match(version,/cacheName:'money-tracker-debt-v37'/);
+  const shellVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(shellVersion>=37,'Wave 100G requires PWA shell v37 or newer.');
+  assert.match(version,/cacheName:'money-tracker-debt-v\d+'/);
   assert.match(version,/offlineDbVersion:8/);
   assert.match(server,/offlineWave100GVersion:1/);
   assert.match(server,/syncChangeRevisions:DATA_LIMITS\.syncChangeRevisions/);

@@ -23,6 +23,7 @@ test('O7 stores conflict bases and supports automatic rebase plus explicit resol
   assert.match(offline,/strategy==='keep_server'/);
   assert.match(offline,/strategy==='keep_mine'/);
   assert.match(store,/sameConflictRecord/);
+  assert.match(store,/key==='updatedAt'/);
   assert.match(store,/changed before the offline change could sync/);
   assert.match(store,/await rebaseQueuedOperations\(fresh,identity\)/);
   assert.match(store,/export async function resolveSyncConflict/);
@@ -73,10 +74,15 @@ test('O10 has a separate durable idempotent attachment outbox',()=>{
   assert.match(offline,/row\.operation==='create'[\s\S]*?item\.operation==='delete'[\s\S]*?store\.delete\(operationId\)/);
   assert.match(offline,/pendingOperationCount[\s\S]*?attachmentQueuedRows/);
   assert.match(store,/syncAttachmentOperations/);
+  assert.match(store,/const claimed=await updateAttachmentQueue/);
+  assert.match(store,/if\(!claimed\)continue/);
+  assert.match(store,/const finalIntent=\(await listAttachmentQueue\(identity\)\)\.find/);
   assert.match(store,/\/api\/sync\/attachments/);
   assert.match(store,/queueOfflineAttachmentCreate/);
   assert.match(store,/localUrl/);
   assert.match(server,/function applyAttachmentSyncOperation/);
+  assert.match(server,/tombstoneByEntity\.get\(user\.user_id,'attachment'/);
+  assert.match(server,/upsertTombstone\.run\(user\.user_id,'attachment'/);
   assert.match(server,/processedById/);
   assert.match(server,/url\.pathname==='\/api\/sync\/attachments'/);
   assert.match(app,/queued/);

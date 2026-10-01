@@ -80,7 +80,8 @@ test('O18 publishes update schema metadata and blocks activation around unsynced
   const pwa=read('lib/pwa.js'),sw=read('service-worker.js'),version=read('pwa-version.js'),app=read('app.js');
   const shellVersion=Number(version.match(/version:(\d+)/)?.[1]||0);
   assert.ok(shellVersion>=29);
-  assert.match(version,/offlineDbVersion:7/);
+  const offlineDbVersion=Number(/offlineDbVersion:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(offlineDbVersion>=7);
   assert.match(version,/minMigratableOfflineDbVersion:1/);
   assert.match(sw,/GET_UPDATE_INFO/);
   assert.match(sw,/offlineDbVersion:self\.MONEY_TRACKER_PWA\.offlineDbVersion/);
@@ -99,7 +100,8 @@ test('O18 publishes update schema metadata and blocks activation around unsynced
 
 test('O19 migrations remain intact after the additive v5 Bank Feed extension',()=>{
   const offline=read('lib/offline-db.js');
-  assert.match(offline,/version: 7/);
+  const dbVersion=Number(/version: (\d+)/.exec(offline)?.[1]||0);
+  assert.ok(dbVersion>=7);
   assert.match(offline,/fromVersion<1/);
   assert.match(offline,/fromVersion<2/);
   assert.match(offline,/fromVersion<3/);

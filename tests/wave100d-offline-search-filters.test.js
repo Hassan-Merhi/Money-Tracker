@@ -68,7 +68,8 @@ test('Wave 100D UI, production and CI contracts are wired',()=>{
   const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
   assert.ok(pwaVersion>=34,`Wave 100D requires PWA v34 or newer; found v${pwaVersion}.`);
   assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
-  assert.match(version,/offlineDbVersion:7/);
+  const offlineDbVersion=Number(/offlineDbVersion:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(offlineDbVersion>=7);
   assert.match(sw,/\/lib\/offline-query\.js/);
   assert.equal(pkg.scripts['test:wave100d'],'node --test tests/wave100d-offline-search-filters.test.js');
   assert.equal(pkg.scripts['test:wave100d-e2e'],'playwright test e2e/wave100d-offline-search-filters.spec.mjs --workers=1');

@@ -249,7 +249,15 @@ const q = {
   deleteEntry: db.prepare('DELETE FROM entries WHERE user_id=? AND id=?'),
   entryCount: db.prepare('SELECT COUNT(*) AS count FROM entries WHERE user_id=?'),
   entryExists: db.prepare('SELECT id FROM entries WHERE user_id=? AND id=?'),
-  attachmentCounts: db.prepare('SELECT entry_id AS entryId, COUNT(*) AS count FROM attachments WHERE user_id=? GROUP BY entry_id'),
+  entryUsesPerson: db.prepare(`SELECT 1 FROM entries e
+    WHERE e.user_id=? AND (
+      e.person_id=? OR
+      (e.type='split_paid_for_people' AND EXISTS (
+        SELECT 1 FROM json_each(e.split_json) split
+        WHERE json_extract(split.value,'$.personId')=?
+      ))
+    ) LIMIT 1`),
+  entryUsesAccount: db.prepare('SELECT 1 FROM entries WHERE user_id=? AND (account_id=? OR from_account_id=? OR to_account_id=?) LIMIT 1'),
   attachmentUsage: db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(size_bytes),0) AS bytes FROM attachments WHERE user_id=?'),
   attachmentRefs: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? ORDER BY created_at'),
   attachmentsForEntry: db.prepare('SELECT id,entry_id AS entryId,name,mime_type AS mimeType,size_bytes AS sizeBytes,created_at AS createdAt FROM attachments WHERE user_id=? AND entry_id=? ORDER BY created_at'),
@@ -284,7 +292,9 @@ const syncQ={
   deleteTombstone:db.prepare('DELETE FROM sync_tombstones WHERE user_id=? AND entity=? AND entity_id=?'),
   bumpMetric:db.prepare(`INSERT INTO sync_metrics(metric,count,last_at) VALUES(?,1,?)
     ON CONFLICT(metric) DO UPDATE SET count=sync_metrics.count+1,last_at=excluded.last_at`),
-  metricRows:db.prepare('SELECT metric,count,last_at AS lastAt FROM sync_metrics ORDER BY metric')
+  metricRows:db.prepare('SELECT metric,count,last_at AS lastAt FROM sync_metrics ORDER BY metric'),
+  deleteChangesThrough:db.prepare('DELETE FROM sync_changes WHERE user_id=? AND revision<=?'),
+  changeCount:db.prepare('SELECT COUNT(*) AS count, MIN(revision) AS minRevision, MAX(revision) AS maxRevision FROM sync_changes WHERE user_id=?')
 };
 
 const bankFeed = createBankFeedService(db);
@@ -673,14 +683,18 @@ function advanceRecurringRule(userId,row,occurrenceDate,{posted=false}={}) {
 function loadState(userId) {
   const u=q.userById.get(userId); if(!u) return null;
   insights.ensureDefaults(userId);
-  const counts=new Map(q.attachmentCounts.all(userId).map(row=>[row.entryId,Number(row.count||0)]));
-  const attachmentMap=new Map();for(const row of q.attachmentRefs.all(userId)){if(!attachmentMap.has(row.entryId))attachmentMap.set(row.entryId,[]);attachmentMap.get(row.entryId).push({id:row.id,name:row.name,mimeType:row.mimeType,sizeBytes:Number(row.sizeBytes||0),createdAt:row.createdAt});}
+  const attachmentMap=new Map();
+  for(const row of q.attachmentRefs.all(userId)){
+    if(!attachmentMap.has(row.entryId))attachmentMap.set(row.entryId,[]);
+    attachmentMap.get(row.entryId).push({id:row.id,name:row.name,mimeType:row.mimeType,sizeBytes:Number(row.sizeBytes||0),createdAt:row.createdAt});
+  }
   const accounts=q.accounts.all(userId).map(accountFromStorage);
   const accountById=new Map(accounts.map(row=>[row.id,row]));
   const entries=q.entries.all(userId).map(row=>{
     const api=entryFromStorage(row,accountById);
     const {splitJson,amountMinor,fromAmountMinor,toAmountMinor,signedAmountMinor,...entry}=api;
-    return {...entry,attachmentCount:counts.get(row.id)||0,attachments:attachmentMap.get(row.id)||[]};
+    const attachments=attachmentMap.get(row.id)||[];
+    return {...entry,attachmentCount:attachments.length,attachments};
   });
   const meta=insights.list(userId);
   return {version:u.revision,settings:{displayName:u.display_name,defaultCurrency:u.default_currency,appMode:u.app_mode||'simple',timezone:u.timezone||'UTC'},people:q.people.all(userId),accounts,entries,categories:meta.categories,budgets:meta.budgets};
@@ -813,10 +827,10 @@ function currentEntry(userId,id){
   return entry;
 }
 function personUsedByEntry(userId,id){
-  return loadState(userId).entries.some(entry=>entry.personId===id||(entry.type==='split_paid_for_people'&&(entry.splits||[]).some(split=>split.personId===id)));
+  return Boolean(q.entryUsesPerson.get(userId,id,id));
 }
 function accountUsedByEntry(userId,id){
-  return loadState(userId).entries.some(entry=>entry.accountId===id||entry.fromAccountId===id||entry.toAccountId===id);
+  return Boolean(q.entryUsesAccount.get(userId,id,id,id));
 }
 function personUsedByRecurring(userId,id){
   return loadRecurringRules(userId).some(rule=>rule.template?.personId===id||(rule.template?.type==='split_paid_for_people'&&(rule.template?.splits||[]).some(split=>split.personId===id)));
@@ -1038,6 +1052,8 @@ function applySyncOperation(user,raw){
         stamp
       );
     }
+    const pruneThrough=revision-DATA_LIMITS.syncChangeRevisions;
+    if(pruneThrough>0)syncQ.deleteChangesThrough.run(user.user_id,pruneThrough);
     const result={operationId:op.operationId,status:'accepted',revision,reopenedFeedItems};
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');
@@ -1230,6 +1246,7 @@ function applyRecurringSyncOperation(user,raw){
         advanceRecurringRule(user.user_id,current,occurrenceDate,{posted:true});
         recurringReminders.acknowledgeOccurrence(user.user_id,op.ruleId,occurrenceDate);
         syncQ.insertChange.run(user.user_id,expected+1,'entry',entry.id,'create',JSON.stringify(entry),nowIso());
+        const pruneThrough=(expected+1)-DATA_LIMITS.syncChangeRevisions;if(pruneThrough>0)syncQ.deleteChangesThrough.run(user.user_id,pruneThrough);
       }
       if(op.action!=='delete')rule=recurringRow(q.recurringRuleById.get(user.user_id,op.ruleId),user.user_id);
     }
@@ -1298,7 +1315,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineWave100CVersion:1,offlineWave100DVersion:1,offlineWave100EVersion:1,offlineWave100FVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineWave100AVersion:1,offlineWave100BVersion:1,offlineWave100CVersion:1,offlineWave100DVersion:1,offlineWave100EVersion:1,offlineWave100FVersion:1,offlineWave100GVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{people:DATA_LIMITS.people,accounts:DATA_LIMITS.accounts,entries:DATA_LIMITS.entries,attachments:DATA_LIMITS.attachments,attachmentBytes:DATA_LIMITS.attachmentBytes,bankFeedItems:DATA_LIMITS.bankFeedItems,syncChangeRevisions:DATA_LIMITS.syncChangeRevisions},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }

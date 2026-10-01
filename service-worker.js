@@ -10,7 +10,7 @@ const CORE=[
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg','/assets/icon-192.png','/assets/icon-512.png',
   '/lib/ledger.js','/lib/money.js','/lib/money-parse.js','/lib/fx.js','/lib/store.js','/lib/offline-db.js','/lib/offline-query.js','/lib/offline-recovery.js','/lib/offline-lifecycle.js','/lib/utils.js','/lib/pwa.js',
-  '/lib/recurring.js','/lib/recurring-rule-form.js','/lib/bank-feed.js','/lib/insights.js',
+  '/lib/recurring.js','/lib/recurring-rule-form.js','/lib/bank-feed.js','/lib/xlsx-browser.js','/lib/insights.js',
   '/lib/reporting.js','/lib/xlsx.js','/lib/importer.js','/lib/legacy-excel.js','/lib/pdf.js','/lib/reports-ui.js'
 ];
 

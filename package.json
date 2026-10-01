@@ -48,7 +48,9 @@
     "test:wave100g": "node --test tests/wave100g-scale-longevity.test.js tests/wave100g-scale-server.test.js",
     "test:wave100g-e2e": "playwright test e2e/wave100g-scale-longevity.spec.mjs --workers=1",
     "test:wave100h": "node --test tests/wave100h-offline-completeness.test.js",
-    "test:wave100h-e2e": "playwright test e2e/wave100h-offline-xlsx.spec.mjs --workers=1"
+    "test:wave100h-e2e": "playwright test e2e/wave100h-offline-xlsx.spec.mjs --workers=1",
+    "test:wave100i": "node --test tests/wave100i-offline-import-migration.test.js",
+    "test:wave100i-e2e": "playwright test e2e/wave100i-offline-import-migration.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

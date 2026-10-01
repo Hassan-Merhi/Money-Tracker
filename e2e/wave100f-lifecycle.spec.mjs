@@ -45,21 +45,53 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   });
   await expect(pageB.locator('#main')).toContainText('Peer Refresh Person');
 
-  let slowPushes=0;
-  const slowPush=async route=>{
-    slowPushes++;
-    await new Promise(resolve=>setTimeout(resolve,350));
-    await route.continue();
-  };
-  await pageA.route('**/api/sync/push',slowPush);
-  await pageB.route('**/api/sync/push',slowPush);
-  const syncA=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-first-tab'});});
+  const queuedBeforeRace=await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    return (await store.getSyncStatus()).queue.filter(row=>row.entityId==='person_wave100f_peer'&&row.status==='pending').length;
+  });
+  expect(queuedBeforeRace).toBe(1);
+
+  // Prove the per-account Web Lock is shared by both tabs. The second tab
+  // must not enter until the first tab releases the deliberately held lock.
+  const lockA=pageA.evaluate(async()=>{
+    const lifecycle=await import('/lib/offline-lifecycle.js');
+    const db=await import('/lib/offline-db.js');
+    const user=await db.loadAuthorizedUser(),identity=user.id||user.email;
+    return await lifecycle.withOfflineSyncLock(identity,async()=>{
+      localStorage.setItem('wave100f-lock-order','A');
+      await new Promise(resolve=>setTimeout(resolve,350));
+      return localStorage.getItem('wave100f-lock-order');
+    });
+  });
   await pageA.waitForTimeout(60);
+  const lockB=pageB.evaluate(async()=>{
+    const lifecycle=await import('/lib/offline-lifecycle.js');
+    const db=await import('/lib/offline-db.js');
+    const user=await db.loadAuthorizedUser(),identity=user.id||user.email;
+    return await lifecycle.withOfflineSyncLock(identity,async()=>{
+      const before=localStorage.getItem('wave100f-lock-order');
+      localStorage.setItem('wave100f-lock-order','B');
+      return before;
+    });
+  });
+  const [aSaw,bSaw]=await Promise.all([lockA,lockB]);
+  expect(aSaw).toBe('A');
+  expect(bSaw).toBe('A');
+
+  const syncA=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-first-tab'});});
+  await pageA.waitForTimeout(40);
   const syncB=pageB.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-second-tab'});});
   await Promise.all([syncA,syncB]);
-  await pageA.unroute('**/api/sync/push');
-  await pageB.unroute('**/api/sync/push');
-  expect(slowPushes).toBe(1);
+  const multiTabResult=await pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const status=await store.getSyncStatus();
+    const server=await (await fetch('/api/state',{credentials:'same-origin',cache:'no-store'})).json();
+    return {
+      serverCount:server.people.filter(row=>row.id==='person_wave100f_peer').length,
+      pending:status.queue.filter(row=>row.entityId==='person_wave100f_peer'&&['pending','failed','conflict'].includes(row.status)).length
+    };
+  });
+  expect(multiTabResult).toEqual({serverCount:1,pending:0});
 
   await pageA.evaluate(async()=>{
     const db=await import('/lib/offline-db.js');

@@ -1052,6 +1052,8 @@ function applySyncOperation(user,raw){
         stamp
       );
     }
+    const pruneThrough=revision-DATA_LIMITS.syncChangeRevisions;
+    if(pruneThrough>0)syncQ.deleteChangesThrough.run(user.user_id,pruneThrough);
     const result={operationId:op.operationId,status:'accepted',revision,reopenedFeedItems};
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');

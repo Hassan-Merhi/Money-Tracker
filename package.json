@@ -36,7 +36,9 @@
     "test:wave100a": "node --test tests/wave100a-offline-bank-feed.test.js tests/bank-feed-server.test.js",
     "test:wave100a-e2e": "playwright test e2e/wave100a-offline-bank-feed.spec.mjs --workers=1",
     "test:wave100b": "node --test tests/wave100b-offline-recurring.test.js tests/wave100b-recurring-server.test.js",
-    "test:wave100b-e2e": "playwright test e2e/wave100b-offline-recurring.spec.mjs --workers=1"
+    "test:wave100b-e2e": "playwright test e2e/wave100b-offline-recurring.spec.mjs --workers=1",
+    "test:wave100c": "node --test tests/wave100c-offline-attachment-cache.test.js",
+    "test:wave100c-e2e": "playwright test e2e/wave100c-offline-attachment-cache.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

@@ -32,7 +32,7 @@ async function loginStore(page){
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
 }
 
-test('Wave 100C: v6 attachment rows migrate safely to v7 policy metadata',async({browser})=>{
+test('Wave 100C: v6 attachment rows migrate safely through the current policy schema',async({browser})=>{
   const context=await browser.newContext();
   const page=await context.newPage();
   await page.goto('/pwa-version.js');

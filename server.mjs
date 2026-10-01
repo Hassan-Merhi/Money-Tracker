@@ -857,7 +857,7 @@ function syncChange(entity,entityId,operation,payload=null){
   return {entity,entityId,operation,payload};
 }
 
-const SYNC_METRIC_KEYS=Object.freeze(['pushAccepted','pushReplayed','pushConflict','pushRejected','attachmentAccepted','attachmentReplayed','attachmentConflict','attachmentRejected','pulls','pullFullRefresh']);
+const SYNC_METRIC_KEYS=Object.freeze(['pushAccepted','pushReplayed','pushConflict','pushRejected','attachmentAccepted','attachmentReplayed','attachmentConflict','attachmentRejected','bankFeedAccepted','bankFeedReplayed','bankFeedConflict','bankFeedRejected','pulls','pullFullRefresh']);
 function bumpSyncMetric(metric){
   if(!SYNC_METRIC_KEYS.includes(metric))return;
   try{syncQ.bumpMetric.run(metric,nowIso());}catch{}
@@ -1118,6 +1118,50 @@ function applyAttachmentSyncOperation(user,raw){
   }
 }
 
+
+function cleanBankFeedSyncOperation(raw){
+  const operationId=String(raw?.operationId||''),action=String(raw?.action||''),itemId=String(raw?.itemId||''),ruleId=String(raw?.ruleId||raw?.payload?.id||''),payload=raw?.payload&&typeof raw.payload==='object'?raw.payload:{};
+  const allowed=new Set(['import','post','undo','ignore','reopen','delete','create_rule','delete_rule']);
+  if(!idOk(operationId,'op')||!allowed.has(action))throw ledgerError('Invalid Bank Feed sync operation.');
+  if(['post','undo','ignore','reopen','delete'].includes(action)&&!idOk(itemId,'bank'))throw ledgerError('Invalid Bank Feed item.');
+  if(['create_rule','delete_rule'].includes(action)&&!/^bankrule_[A-Za-z0-9_-]{1,70}$/.test(ruleId))throw ledgerError('Invalid Bank Feed rule.');
+  return {operationId,action,itemId,ruleId,payload};
+}
+
+function applyBankFeedSyncOperation(user,raw){
+  const op=cleanBankFeedSyncOperation(raw);
+  const requestHash=sha256(JSON.stringify({operationId:op.operationId,action:op.action,itemId:op.itemId,ruleId:op.ruleId,payload:op.payload}));
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const prior=syncQ.processedById.get(user.user_id,op.operationId);
+    if(prior){
+      if(prior.requestHash!==requestHash)throw ledgerError('This sync operation id was already used for different data.',409);
+      const result=JSON.parse(prior.resultJson||'{}');
+      db.exec('COMMIT');bumpSyncMetric('bankFeedReplayed');return {...result,alreadyProcessed:true};
+    }
+    let rawResult={};
+    if(op.action==='import')rawResult=bankFeed.importRows(user.user_id,op.payload,{externalTransaction:true});
+    else if(op.action==='post')rawResult=bankFeed.post(user.user_id,op.itemId,op.payload,{externalTransaction:true});
+    else if(op.action==='undo')rawResult=bankFeed.undo(user.user_id,op.itemId,op.payload,{externalTransaction:true});
+    else if(op.action==='ignore')rawResult=bankFeed.ignore(user.user_id,op.itemId);
+    else if(op.action==='reopen')rawResult=bankFeed.reopen(user.user_id,op.itemId);
+    else if(op.action==='delete')rawResult=bankFeed.remove(user.user_id,op.itemId);
+    else if(op.action==='create_rule')rawResult={rule:bankFeed.createRule(user.user_id,{...op.payload,id:op.ruleId})};
+    else if(op.action==='delete_rule')rawResult=bankFeed.deleteRule(user.user_id,op.ruleId);
+    const result={
+      operationId:op.operationId,status:'accepted',action:op.action,
+      revision:Number(q.userById.get(user.user_id)?.revision)||0,
+      entryId:rawResult.entryId||null,linkedExistingTransfer:Boolean(rawResult.linkedExistingTransfer),
+      reopenedItems:Number(rawResult.reopenedItems||0),rule:rawResult.rule||null,
+      batchId:rawResult.batchId||null,imported:Number(rawResult.imported||0),skipped:Number(rawResult.skipped||0),invalid:Number(rawResult.invalid||0)
+    };
+    syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),nowIso());
+    db.exec('COMMIT');bumpSyncMetric('bankFeedAccepted');return result;
+  }catch(error){
+    db.exec('ROLLBACK');bumpSyncMetric(Number(error?.status)===409?'bankFeedConflict':'bankFeedRejected');throw error;
+  }
+}
+
 function pullSyncChanges(userId,sinceRevision){
   bumpSyncMetric('pulls');
   const current=Number(q.userById.get(userId)?.revision);
@@ -1174,7 +1218,7 @@ export const server=http.createServer(async(req,res)=>{
   const requestId=randomUUID();res.setHeader('X-Request-Id',requestId);
   try{
     const url=new URL(req.url,'http://localhost');
-    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
+    if(url.pathname==='/api/health'){const runtime=runtimeOps.diagnostics();const quarantine=getMigrationQuarantineStats(db);return json(res,runtime.ok?200:503,{ok:runtime.ok,moneySchemaVersion:exactMoneySchemaVersion(db),moneyStorage:'integer-minor-units',ledgerApiVersion:1,fullBackupVersion:2,durableRateLimits:true,laneBVersion:1,laneCVersion:1,laneDVersion:1,offlineBlockBVersion:1,offlineBlockCVersion:1,offlineBlockDVersion:1,offlineBlockEVersion:1,offlineBlockFVersion:1,offlineWave100AVersion:1,offlineSyncMonitor:offlineSyncMonitor(),wave13Version:1,buildVersion:BUILD_VERSION,deployment:DEPLOYMENT_INFO,pwaCacheVersion:PWA_CACHE_VERSION,pwaCacheName:PWA_CACHE_NAME,dataLimits:{bankFeedItems:DATA_LIMITS.bankFeedItems,attachmentBytes:DATA_LIMITS.attachmentBytes},recurringWorker:recurringReminders.status(),runtime,migrationQuarantine:quarantine});}
     if(url.pathname==='/api/auth/status'&&req.method==='GET'){
       return json(res,200,{registrationOpen:Number(q.userCount.get()?.count||0)===0});
     }
@@ -1310,6 +1354,12 @@ export const server=http.createServer(async(req,res)=>{
       const a=requireAuth(req,res,{csrf:true});if(!a)return;
       const body=await bodyJson(req,ATTACHMENT_BODY_LIMIT);
       const result=applyAttachmentSyncOperation(a,body.operation);
+      return json(res,result.alreadyProcessed?200:201,result);
+    }
+    if(url.pathname==='/api/sync/bank-feed'&&req.method==='POST'){
+      const a=requireAuth(req,res,{csrf:true});if(!a)return;
+      const body=await bodyJson(req,12_000_000);
+      const result=applyBankFeedSyncOperation(a,body.operation);
       return json(res,result.alreadyProcessed?200:201,result);
     }
     if(url.pathname==='/api/settings'&&req.method==='PUT'){

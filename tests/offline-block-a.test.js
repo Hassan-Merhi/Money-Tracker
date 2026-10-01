@@ -76,11 +76,12 @@ test('Offline Block A O3: authenticated reads are identity-bound and 401 respons
   assert.match(store,/adoptAuthenticatedUser/);
 });
 
-test('Offline Block A cached-read foundation remains intact after Block B adds writes',()=>{
+test('Offline Block A cached-read foundation remains intact as later waves add offline features',()=>{
   const app=read('app.js');
   assert.doesNotMatch(app,/Offline mode is read-only for now/);
   assert.ok(app.includes('Offline · changes save locally'));
-  assert.ok(app.includes("renderOfflineServerFeature(main,'Bank Feed'"));
+  assert.match(app,/route\.page === 'bank'\) renderBankFeedPage/);
+  assert.doesNotMatch(app,/Bank Feed remains server-only/);
   assert.ok(app.includes("renderOfflineServerFeature(main,'Scheduled & Reminders'"));
   assert.match(app,/cached ledger remains available in Dashboard, People, Accounts, Activity, Insights and Reports/i);
 });

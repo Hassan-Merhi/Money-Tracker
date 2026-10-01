@@ -46,16 +46,19 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   await expect(pageB.locator('#main')).toContainText('Peer Refresh Person');
 
   let slowPushes=0;
-  await context.route('**/api/sync/push',async route=>{
+  const slowPush=async route=>{
     slowPushes++;
     await new Promise(resolve=>setTimeout(resolve,350));
     await route.continue();
-  });
+  };
+  await pageA.route('**/api/sync/push',slowPush);
+  await pageB.route('**/api/sync/push',slowPush);
   const syncA=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-first-tab'});});
   await pageA.waitForTimeout(60);
   const syncB=pageB.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-second-tab'});});
   await Promise.all([syncA,syncB]);
-  await context.unroute('**/api/sync/push');
+  await pageA.unroute('**/api/sync/push');
+  await pageB.unroute('**/api/sync/push');
   expect(slowPushes).toBe(1);
 
   await pageA.evaluate(async()=>{

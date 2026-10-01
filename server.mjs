@@ -1061,6 +1061,7 @@ function applyAttachmentSyncOperation(user,raw){
     let result;
     if(op.operation==='create'){
       if(!q.entryExists.get(user.user_id,op.entryId))throw ledgerError('The transaction for this attachment no longer exists.',409);
+      if(syncQ.tombstoneByEntity.get(user.user_id,'attachment',op.attachmentId))throw ledgerError('This attachment was deleted before. Add the file again as a new attachment.',409);
       if(q.attachmentById.get(user.user_id,op.attachmentId))throw ledgerError('That attachment id already exists.',409);
       const name=safeStr(op.payload.name,180),mimeType=String(op.payload.mimeType||'application/octet-stream').toLowerCase();
       if(!name||!ALLOWED_ATTACHMENT_TYPES.has(mimeType))throw ledgerError('Use a JPG, PNG, WebP, GIF, PDF, or text file.');
@@ -1075,6 +1076,7 @@ function applyAttachmentSyncOperation(user,raw){
     }else{
       const existing=q.attachmentById.get(user.user_id,op.attachmentId);
       if(existing)q.deleteAttachment.run(user.user_id,op.attachmentId);
+      syncQ.upsertTombstone.run(user.user_id,'attachment',op.attachmentId,Number(q.userById.get(user.user_id)?.revision)||0,nowIso());
       result={operationId:op.operationId,status:'accepted',deleted:true,attachmentId:op.attachmentId,missing:!existing};
     }
 
@@ -1446,6 +1448,7 @@ export const server=http.createServer(async(req,res)=>{
       const id=decodeURIComponent(url.pathname.slice('/api/attachments/'.length));
       const result=q.deleteAttachment.run(a.user_id,id);
       if(!Number(result.changes))return fail(res,404,'Attachment not found.');
+      syncQ.upsertTombstone.run(a.user_id,'attachment',id,Number(q.userById.get(a.user_id)?.revision)||0,nowIso());
       return json(res,200,{ok:true});
     }
 

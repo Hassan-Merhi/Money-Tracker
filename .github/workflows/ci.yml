@@ -40,6 +40,8 @@ jobs:
         run: npm run test:wave100d
       - name: Run Wave 100E Offline Recovery Restore gate
         run: npm run test:wave100e
+      - name: Run Wave 100F Hostile Connectivity & Lifecycle gate
+        run: npm run test:wave100f
       - name: Run Wave 4 desktop/tablet gate
         run: npm run test:wave4
       - name: Run Lane D release gate
@@ -111,8 +113,10 @@ jobs:
           node --check e2e/wave100c-offline-attachment-cache.spec.mjs
           node --check e2e/wave100d-offline-search-filters.spec.mjs
           node --check e2e/wave100e-offline-recovery-restore.spec.mjs
+          node --check e2e/wave100f-hostile-connectivity-lifecycle.spec.mjs
           node --check lib/offline-query.js
           node --check lib/offline-recovery.js
+          node --check lib/offline-lifecycle.js
           node --check e2e/wave14-fixture.mjs
           node --check e2e/visual-audit-matrix.spec.mjs
           node --check e2e/visual-audit-states.spec.mjs
@@ -157,6 +161,8 @@ jobs:
         run: npm run test:wave100d-e2e
       - name: Run Wave 100E Offline Recovery Restore browser gate
         run: npm run test:wave100e-e2e
+      - name: Run Wave 100F Hostile Connectivity & Lifecycle browser gate
+        run: npm run test:wave100f-e2e
       - name: Run Wave 14 visual audit
         run: npm run test:wave14
       - name: Upload Wave 14 visual audit

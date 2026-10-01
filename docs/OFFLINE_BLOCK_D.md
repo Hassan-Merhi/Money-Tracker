@@ -54,7 +54,7 @@ Guaranteed foreground triggers:
 - window focus;
 - visibility returning to visible.
 
-Where the Background Sync API exists, Money Tracker registers `money-tracker-sync`. The service worker relays background/periodic sync events to active app clients. Platforms without Background Sync use the foreground resume triggers above.
+Where the Background Sync API exists, Money Tracker registers `money-tracker-sync`. The service worker authenticates with the existing same-origin session, keeps the returned CSRF token only in worker memory, and can push pending ledger and attachment operations directly from IndexedDB even when no app window is open. It stops on stale/conflicted work so the foreground O7 resolver can make the decision, and signals any open clients after completion. Platforms without Background Sync use the foreground resume triggers above.
 
 All retry paths keep O6 idempotency keys and O7 conflict detection intact.
 
@@ -69,6 +69,6 @@ Block D is complete when all of the following are green:
 - retry/export/discard recovery paths are available;
 - multiple resume signals cannot create parallel sync runs;
 - reconnect/resume drains a valid queue;
-- service-worker sync hooks are installed without caching authenticated API responses;
+- service-worker sync hooks can drain safe queued writes without an open window and still never cache authenticated API responses;
 - Offline Blocks A–C remain green;
 - full accounting, release, browser, visual, post-merge CI, and production smoke gates pass.

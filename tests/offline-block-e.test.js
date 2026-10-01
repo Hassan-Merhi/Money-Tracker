@@ -78,7 +78,8 @@ test('O17 exposes recorded FX in snapshot, transaction export, workbook and PDF 
 
 test('O18 publishes update schema metadata and blocks activation around unsynced work',()=>{
   const pwa=read('lib/pwa.js'),sw=read('service-worker.js'),version=read('pwa-version.js'),app=read('app.js');
-  assert.match(version,/version:29/);
+  const shellVersion=Number(version.match(/version:(\d+)/)?.[1]||0);
+  assert.ok(shellVersion>=29);
   assert.match(version,/offlineDbVersion:4/);
   assert.match(version,/minMigratableOfflineDbVersion:1/);
   assert.match(sw,/GET_UPDATE_INFO/);
@@ -87,9 +88,13 @@ test('O18 publishes update schema metadata and blocks activation around unsynced
   assert.match(pwa,/waitingWorkerInfo/);
   assert.match(pwa,/pendingCount/);
   assert.match(pwa,/Sync or resolve queued offline changes before updating the app/);
-  assert.match(pwa,/current<minimum/);
+  assert.match(pwa,/metadataValid/);
+  assert.match(pwa,/targetDb>=currentDb/);
+  assert.match(pwa,/updateInfo\.compatible!==true/);
+  assert.match(pwa,/could not verify this update/);
   assert.match(app,/pendingCount:syncInfo\.pending/);
   assert.match(app,/Sync before update/);
+  assert.match(app,/Update blocked/);
 });
 
 test('O19 uses explicit additive v1-v4 migrations with post-open FX backfill',()=>{
@@ -106,6 +111,7 @@ test('O19 uses explicit additive v1-v4 migrations with post-open FX backfill',()
   assert.match(offline,/export async function offlineSchemaInfo/);
   assert.match(offline,/export async function offlineFxRates/);
   assert.match(offline,/applyPulledChanges[\s\S]*?rebuildFxRateCache\(identity\)/);
+  assert.match(offline,/rebaseQueuedOperations[\s\S]*?await rebuildFxRateCache\(identity\)/);
   assert.match(offline,/strategy:'retained-after-user-clear'/);
 });
 

@@ -30,7 +30,7 @@ test('Wave 100A adds IndexedDB v5 Bank Feed cache and outbox to data-loss guards
 });
 
 test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions foreground-authoritative',()=>{
-  const server=read('server.mjs'),store=read('lib/store.js'),sw=read('service-worker.js');
+  const server=read('server.mjs'),store=read('lib/store.js'),sw=read('service-worker.js'),app=read('app.js');
   assert.match(server,/function applyBankFeedSyncOperation/);
   assert.match(server,/requestHash!==requestHash/);
   assert.match(server,/\/api\/sync\/bank-feed/);
@@ -43,6 +43,8 @@ test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions fore
   assert.match(sw,/background-bank-feed-ledger/);
   assert.match(sw,/\['post','undo'\]\.includes\(operation\.action\)/);
   assert.match(sw,/\/api\/sync\/bank-feed/);
+  assert.match(app,/route\.page === 'bank'\) renderBankFeedPage/);
+  assert.doesNotMatch(app,/Bank Feed remains server-only/);
 });
 
 test('Wave 100A PWA schema and CI gates are wired',()=>{

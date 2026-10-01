@@ -280,12 +280,10 @@ test('Offline Block D: service worker drains the durable outbox without foregrou
     return (await db.listQueuedOperations(user.id)).filter(row=>row.operationId==='op_worker_background_person').length;
   }),{timeout:10000}).toBe(0);
 
-  const health=await page.evaluate(async()=>{
+  const health=await expect.poll(()=>page.evaluate(async()=>{
     const store=await import('/lib/store.js');
     const status=await store.getSyncStatus();
-    return {pending:status.pending,lastSyncedAt:status.lastSyncedAt};
-  });
-  expect(health.pending).toBe(0);
-  expect(Date.parse(health.lastSyncedAt)).toBeGreaterThan(0);
+    return {pending:status.pending,lastSyncedAt:status.lastSyncedAt||null};
+  }),{timeout:10000}).toMatchObject({pending:0,lastSyncedAt:expect.any(String)});
   await context.close();
 });

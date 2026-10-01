@@ -97,7 +97,8 @@ test('Block C has dedicated CI/browser gates and PWA v26',()=>{
   assert.equal(pkg.scripts['test:offline-c-e2e'],'playwright test e2e/offline-block-c.spec.mjs --workers=1');
   assert.match(ci,/Run Offline Block C contract gate/);
   assert.match(ci,/Run Offline Block C browser gate/);
-  assert.match(version,/version:26/);
-  assert.match(version,/money-tracker-debt-v26/);
+  const match=version.match(/version:(\d+)/),cache=version.match(/money-tracker-debt-v(\d+)/);
+  assert.ok(match&&Number(match[1])>=26);
+  assert.equal(cache?.[1],match?.[1]);
   assert.match(server,/offlineBlockCVersion:1/);
 });

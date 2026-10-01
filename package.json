@@ -28,7 +28,9 @@
     "test:offline-c": "node --test tests/offline-block-c.test.js tests/offline-block-c-server.test.js",
     "test:offline-c-e2e": "playwright test e2e/offline-block-c.spec.mjs --workers=1",
     "test:offline-d": "node --test tests/offline-block-d.test.js",
-    "test:offline-d-e2e": "playwright test e2e/offline-block-d.spec.mjs --workers=1"
+    "test:offline-d-e2e": "playwright test e2e/offline-block-d.spec.mjs --workers=1",
+    "test:offline-e": "node --test tests/offline-block-e.test.js",
+    "test:offline-e-e2e": "playwright test e2e/offline-block-e.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

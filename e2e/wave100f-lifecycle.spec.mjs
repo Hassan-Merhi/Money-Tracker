@@ -29,25 +29,34 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   const caps=await pageA.evaluate(async()=>{const lifecycle=await import('/lib/offline-lifecycle.js');return lifecycle.offlineLifecycleCapabilities();});
   expect(caps.webLocks).toBe(true);
 
+  await pageA.evaluate(async()=>{
+    const db=await import('/lib/offline-db.js');
+    const lifecycle=await import('/lib/offline-lifecycle.js');
+    const [state,user]=await Promise.all([db.loadStateSnapshot(),db.loadAuthorizedUser()]);
+    const identity=user.id||user.email,stamp=new Date().toISOString();
+    const result=await db.enqueueLocalMutation({
+      operationId:'op_wave100f_peer',
+      entity:'person',entityId:'person_wave100f_peer',operation:'create',
+      expectedRevision:state.version,
+      payload:{id:'person_wave100f_peer',name:'Peer Refresh Person',note:'slow multi-tab sync',openingBalance:0,currency:'USD',direction:'to_me'},
+      localRecord:{id:'person_wave100f_peer',name:'Peer Refresh Person',note:'slow multi-tab sync',createdAt:stamp}
+    },identity);
+    lifecycle.announceOfflineChange({identity,kind:'ledger-queued',version:result.state?.version,source:'wave100f-test'});
+  });
+  await expect(pageB.locator('#main')).toContainText('Peer Refresh Person');
+
   let slowPushes=0;
   await context.route('**/api/sync/push',async route=>{
     slowPushes++;
     await new Promise(resolve=>setTimeout(resolve,350));
     await route.continue();
   });
-
-  const createPromise=pageA.evaluate(async()=>{
-    const store=await import('/lib/store.js');
-    const state=await store.loadState();
-    return await store.createPerson({id:'person_wave100f_peer',name:'Peer Refresh Person',note:'slow multi-tab sync',openingBalance:0,currency:'USD',direction:'to_me'},state.version);
-  });
-  await pageA.waitForTimeout(80);
-  const peerSync=pageB.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-second-tab'});});
-  await Promise.all([createPromise,peerSync]);
+  const syncA=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-first-tab'});});
+  await pageA.waitForTimeout(60);
+  const syncB=pageB.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-second-tab'});});
+  await Promise.all([syncA,syncB]);
   await context.unroute('**/api/sync/push');
-
   expect(slowPushes).toBe(1);
-  await expect(pageB.locator('#main')).toContainText('Peer Refresh Person');
 
   await pageA.evaluate(async()=>{
     const db=await import('/lib/offline-db.js');

@@ -16,7 +16,7 @@ function scaleState(entryCount=DATA_LIMITS.entries){
   const accounts=Array.from({length:DATA_LIMITS.accounts},(_,i)=>({id:`account_${i}`,name:`Account ${i}`,type:'bank',currency:'USD',openingBalance:1000}));
   const categories=Array.from({length:DATA_LIMITS.categories},(_,i)=>({id:`category_${i}`,name:`Category ${i}`,kind:'expense'}));
   const entries=Array.from({length:entryCount},(_,i)=>{
-    const date=`${2018+(i%9)}-${String((i%12)+1).padStart(2,'0')}-${String((i%28)+1).padStart(2,'0')}`;
+    const monthIndex=i%(9*12),date=`${2018+Math.floor(monthIndex/12)}-${String((monthIndex%12)+1).padStart(2,'0')}-${String((i%28)+1).padStart(2,'0')}`;
     if(i%10===0)return {id:`entry_${i}`,type:'account_transfer',fromAccountId:`account_${i%1000}`,toAccountId:`account_${(i+1)%1000}`,fromAmount:2,toAmount:2,amount:2,date,description:'Scale transfer',createdAt:date+'T00:00:00Z',updatedAt:date+'T00:00:00Z'};
     if(i%3===0)return {id:`entry_${i}`,type:'account_expense',accountId:`account_${i%1000}`,amount:1,currency:'USD',date,merchant:i===entryCount-1?'Needle Merchant':(i%1000===0?'Needle Merchant':'Merchant'),description:'Scale expense',categoryId:`category_${i%250}`,createdAt:date+'T00:00:00Z',updatedAt:date+'T00:00:00Z'};
     return {id:`entry_${i}`,type:i%2?'paid_for_person':'received_from_person',personId:`person_${i%10000}`,amount:1,currency:'USD',date,merchant:i===entryCount-1?'Needle Merchant':'',description:'Scale person row',createdAt:date+'T00:00:00Z',updatedAt:date+'T00:00:00Z'};

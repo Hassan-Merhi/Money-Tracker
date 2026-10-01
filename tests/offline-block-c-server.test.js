@@ -212,6 +212,33 @@ test('Offline Block C server completes O7-O10 safety invariants',async(t)=>{
     state=(await request('/api/state')).data;
     assert.equal(state.version,ledgerRevision);
     assert.equal(state.entries.find(row=>row.id==='entry_attachment_host').attachmentCount,0);
+
+    const deleteWins={
+      operationId:'op_attachment_delete_wins_1',
+      operation:'delete',
+      attachmentId:'attachment_delete_wins_1',
+      entryId:'entry_attachment_host',
+      payload:{id:'attachment_delete_wins_1'}
+    };
+    const deleteFirst=await request('/api/sync/attachments',{method:'POST',body:{operation:deleteWins}});
+    assert.equal(deleteFirst.res.status,201);
+    assert.equal(deleteFirst.data.missing,true);
+
+    const staleCreate={
+      operationId:'op_attachment_stale_create_1',
+      operation:'create',
+      attachmentId:'attachment_delete_wins_1',
+      entryId:'entry_attachment_host',
+      payload:{
+        id:'attachment_delete_wins_1',entryId:'entry_attachment_host',name:'stale.txt',mimeType:'text/plain',
+        sizeBytes:5,data:Buffer.from('stale').toString('base64'),createdAt:'2026-09-30T12:05:00.000Z'
+      }
+    };
+    const blockedCreate=await request('/api/sync/attachments',{method:'POST',body:{operation:staleCreate}});
+    assert.equal(blockedCreate.res.status,409);
+    assert.match(blockedCreate.data.error,/deleted before/i);
+    listed=(await request('/api/attachments?entry=entry_attachment_host')).data.attachments;
+    assert.equal(listed.some(row=>row.id==='attachment_delete_wins_1'),false);
   });
 
   await t.test('O8 whole-state and complete-backup replacement preserve deletion tombstones',async()=>{

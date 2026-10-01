@@ -42,6 +42,7 @@ test('Wave 100B sync is idempotent, recurring conflicts are targeted, and recurr
   assert.match(sw,/background-recurring-ledger/);
   assert.match(sw,/\/api\/sync\/recurring/);
   assert.match(sw,/remainingRecurring[\s\S]*baseUpdatedAt:data\.rule\.updatedAt/);
+  assert.match(sw,/sortedRecurringQueue[\s\S]*queueOrder/);
   assert.match(app,/route\.page === 'scheduled'\) renderRecurringPage/);
   assert.doesNotMatch(app,/Recurring rules and reminder inboxes remain server-only/);
   assert.match(app,/data-resolve-recurring-conflict/);

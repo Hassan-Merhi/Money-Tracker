@@ -53,7 +53,7 @@ Existing server-only attachments have their metadata cached when listed online. 
 
 ## Safety boundaries
 
-Bank Feed and Scheduled/Reminders remain server-only offline. Conflict resolution requires a connection because it must compare against the current authoritative server state.
+At the Block C milestone, Bank Feed and Scheduled/Reminders remained server-only offline. Wave 100A later added offline Bank Feed and Wave 100B later added offline Scheduled & Reminders. Conflict resolution still requires a connection because it must compare against the current authoritative server state.
 
 ## Definition of done
 

@@ -82,6 +82,7 @@ test('Offline Block A cached-read foundation remains intact as later waves add o
   assert.ok(app.includes('Offline · changes save locally'));
   assert.match(app,/route\.page === 'bank'\) renderBankFeedPage/);
   assert.doesNotMatch(app,/Bank Feed remains server-only/);
-  assert.ok(app.includes("renderOfflineServerFeature(main,'Scheduled & Reminders'"));
+  assert.match(app,/route\.page === 'scheduled'\) renderRecurringPage/);
+  assert.doesNotMatch(app,/Recurring rules and reminder inboxes remain server-only/);
   assert.match(app,/cached ledger remains available in Dashboard, People, Accounts, Activity, Insights and Reports/i);
 });

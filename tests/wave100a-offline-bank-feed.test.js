@@ -17,7 +17,8 @@ test('Wave 100A documents cached Bank Feed reads, durable writes and safety boun
 
 test('Wave 100A adds IndexedDB v5 Bank Feed cache and outbox to data-loss guards',()=>{
   const offline=read('lib/offline-db.js');
-  assert.match(offline,/version: 5/);
+  const dbVersion=Number(/version:\s*(\d+)/.exec(offline)?.[1]||0);
+  assert.ok(dbVersion>=5,`Wave 100A requires IndexedDB v5 or newer; found v${dbVersion}.`);
   assert.match(offline,/fromVersion<5/);
   assert.match(offline,/BANK_FEED_STATE_STORE='bankFeedState'/);
   assert.match(offline,/BANK_FEED_QUEUE_STORE='bankFeedQueue'/);
@@ -55,9 +56,10 @@ test('Wave 100A keeps Bank Feed sync idempotent and ledger-changing actions fore
 
 test('Wave 100A PWA schema and CI gates are wired',()=>{
   const version=read('pwa-version.js'),ci=read('.github/workflows/ci.yml'),pkg=JSON.parse(read('package.json'));
-  assert.match(version,/version:31/);
-  assert.match(version,/cacheName:'money-tracker-debt-v31'/);
-  assert.match(version,/offlineDbVersion:5/);
+  const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0),dbVersion=Number(/offlineDbVersion:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(pwaVersion>=31,`Wave 100A requires PWA v31 or newer; found v${pwaVersion}.`);
+  assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
+  assert.ok(dbVersion>=5,`Wave 100A requires offline DB v5 or newer; found v${dbVersion}.`);
   assert.equal(pkg.scripts['test:wave100a'],'node --test tests/wave100a-offline-bank-feed.test.js tests/bank-feed-server.test.js');
   assert.equal(pkg.scripts['test:wave100a-e2e'],'playwright test e2e/wave100a-offline-bank-feed.spec.mjs --workers=1');
   assert.match(ci,/Run Wave 100A Offline Bank Feed gate/);

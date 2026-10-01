@@ -72,14 +72,14 @@ This preserves the ledger as the source of financial truth.
 These intentionally do not masquerade as offline-capable in Block A:
 
 - Bank Feed imports and feed pagination
-- Scheduled/recurring rules and reminder inbox
+- Scheduled/recurring rules and reminder inbox *(Block A boundary; superseded by Wave 100B offline schedules/reminders)*
 - authentication changes and password operations
 - user/session/security administration
 - server snapshots and recovery operations
 - cloud attachment download/upload
 - remote production/runtime diagnostics
 
-Bank Feed and Scheduled pages show an explicit connection-required panel while offline.
+At the Block A milestone, Bank Feed and Scheduled pages showed explicit connection-required panels. Wave 100A later made Bank Feed offline-capable, and Wave 100B later made Scheduled & Reminders offline-capable.
 
 ## O1 — PWA foundation
 

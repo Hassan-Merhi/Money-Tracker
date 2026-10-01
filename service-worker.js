@@ -108,10 +108,19 @@ function sortedAttachmentQueue(rows){
 function sortedBankFeedQueue(rows){
   return [...rows].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId)));
 }
+function sortedRecurringQueue(rows){
+  return [...rows].sort((a,b)=>Number(a.queueOrder||0)-Number(b.queueOrder||0)||String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId)));
+}
 async function saveWorkerBankFeedSnapshot(db,identity,snapshot){
   if(!db.objectStoreNames.contains('bankFeedState'))return false;
   const tx=db.transaction('bankFeedState','readwrite');
   tx.objectStore('bankFeedState').put({key:'bank-feed',identity,snapshot:{...snapshot,cachedAt:new Date().toISOString()},savedAt:new Date().toISOString()});
+  await transactionDone(tx);return true;
+}
+async function saveWorkerRecurringSnapshot(db,identity,snapshot){
+  if(!db.objectStoreNames.contains('recurringState'))return false;
+  const tx=db.transaction('recurringState','readwrite');
+  tx.objectStore('recurringState').put({key:'recurring',identity,snapshot:{...snapshot,cachedAt:new Date().toISOString()},savedAt:new Date().toISOString()});
   await transactionDone(tx);return true;
 }
 async function responseData(response){
@@ -222,6 +231,60 @@ async function runBackgroundSync(source='background-sync'){
         }catch{}
       }
 
+      if(db.objectStoreNames.contains('recurringQueue')){
+        for(const snapshot of sortedRecurringQueue((await readStore(db,'recurringQueue')).filter(row=>row.identity===identity))){
+          const operation=await readRow(db,'recurringQueue',snapshot.operationId);
+          if(!operation)continue;
+          if(operation.status==='failed'||operation.status==='conflict'){
+            await requestClientSync('background-needs-attention');
+            return false;
+          }
+          if(operation.status!=='pending')continue;
+          if(operation.action==='post'){
+            await requestClientSync('background-recurring-ledger');
+            return false;
+          }
+          await updateRow(db,'recurringQueue',operation.operationId,{attempts:Number(operation.attempts||0)+1,lastError:''});
+          let response;
+          try{
+            response=await fetch('/api/sync/recurring',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify({operation})});
+          }catch(error){
+            await updateRow(db,'recurringQueue',operation.operationId,{status:'pending',lastError:'Connection lost during background recurring sync.'}).catch(()=>{});
+            throw error;
+          }
+          const data=await responseData(response);
+          if(!response.ok){
+            if(response.status===401){
+              await updateRow(db,'recurringQueue',operation.operationId,{status:'pending',lastError:'Sign in again to resume recurring sync.'}).catch(()=>{});
+              await requestClientSync('background-auth-required');
+              return false;
+            }
+            await updateRow(db,'recurringQueue',operation.operationId,{status:response.status===409?'conflict':'failed',lastError:data.error||'The server rejected this recurring change.'}).catch(()=>{});
+            await requestClientSync(response.status===409?'background-conflict':'background-failed');
+            return false;
+          }
+          await deleteRow(db,'recurringQueue',operation.operationId);
+          if(data?.rule?.updatedAt&&operation.ruleId){
+            const remainingRecurring=await readStore(db,'recurringQueue');
+            for(const later of remainingRecurring){
+              if(later.identity===identity&&later.ruleId===operation.ruleId&&later.status==='pending'){
+                await updateRow(db,'recurringQueue',later.operationId,{baseUpdatedAt:data.rule.updatedAt});
+              }
+            }
+          }
+        }
+        try{
+          const [rulesResponse,remindersResponse]=await Promise.all([
+            fetch('/api/recurring',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}}),
+            fetch('/api/recurring/reminders',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}})
+          ]);
+          if(rulesResponse.ok&&remindersResponse.ok){
+            const rulesData=await responseData(rulesResponse),reminderData=await responseData(remindersResponse);
+            await saveWorkerRecurringSnapshot(db,identity,{rules:rulesData.rules||[],reminders:reminderData.reminders||[],worker:reminderData.worker||{},acknowledgedReminderIds:[]});
+          }
+        }catch{}
+      }
+
       for(const snapshot of sortedAttachmentQueue((await readStore(db,'attachmentQueue')).filter(row=>row.identity===identity))){
         const operation=await readRow(db,'attachmentQueue',snapshot.operationId);
         if(!operation)continue;
@@ -262,7 +325,8 @@ async function runBackgroundSync(source='background-sync'){
       const remaining=[
         ...(await readStore(db,'syncQueue')),
         ...(await readStore(db,'attachmentQueue')),
-        ...(db.objectStoreNames.contains('bankFeedQueue')?await readStore(db,'bankFeedQueue'):[])
+        ...(db.objectStoreNames.contains('bankFeedQueue')?await readStore(db,'bankFeedQueue'):[]),
+        ...(db.objectStoreNames.contains('recurringQueue')?await readStore(db,'recurringQueue'):[])
       ].filter(row=>row.identity===identity&&['pending','failed','conflict'].includes(String(row.status||'pending')));
       if(remaining.length){
         await requestClientSync('background-pending');

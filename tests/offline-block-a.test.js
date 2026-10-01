@@ -57,7 +57,7 @@ test('Offline Block A O2: IndexedDB schema has normalized core ledger stores and
   assert.match(source,/STATE_HEAD_KEY='state-head'/);
   assert.match(source,/schemaVersion:OFFLINE_DB\.version/);
   assert.match(source,/saveStateSnapshot\(state,expectedIdentity=''/);
-  assert.match(source,/db\.transaction\(\[META_STORE,\.\.\.LEDGER_STORES,TOMBSTONE_STORE\],'readwrite'\)/);
+  assert.match(source,/db\.transaction\(\[META_STORE,\.\.\.LEDGER_STORES,TOMBSTONE_STORE(?:,FX_RATE_STORE)?\],'readwrite'\)/);
   assert.match(source,/activeRequest\.result\?\.identity!==identity/);
   assert.match(source,/identityMismatch=true;[\s\S]*?tx\.abort\(\)/);
   assert.match(source,/loadStateSnapshot/);

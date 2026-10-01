@@ -35,7 +35,7 @@ Before activation:
 
 - the app queries the waiting worker for its PWA version and required offline database version;
 - activation is blocked while any queued/failed/conflicted ledger or attachment work remains;
-- activation is blocked when the waiting worker requires a database schema newer than the running client understands;
+- the waiting worker advertises both its target DB schema and the oldest DB schema it can migrate from; unsupported upgrade jumps are blocked;
 - the existing controller stays active until the update is safe;
 - successful activation reloads the app through `controllerchange`.
 

@@ -65,8 +65,9 @@ test('Wave 100D UI, production and CI contracts are wired',()=>{
   assert.match(recurring,/id="recurringStatusFilter"/);
   assert.match(server,/offlineWave100DVersion:1/);
   assert.match(smoke,/offlineWave100DVersion/);
-  assert.match(version,/version:34/);
-  assert.match(version,/cacheName:'money-tracker-debt-v34'/);
+  const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(pwaVersion>=34,`Wave 100D requires PWA v34 or newer; found v${pwaVersion}.`);
+  assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
   assert.match(version,/offlineDbVersion:7/);
   assert.match(sw,/\/lib\/offline-query\.js/);
   assert.equal(pkg.scripts['test:wave100d'],'node --test tests/wave100d-offline-search-filters.test.js');

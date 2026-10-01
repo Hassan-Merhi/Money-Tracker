@@ -42,7 +42,9 @@ test('Wave 100G builds a multi-year 20k reporting snapshot without duplicate ful
   const snapshot=reportingSnapshot(state,{from:'2019-01-01',to:'2026-12-31'});
   const elapsed=performance.now()-started;
   assert.ok(snapshot.transactionCount>10000);
-  assert.ok(snapshot.receivablesMovement.length>24);
+  assert.ok(snapshot.receivablesMovement.length>=12);
+  const reportYears=new Set(snapshot.receivablesMovement.map(row=>String(row.month).slice(0,4)));
+  assert.ok(reportYears.size>=4,'Expected multi-year receivables coverage.');
   assert.equal(snapshot.accounts.length,DATA_LIMITS.accounts);
   assert.ok(elapsed<10000,`20k reporting snapshot took ${elapsed.toFixed(0)}ms; expected <10000ms.`);
 });

@@ -16,7 +16,8 @@ test('Wave 100B documents the offline recurring authority boundary',()=>{
 
 test('Wave 100B adds IndexedDB v6 recurring cache/outbox to every data-loss guard',()=>{
   const offline=read('lib/offline-db.js');
-  assert.match(offline,/version: 6/);
+  const dbVersion=Number(/version:\s*(\d+)/.exec(offline)?.[1]||0);
+  assert.ok(dbVersion>=6,`Wave 100B requires IndexedDB v6 or newer; found v${dbVersion}.`);
   assert.match(offline,/fromVersion<6/);
   assert.match(offline,/RECURRING_STATE_STORE='recurringState'/);
   assert.match(offline,/RECURRING_QUEUE_STORE='recurringQueue'/);
@@ -51,9 +52,10 @@ test('Wave 100B sync is idempotent, recurring conflicts are targeted, and recurr
 
 test('Wave 100B PWA and CI gates are wired',()=>{
   const version=read('pwa-version.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml');
-  assert.match(version,/version:32/);
-  assert.match(version,/cacheName:'money-tracker-debt-v32'/);
-  assert.match(version,/offlineDbVersion:6/);
+  const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0),dbVersion=Number(/offlineDbVersion:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(pwaVersion>=32,`Wave 100B requires PWA v32 or newer; found v${pwaVersion}.`);
+  assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
+  assert.ok(dbVersion>=6,`Wave 100B requires offline DB v6 or newer; found v${dbVersion}.`);
   assert.equal(pkg.scripts['test:wave100b'],'node --test tests/wave100b-offline-recurring.test.js tests/wave100b-recurring-server.test.js');
   assert.equal(pkg.scripts['test:wave100b-e2e'],'playwright test e2e/wave100b-offline-recurring.spec.mjs --workers=1');
   assert.match(ci,/Run Wave 100B Offline Schedules gate/);

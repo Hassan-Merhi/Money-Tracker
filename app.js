@@ -1,5 +1,5 @@
 import { icon, mobilePages, recentDebtEntries, activityMarkup, peopleOverviewMarkup } from './lib/dashboard-ui.js';
-import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, pinAttachmentOffline, unpinAttachmentOffline, clearEvictableAttachmentCache, uid, getSyncStatus, syncPendingOperations, retryFailedSyncOperations, exportPendingSyncRecovery, exportOfflineRecoveryArchive, inspectOfflineRecoveryArchive, restoreOfflineRecoveryArchive, resolveSyncConflict, resolveBankFeedConflict, resolveRecurringConflict, discardPendingChangesAndReload } from './lib/store.js';
+import { currentUser, registrationStatus, login, register, listUsers, createUserAccount, resetUserPassword, deleteUserAccount, changePassword, revokeOtherSessions, listSessions, revokeSession, listSecurityEvents, runtimeStatus, createServerSnapshot, deleteMyAccount, logout, loadState, updateSettings, createPerson, updatePerson, removePerson, createAccount, updateAccount, removeAccount, createEntry, updateEntry, removeEntry, exportFullBackup, restoreFullBackup, resetState, listAttachments, uploadAttachment, deleteAttachment, attachmentUrl, pinAttachmentOffline, unpinAttachmentOffline, clearEvictableAttachmentCache, uid, getSyncStatus, loadCachedState, syncPendingOperations, retryFailedSyncOperations, exportPendingSyncRecovery, exportOfflineRecoveryArchive, inspectOfflineRecoveryArchive, restoreOfflineRecoveryArchive, resolveSyncConflict, resolveBankFeedConflict, resolveRecurringConflict, discardPendingChangesAndReload } from './lib/store.js';
 import { personBalances, accountBalances, totalsFromBalances, personDelta, accountDelta, runningStatement, PERSON_ENTRY_TYPES, entryTouchesPerson, SPLIT_ENTRY_TYPE, validateSplit } from './lib/ledger.js';
 import { CURRENCIES, money, today, dateInTimeZone, escapeHtml, downloadText, balancesText, prettyType } from './lib/utils.js';
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
@@ -24,6 +24,9 @@ let modalSequence = 0;
 let a11yFieldSequence = 0;
 let pwa = {online:navigator.onLine,installable:false,installed:false,updateWaiting:false,update:{version:null,offlineDbVersion:null,compatible:null,reason:''},storage:{supported:Boolean(navigator.storage),persisted:null,usage:0,quota:0,usageRatio:0},backgroundSync:{supported:false,registered:false}};
 let syncInfo = {pending:0,failed:0,conflicts:0,online:navigator.onLine};
+let peerRefreshTimer=null;
+let peerRefreshPending=null;
+let peerRefreshBusy=false;
 
 const app = document.querySelector('#app');
 const advancedMode=()=>state?.settings?.appMode==='advanced';
@@ -82,6 +85,36 @@ async function resumeSync(reason='resume'){
   }finally{resumeSyncBusy=false;}
 }
 window.addEventListener('moneytracker:sync-request',event=>{void resumeSync(event.detail?.reason||'resume');});
+
+async function refreshFromPeer(detail={}){
+  if(!user||!state)return;
+  const identity=String(user?.id||user?.email||'').trim();
+  if(detail.identity&&String(detail.identity)!==identity)return;
+  if(saving||document.querySelector('.modal-backdrop')){
+    peerRefreshPending=detail;
+    return;
+  }
+  if(peerRefreshBusy){peerRefreshPending=detail;return;}
+  peerRefreshBusy=true;
+  try{
+    const [cached,status]=await Promise.all([loadCachedState().catch(()=>null),getSyncStatus().catch(()=>syncInfo)]);
+    if(cached)state=cached;
+    syncInfo=status||syncInfo;
+    render();
+  }finally{
+    peerRefreshBusy=false;
+    if(peerRefreshPending){
+      const pending=peerRefreshPending;peerRefreshPending=null;
+      clearTimeout(peerRefreshTimer);
+      peerRefreshTimer=setTimeout(()=>void refreshFromPeer(pending),80);
+    }
+  }
+}
+window.addEventListener('moneytracker:peer-change',event=>{
+  const detail=event.detail||{};
+  clearTimeout(peerRefreshTimer);
+  peerRefreshTimer=setTimeout(()=>void refreshFromPeer(detail),100);
+});
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -1094,6 +1127,7 @@ function closeModal(restoreFocus=true){
   const target=modalReturnFocus;
   modalReturnFocus=null;
   if(restoreFocus&&target?.isConnected)requestAnimationFrame(()=>target.focus());
+  if(peerRefreshPending){const pending=peerRefreshPending;peerRefreshPending=null;clearTimeout(peerRefreshTimer);peerRefreshTimer=setTimeout(()=>void refreshFromPeer(pending),80);}
 }
 
 async function deleteEntry(id){const e=state.entries.find(x=>x.id===id);if(!e)return;if(confirm('Delete this transaction? Balances will recalculate immediately.')){const saved=await runMutation(version=>removeEntry(id,version),'Transaction deleted.');if(saved)closeModal();}}

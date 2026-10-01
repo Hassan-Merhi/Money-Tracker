@@ -9,7 +9,7 @@ const CORE=[
   '/block-c-import.js','/block-c-import.css','/block-e-recurring.js','/block-e-recurring.css',
   '/block-f-bank-feed.js','/block-f-bank-feed.css','/block-g-insights.js','/block-g-insights.css',
   '/manifest.webmanifest','/assets/icon.svg','/assets/icon-192.png','/assets/icon-512.png',
-  '/lib/ledger.js','/lib/money.js','/lib/money-parse.js','/lib/fx.js','/lib/store.js','/lib/offline-db.js','/lib/offline-query.js','/lib/offline-recovery.js','/lib/utils.js','/lib/pwa.js',
+  '/lib/ledger.js','/lib/money.js','/lib/money-parse.js','/lib/fx.js','/lib/store.js','/lib/offline-db.js','/lib/offline-query.js','/lib/offline-recovery.js','/lib/offline-lifecycle.js','/lib/utils.js','/lib/pwa.js',
   '/lib/recurring.js','/lib/recurring-rule-form.js','/lib/bank-feed.js','/lib/insights.js',
   '/lib/reporting.js','/lib/xlsx.js','/lib/importer.js','/lib/legacy-excel.js','/lib/pdf.js','/lib/reports-ui.js'
 ];
@@ -126,6 +126,13 @@ async function saveWorkerRecurringSnapshot(db,identity,snapshot){
 async function responseData(response){
   try{return await response.json();}catch{return {};}
 }
+const TRANSIENT_SYNC_STATUSES=new Set([408,425,429,500,502,503,504]);
+function transientResponse(status){return TRANSIENT_SYNC_STATUSES.has(Number(status));}
+async function withWorkerSyncLock(identity,task){
+  const locks=self.navigator?.locks;
+  if(identity&&locks?.request)return await locks.request('money-tracker-sync:'+identity,{mode:'exclusive'},async()=>await task());
+  return await task();
+}
 
 let backgroundSyncInFlight=null;
 async function runBackgroundSync(source='background-sync'){
@@ -138,9 +145,10 @@ async function runBackgroundSync(source='background-sync'){
     }
     const auth=await responseData(authResponse),identity=userIdentity(auth.user);
     if(!identity||!auth.csrfToken)return false;
-    const db=await openOfflineDb();
-    if(!db)return false;
-    try{
+    return await withWorkerSyncLock(identity,async()=>{
+      const db=await openOfflineDb();
+      if(!db)return false;
+      try{
       const active=await readRow(db,'meta',ACTIVE_USER_KEY);
       if(active?.identity!==identity)return false;
       await refreshVerifiedUser(db,auth.user);
@@ -169,6 +177,11 @@ async function runBackgroundSync(source='background-sync'){
           if(response.status===401){
             await updateRow(db,'syncQueue',operation.operationId,{status:'pending',lastError:'Sign in again to resume sync.'}).catch(()=>{});
             await requestClientSync('background-auth-required');
+            return false;
+          }
+          if(transientResponse(response.status)){
+            await updateRow(db,'syncQueue',operation.operationId,{status:'pending',lastError:data.error||('Temporary server error ('+response.status+'). Sync will retry safely.')}).catch(()=>{});
+            await requestClientSync('background-transient');
             return false;
           }
           if(response.status===409){
@@ -219,6 +232,11 @@ async function runBackgroundSync(source='background-sync'){
               await requestClientSync('background-auth-required');
               return false;
             }
+            if(transientResponse(response.status)){
+              await updateRow(db,'bankFeedQueue',operation.operationId,{status:'pending',lastError:data.error||('Temporary server error ('+response.status+'). Bank Feed sync will retry safely.')}).catch(()=>{});
+              await requestClientSync('background-transient');
+              return false;
+            }
             await updateRow(db,'bankFeedQueue',operation.operationId,{status:response.status===409?'conflict':'failed',lastError:data.error||'The server rejected this Bank Feed change.'}).catch(()=>{});
             await requestClientSync(response.status===409?'background-conflict':'background-failed');
             return false;
@@ -257,6 +275,11 @@ async function runBackgroundSync(source='background-sync'){
             if(response.status===401){
               await updateRow(db,'recurringQueue',operation.operationId,{status:'pending',lastError:'Sign in again to resume recurring sync.'}).catch(()=>{});
               await requestClientSync('background-auth-required');
+              return false;
+            }
+            if(transientResponse(response.status)){
+              await updateRow(db,'recurringQueue',operation.operationId,{status:'pending',lastError:data.error||('Temporary server error ('+response.status+'). Recurring sync will retry safely.')}).catch(()=>{});
+              await requestClientSync('background-transient');
               return false;
             }
             await updateRow(db,'recurringQueue',operation.operationId,{status:response.status===409?'conflict':'failed',lastError:data.error||'The server rejected this recurring change.'}).catch(()=>{});
@@ -313,6 +336,11 @@ async function runBackgroundSync(source='background-sync'){
             await requestClientSync('background-auth-required');
             return false;
           }
+          if(transientResponse(response.status)){
+            await updateRow(db,'attachmentQueue',operation.operationId,{status:'pending',lastError:data.error||('Temporary server error ('+response.status+'). Attachment sync will retry safely.')}).catch(()=>{});
+            await requestClientSync('background-transient');
+            return false;
+          }
           await updateRow(db,'attachmentQueue',operation.operationId,{status:'failed',lastError:data.error||'The server rejected this attachment.'}).catch(()=>{});
           await requestClientSync('background-failed');
           return false;
@@ -335,9 +363,10 @@ async function runBackgroundSync(source='background-sync'){
       await markWorkerSync(db,identity,lastRevision,source);
       await requestClientSync(reopenedFeedItems?'background-sync-reconciled':'background-sync-complete');
       return true;
-    }finally{
-      db.close();
-    }
+      }finally{
+        db.close();
+      }
+    });
   })();
   try{return await backgroundSyncInFlight;}finally{backgroundSyncInFlight=null;}
 }

@@ -93,8 +93,9 @@ test('Wave 100E wires transactional local restore, UI, PWA and production contra
   assert.match(app,/id="offlineRecoveryFile"/);
   assert.match(app,/Local-device recovery only/);
   assert.match(sw,/\/lib\/offline-recovery\.js/);
-  assert.match(version,/version:35/);
-  assert.match(version,/cacheName:'money-tracker-debt-v35'/);
+  const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(pwaVersion>=35,`Wave 100E requires PWA v35 or newer; found v${pwaVersion}.`);
+  assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
   assert.match(version,/offlineDbVersion:7/);
   assert.match(server,/offlineWave100EVersion:1/);
   assert.match(smoke,/offlineWave100EVersion/);

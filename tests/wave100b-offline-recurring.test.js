@@ -36,6 +36,7 @@ test('Wave 100B sync is idempotent, recurring conflicts are targeted, and recurr
   assert.match(server,/recurringConflict/);
   assert.match(server,/offlineWave100BVersion:1/);
   assert.match(store,/async function syncRecurringOperations/);
+  assert.match(store,/listRecurringQueue\(identity\)\)\.find\(row=>row\.operationId===operationId\)/);
   assert.match(store,/operation\.action==='post'/);
   assert.match(store,/expectedRevision:Number\(freshState\.version\)/);
   assert.match(store,/export async function resolveRecurringConflict/);

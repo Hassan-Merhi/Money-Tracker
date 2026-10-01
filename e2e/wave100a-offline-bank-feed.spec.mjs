@@ -211,3 +211,98 @@ test('Wave 100A: cached Bank Feed survives airplane-mode reload and converges qu
   await remoteContext.close();
   await context.close();
 });
+
+
+test('Wave 100A: incompatible remote Bank Feed change becomes a targeted conflict and Use server preserves unrelated work',async({browser})=>{
+  const localContext=await browser.newContext({viewport:{width:390,height:844}});
+  const remoteContext=await browser.newContext({viewport:{width:1280,height:800}});
+  const local=await localContext.newPage(),remote=await remoteContext.newPage();
+  await loginStore(local);
+  await loginStore(remote);
+
+  const setup=await local.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const state=await store.loadState();
+    const imported=await store.importBankFeed({
+      accountId:'account_wave100a',
+      sourceName:'wave100a-conflict.csv',
+      rows:[{date:'2026-10-01',description:'Conflict candidate',merchant:'Conflict Shop',signedAmount:-9,currency:'USD',externalId:'wave100a-conflict'}]
+    });
+    await store.listBankFeed({limit:100,offset:0});
+    const item=imported.items.find(row=>row.externalId==='wave100a-conflict');
+    return {itemId:item.id,revision:state.version,identity:(await db.loadAuthorizedUser()).id};
+  });
+
+  await localContext.setOffline(true);
+  const queued=await local.evaluate(async({itemId,revision})=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const result=await store.postBankFeedItem(itemId,{expectedRevision:revision,classification:'expense',note:'local conflicting post'});
+    const user=await db.loadAuthorizedUser();
+    await store.createPerson({id:'wave100a_unrelated_local',name:'Unrelated Local Work',note:'must survive bank conflict resolution',openingBalance:0,currency:'USD',direction:'to_me'},revision);
+    const bankQueue=await db.listBankFeedQueue(user.id||user.email);
+    const ledgerQueue=await db.listQueuedOperations(user.id||user.email);
+    return {operationId:result.operationId,bank:bankQueue.map(row=>row.action),ledger:ledgerQueue.map(row=>row.entityId)};
+  },setup);
+  expect(queued.bank).toEqual(['post']);
+  expect(queued.ledger).toContain('wave100a_unrelated_local');
+
+  await remote.evaluate(async itemId=>{
+    const store=await import('/lib/store.js');
+    await store.ignoreBankFeedItem(itemId);
+  },setup.itemId);
+
+  await localContext.setOffline(false);
+  const conflicted=await local.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const result=await store.syncPendingOperations({source:'wave100a-conflict'});
+    const status=await store.getSyncStatus();
+    return {
+      pending:status.pending,
+      bankConflicts:(status.bankFeedQueue||[]).filter(row=>row.status==='conflict').map(row=>({id:row.operationId,action:row.action})),
+      ledgerQueued:(status.queue||[]).map(row=>row.entityId),
+      synced:result.synced===true
+    };
+  });
+  expect(conflicted.bankConflicts).toEqual([{id:queued.operationId,action:'post'}]);
+  expect(conflicted.ledgerQueued).toContain('wave100a_unrelated_local');
+  expect(conflicted.synced).toBe(false);
+
+  const resolved=await local.evaluate(async operationId=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    await store.resolveBankFeedConflict(operationId);
+    const user=await db.loadAuthorizedUser();
+    const status=await store.getSyncStatus();
+    const feed=await store.listBankFeed({limit:100,offset:0});
+    return {
+      bankQueue:(await db.listBankFeedQueue(user.id||user.email)).length,
+      ledgerQueue:(await db.listQueuedOperations(user.id||user.email)).length,
+      bankConflicts:(status.bankFeedQueue||[]).filter(row=>row.status==='conflict').length,
+      rowStatus:feed.items.find(row=>row.id==='${setup.itemId}')?.status||''
+    };
+  },queued.operationId);
+  // Read the actual row separately because Playwright evaluate only receives one serialized argument.
+  const finalState=await local.evaluate(async itemId=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const user=await db.loadAuthorizedUser();
+    const feed=await store.listBankFeed({limit:100,offset:0});
+    return {
+      bankQueue:(await db.listBankFeedQueue(user.id||user.email)).length,
+      ledgerQueue:(await db.listQueuedOperations(user.id||user.email)).length,
+      rowStatus:feed.items.find(row=>row.id===itemId)?.status||'',
+      localPerson:(await db.loadStateSnapshot()).people.some(row=>row.id==='wave100a_unrelated_local')
+    };
+  },setup.itemId);
+  expect(resolved.bankQueue).toBe(0);
+  expect(resolved.bankConflicts).toBe(0);
+  expect(finalState.bankQueue).toBe(0);
+  expect(finalState.ledgerQueue).toBe(0);
+  expect(finalState.rowStatus).toBe('ignored');
+  expect(finalState.localPerson).toBe(true);
+
+  await remoteContext.close();
+  await localContext.close();
+});

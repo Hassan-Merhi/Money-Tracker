@@ -207,6 +207,53 @@ test('ambiguous transfer candidates create a new movement instead of guessing',a
   assert.equal(result.res.status,200);assert.equal(result.data.linkedExistingTransfer,false);assert.equal(result.data.state.entries.length,before+1);state=result.data.state;
 });
 
+
+test('Wave 100A Bank Feed sync ignore is idempotent and rejects operation-id reuse',async()=>{
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'wave100a-ignore.csv',rows:[{date:'2026-10-01',description:'Offline ignore candidate',signedAmount:-3,currency:'USD',externalId:'wave100a-ignore'}]}});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(row=>row.externalId==='wave100a-ignore');
+  assert.ok(item);
+  const operation={operationId:'op_wave100a_ignore_once',action:'ignore',itemId:item.id,ruleId:'',payload:{}};
+  const first=await request('/api/sync/bank-feed',{method:'POST',body:{operation}});
+  assert.equal(first.res.status,201);
+  assert.equal(first.data.alreadyProcessed,undefined);
+  const replay=await request('/api/sync/bank-feed',{method:'POST',body:{operation}});
+  assert.equal(replay.res.status,200);
+  assert.equal(replay.data.alreadyProcessed,true);
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(row=>row.id===item.id)?.status,'ignored');
+  const reused=await request('/api/sync/bank-feed',{method:'POST',body:{operation:{...operation,action:'reopen'}}});
+  assert.equal(reused.res.status,409);
+});
+
+test('Wave 100A Bank Feed synced post advances the ledger exactly once across replay',async()=>{
+  const imported=await request('/api/bank-feed/import',{method:'POST',body:{accountId:'account_bank',sourceName:'wave100a-post.csv',rows:[{date:'2026-10-01',description:'Offline post once',signedAmount:-11,currency:'USD',externalId:'wave100a-post'}]}});
+  assert.equal(imported.res.status,200);
+  const item=imported.data.items.find(row=>row.externalId==='wave100a-post');
+  const before=(await request('/api/state')).data;
+  const operation={operationId:'op_wave100a_post_once',action:'post',itemId:item.id,ruleId:'',payload:{expectedRevision:before.version,classification:'expense',note:'Wave 100A offline post'}};
+  const first=await request('/api/sync/bank-feed',{method:'POST',body:{operation}});
+  assert.equal(first.res.status,201);
+  assert.equal(first.data.status,'accepted');
+  const afterFirst=(await request('/api/state')).data;
+  assert.equal(afterFirst.version,before.version+1);
+  assert.equal(afterFirst.entries.filter(row=>row.id===first.data.entryId).length,1);
+  const replay=await request('/api/sync/bank-feed',{method:'POST',body:{operation}});
+  assert.equal(replay.res.status,200);
+  assert.equal(replay.data.alreadyProcessed,true);
+  const afterReplay=(await request('/api/state')).data;
+  assert.equal(afterReplay.version,afterFirst.version);
+  assert.equal(afterReplay.entries.filter(row=>row.id===first.data.entryId).length,1);
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.find(row=>row.id===item.id)?.status,'posted');
+  const health=(await request('/api/health')).data;
+  assert.equal(health.offlineWave100AVersion,1);
+  assert.ok(health.offlineSyncMonitor.metrics.bankFeedAccepted.count>=2);
+  assert.ok(health.offlineSyncMonitor.metrics.bankFeedReplayed.count>=2);
+  assert.ok(health.offlineSyncMonitor.metrics.bankFeedConflict.count>=1);
+  state=afterReplay;
+});
+
 test('ledger reset also clears bank feed rows and rules',async()=>{
   const before=(await request('/api/bank-feed')).data;
   assert.ok(before.items.length>0);

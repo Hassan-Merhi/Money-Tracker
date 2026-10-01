@@ -9,7 +9,8 @@ const read=path=>readFileSync(join(ROOT,path),'utf8');
 
 test('Offline Block F documents O20-O22 and the cross-block release matrix',()=>{
   const doc=read('docs/OFFLINE_BLOCK_F.md');
-  for(const marker of ['O20','O21','O22','Cold launch','Multi-device','Idempotent','full authoritative refresh','offlineSyncMonitor'])assert.ok(doc.includes(marker),marker);
+  for(const marker of ['O20','O21','O22','Cold launch','Multi-device','full authoritative refresh','offlineSyncMonitor'])assert.ok(doc.includes(marker),marker);
+  assert.match(doc,/idempotent/i);
   for(const marker of ['Cold launch','Reads','Writes','Sync','Retry','Conflicts','Tombstones','Transfers','Attachments','Auth','Storage','Updates','Migrations','Exports','Multi-device'])assert.ok(doc.includes(marker),marker);
   assert.match(doc,/server remains authoritative/i);
   assert.match(doc,/local and server ledger revisions match/i);

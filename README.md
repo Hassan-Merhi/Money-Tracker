@@ -51,8 +51,9 @@ Block B makes the ledger practical for everyday use on desktop and mobile:
 
 ## Block C — Imports & migration
 
-- Excel `.xlsx` / `.xlsm` upload with protected server-side workbook parsing
+- Excel `.xlsx` / `.xlsm` upload with protected on-device workbook parsing, including while offline
 - CSV import directly in the browser
+- Normal imports, legacy workbook migration, and Quick Excel Paste can queue safely offline and sync after reconnect
 - Downloadable import template using the existing Block D XLSX engine
 - Sheet/sample preview before any ledger write
 - Automatic column suggestions plus manual mapping

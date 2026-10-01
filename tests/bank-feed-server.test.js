@@ -254,6 +254,30 @@ test('Wave 100A Bank Feed synced post advances the ledger exactly once across re
   state=afterReplay;
 });
 
+
+test('Wave 100A queued statement import is idempotent across replay',async()=>{
+  const operation={
+    operationId:'op_wave100a_import_once',
+    action:'import',
+    itemId:'',
+    ruleId:'',
+    payload:{
+      accountId:'account_bank',
+      sourceName:'wave100a-offline-import.csv',
+      rows:[{date:'2026-10-01',description:'Offline import once',merchant:'Offline CSV',signedAmount:-6,currency:'USD',externalId:'wave100a-import-once'}]
+    }
+  };
+  const first=await request('/api/sync/bank-feed',{method:'POST',body:{operation}});
+  assert.equal(first.res.status,201);
+  assert.equal(first.data.imported,1);
+  const replay=await request('/api/sync/bank-feed',{method:'POST',body:{operation}});
+  assert.equal(replay.res.status,200);
+  assert.equal(replay.data.alreadyProcessed,true);
+  assert.equal(replay.data.imported,1);
+  const feed=(await request('/api/bank-feed')).data;
+  assert.equal(feed.items.filter(row=>row.externalId==='wave100a-import-once').length,1);
+});
+
 test('ledger reset also clears bank feed rows and rules',async()=>{
   const before=(await request('/api/bank-feed')).data;
   assert.ok(before.items.length>0);

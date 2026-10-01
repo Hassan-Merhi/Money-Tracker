@@ -56,7 +56,7 @@ test('Wave 100D recurring search and status filters use cached rule metadata',()
 });
 
 test('Wave 100D UI, production and CI contracts are wired',()=>{
-  const app=read('app.js'),reports=read('lib/reports-ui.js'),bank=read('block-f-bank-feed.js'),recurring=read('block-e-recurring.js'),server=read('server.mjs'),smoke=read('lib/production-smoke.js'),version=read('pwa-version.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml');
+  const app=read('app.js'),reports=read('lib/reports-ui.js'),bank=read('block-f-bank-feed.js'),recurring=read('block-e-recurring.js'),server=read('server.mjs'),smoke=read('lib/production-smoke.js'),version=read('pwa-version.js'),sw=read('service-worker.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml');
   assert.match(app,/id='filterSearch'/);
   assert.match(reports,/id="reportSearch"/);
   assert.match(bank,/id="bankSearch"/);
@@ -68,6 +68,7 @@ test('Wave 100D UI, production and CI contracts are wired',()=>{
   assert.match(version,/version:34/);
   assert.match(version,/cacheName:'money-tracker-debt-v34'/);
   assert.match(version,/offlineDbVersion:7/);
+  assert.match(sw,/\/lib\/offline-query\.js/);
   assert.equal(pkg.scripts['test:wave100d'],'node --test tests/wave100d-offline-search-filters.test.js');
   assert.equal(pkg.scripts['test:wave100d-e2e'],'playwright test e2e/wave100d-offline-search-filters.spec.mjs --workers=1');
   assert.match(ci,/Run Wave 100D Offline Search & Filters gate/);

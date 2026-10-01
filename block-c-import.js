@@ -1,6 +1,7 @@
-import { loadState, saveState, uid, previewSpreadsheet } from './lib/store.js';
+import { loadState, commitImportedState, uid } from './lib/store.js';
 import { escapeHtml } from './lib/utils.js';
 import { buildXlsx } from './lib/xlsx.js';
+import { parseWorkbookInBrowser } from './lib/xlsx-browser.js';
 import { applyImport, applyQuickPasteImport, detectImportMode, guessHeader, parseQuickPaste } from './lib/importer.js';
 import { analyzeLegacyWorkbook, applyLegacyWorkbook } from './lib/legacy-excel.js';
 import { currencyExponent } from './lib/money.js';
@@ -60,7 +61,7 @@ async function reviewQuickPaste(){
   if(!r.entries && !r.updated){alert(`Nothing to import.${issues.length?`\n\n${issues.join('\n')}`:''}`);return;}
   if(!confirm(`Import these pasted rows?\n\n${parts.join(', ')}.${issues.length?`\n\nRows with issues will be skipped:\n${issues.join('\n')}`:''}\n\nEach valid row will appear on that person's statement.`))return;
   const btn=q('#impQuickApply'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
-  try{publishImportedState(await saveState(prepared.state));alert(`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
+  try{const committed=await commitImportedState(prepared.state);publishImportedState(committed.state);alert(committed.queued?`Paste import queued offline: ${parts.join(', ')}. It will sync when you reconnect.`:`Paste import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#people';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the paste importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
@@ -84,7 +85,7 @@ async function readFile(file){
   try{
     if(file.size>8_000_000)throw new Error('Keep imports under 8 MB per file.');
     if(file.name.toLowerCase().endsWith('.csv'))preview=parseCsv(await file.text());
-    else{const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));preview=await previewSpreadsheet(file.name,btoa(binary));}
+    else preview=await parseWorkbookInBrowser(await file.arrayBuffer(),{limitRows:5000,limitCols:100,maxFiles:250,maxUncompressed:20_000_000});
     legacyAnalysis=file.name.toLowerCase().endsWith('.csv')?null:analyzeLegacyWorkbook(preview);sheetIndex=Math.max(0,preview.sheets.findIndex(s=>s.rows?.length));if(legacyAnalysis?.recognized&&!manualMode)renderLegacyPreview();else renderPreview();
   }catch(e){area.innerHTML=`<div class="imp-error">${escapeHtml(e.message||'Could not read this file.')}</div>`;}
 }
@@ -132,7 +133,7 @@ async function reviewLegacy(){
     }
   }
   const btn=q('#impLegacyReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Importing…';
-  try{publishImportedState(await saveState(prepared.state));alert(`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
+  try{const committed=await commitImportedState(prepared.state);publishImportedState(committed.state);alert(committed.queued?`Legacy import queued offline: ${parts.join(', ')}. It will sync when you reconnect.`:`Legacy import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }
@@ -158,7 +159,7 @@ async function review(){
   if(!r.people&&!r.accounts&&!r.entries&&!r.updated){alert(`Nothing to import.${parts.length?' '+parts.join(', '):''}${issues?`\n\n${issues}`:''}`);return;}
   if(!confirm(`Apply import?\n\n${parts.join(', ')}.${issues?`\n\nFirst issues:\n${issues}`:''}\n\nThis appends to your current ledger.`))return;
   const btn=q('#impReview'),before=btn.textContent;btn.disabled=true;btn.textContent='Applying…';
-  try{publishImportedState(await saveState(prepared.state));alert(`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
+  try{const committed=await commitImportedState(prepared.state);publishImportedState(committed.state);alert(committed.queued?`Import queued offline: ${parts.join(', ')}. It will sync when you reconnect.`:`Import complete: ${parts.join(', ')}.`);closeImporter();location.hash='#dashboard';}
   catch(e){alert(e.status===409?'The ledger changed in another tab. Reopen the importer and review again.':(e.message||'Could not save import.'));}
   finally{if(btn.isConnected){btn.disabled=false;btn.textContent=before;}}
 }

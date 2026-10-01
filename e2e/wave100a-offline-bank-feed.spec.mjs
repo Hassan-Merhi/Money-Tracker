@@ -250,7 +250,7 @@ test('Wave 100A: incompatible remote Bank Feed change becomes a targeted conflic
     const db=await import('/lib/offline-db.js');
     const post=await store.postBankFeedItem(conflictItemId,{expectedRevision:revision,classification:'expense',note:'local conflicting post'});
     await store.ignoreBankFeedItem(unrelatedItemId);
-    await store.createPerson({id:'wave100a_unrelated_local',name:'Unrelated Local Work',note:'must survive bank conflict resolution',openingBalance:0,currency:'USD',direction:'to_me'},revision);
+    await store.createPerson({id:'person_wave100a_unrelated_local',name:'Unrelated Local Work',note:'must survive bank conflict resolution',openingBalance:0,currency:'USD',direction:'to_me'},revision);
     const user=await db.loadAuthorizedUser();
     const bankQueue=await db.listBankFeedQueue(user.id||user.email);
     const ledgerQueue=await db.listQueuedOperations(user.id||user.email);
@@ -261,7 +261,7 @@ test('Wave 100A: incompatible remote Bank Feed change becomes a targeted conflic
     };
   },setup);
   expect(queued.bank.map(row=>row.action)).toEqual(['post','ignore']);
-  expect(queued.ledger).toContain('wave100a_unrelated_local');
+  expect(queued.ledger).toContain('person_wave100a_unrelated_local');
 
   await remote.evaluate(async itemId=>{
     const store=await import('/lib/store.js');
@@ -305,7 +305,7 @@ test('Wave 100A: incompatible remote Bank Feed change becomes a targeted conflic
     return {
       conflictStatus:feed.items.find(row=>row.id===conflictItemId)?.status||'',
       unrelatedStatus:feed.items.find(row=>row.id===unrelatedItemId)?.status||'',
-      localPerson:state.people.some(row=>row.id==='wave100a_unrelated_local')
+      localPerson:state.people.some(row=>row.id==='person_wave100a_unrelated_local')
     };
   },setup);
   expect(finalState).toEqual({conflictStatus:'ignored',unrelatedStatus:'ignored',localPerson:true});

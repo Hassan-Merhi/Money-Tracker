@@ -105,6 +105,15 @@ function sortedAttachmentQueue(rows){
     return String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId));
   });
 }
+function sortedBankFeedQueue(rows){
+  return [...rows].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId)));
+}
+async function saveWorkerBankFeedSnapshot(db,identity,snapshot){
+  if(!db.objectStoreNames.contains('bankFeedState'))return false;
+  const tx=db.transaction('bankFeedState','readwrite');
+  tx.objectStore('bankFeedState').put({key:'bank-feed',identity,snapshot:{...snapshot,cachedAt:new Date().toISOString()},savedAt:new Date().toISOString()});
+  await transactionDone(tx);return true;
+}
 async function responseData(response){
   try{return await response.json();}catch{return {};}
 }
@@ -173,6 +182,46 @@ async function runBackgroundSync(source='background-sync'){
         return false;
       }
 
+      if(db.objectStoreNames.contains('bankFeedQueue')){
+        for(const snapshot of sortedBankFeedQueue((await readStore(db,'bankFeedQueue')).filter(row=>row.identity===identity))){
+          const operation=await readRow(db,'bankFeedQueue',snapshot.operationId);
+          if(!operation)continue;
+          if(operation.status==='failed'||operation.status==='conflict'){
+            await requestClientSync('background-needs-attention');
+            return false;
+          }
+          if(operation.status!=='pending')continue;
+          if(['post','undo'].includes(operation.action)){
+            await requestClientSync('background-bank-feed-ledger');
+            return false;
+          }
+          await updateRow(db,'bankFeedQueue',operation.operationId,{attempts:Number(operation.attempts||0)+1,lastError:''});
+          let response;
+          try{
+            response=await fetch('/api/sync/bank-feed',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify({operation})});
+          }catch(error){
+            await updateRow(db,'bankFeedQueue',operation.operationId,{status:'pending',lastError:'Connection lost during background Bank Feed sync.'}).catch(()=>{});
+            throw error;
+          }
+          const data=await responseData(response);
+          if(!response.ok){
+            if(response.status===401){
+              await updateRow(db,'bankFeedQueue',operation.operationId,{status:'pending',lastError:'Sign in again to resume Bank Feed sync.'}).catch(()=>{});
+              await requestClientSync('background-auth-required');
+              return false;
+            }
+            await updateRow(db,'bankFeedQueue',operation.operationId,{status:response.status===409?'conflict':'failed',lastError:data.error||'The server rejected this Bank Feed change.'}).catch(()=>{});
+            await requestClientSync(response.status===409?'background-conflict':'background-failed');
+            return false;
+          }
+          await deleteRow(db,'bankFeedQueue',operation.operationId);
+        }
+        try{
+          const bankResponse=await fetch('/api/bank-feed?limit=500&offset=0',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+          if(bankResponse.ok)await saveWorkerBankFeedSnapshot(db,identity,await responseData(bankResponse));
+        }catch{}
+      }
+
       for(const snapshot of sortedAttachmentQueue((await readStore(db,'attachmentQueue')).filter(row=>row.identity===identity))){
         const operation=await readRow(db,'attachmentQueue',snapshot.operationId);
         if(!operation)continue;
@@ -212,7 +261,8 @@ async function runBackgroundSync(source='background-sync'){
 
       const remaining=[
         ...(await readStore(db,'syncQueue')),
-        ...(await readStore(db,'attachmentQueue'))
+        ...(await readStore(db,'attachmentQueue')),
+        ...(db.objectStoreNames.contains('bankFeedQueue')?await readStore(db,'bankFeedQueue'):[])
       ].filter(row=>row.identity===identity&&['pending','failed','conflict'].includes(String(row.status||'pending')));
       if(remaining.length){
         await requestClientSync('background-pending');

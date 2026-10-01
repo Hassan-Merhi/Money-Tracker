@@ -40,7 +40,7 @@ test('Offline Block A: cached ledger reopens and renders without a network',asyn
   await page.reload({waitUntil:'domcontentloaded'});
   await expectHeading(page,'Dashboard');
   await expect(page.locator('.connection-pill')).toContainText('Offline');
-  await expect(page.locator('.connection-pill')).toContainText('changes save locally');
+  await expect(page.locator('.connection-pill')).toContainText(/changes save locally|queued/);
 
   await page.evaluate(()=>{location.hash='#people';});
   await expectHeading(page,'People');

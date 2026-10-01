@@ -63,7 +63,7 @@ test('Offline Block E: cached reports export PDF/XLSX offline and retain recorde
   await page.reload({waitUntil:'domcontentloaded'});
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
   await page.evaluate(()=>{location.hash='#reports';});
-  await expect(page.locator('#pageHeading')).toHaveText('Reports');
+  await expect(page.locator('#pageHeading')).toHaveText('Reports & Exports');
   await expect(page.locator('#main')).toContainText('generated entirely on this device');
   await expect(page.locator('#main')).toContainText('USD/EUR');
   await expect(page.locator('#main')).toContainText('1 USD = 0.92 EUR');

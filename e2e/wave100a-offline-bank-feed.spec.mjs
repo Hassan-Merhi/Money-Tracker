@@ -32,6 +32,11 @@ test('Wave 100A: cached Bank Feed survives airplane-mode reload and converges qu
   const seeded=await page.evaluate(async()=>{
     const store=await import('/lib/store.js');
     let state=await store.loadState();
+    state=await store.updateSettings({
+      defaultCurrency:state.settings.defaultCurrency,
+      appMode:'advanced',
+      timezone:state.settings.timezone||'UTC'
+    },state.version);
     state=await store.createAccount({
       id:'account_wave100a',name:'Wave 100A Bank',type:'bank',currency:'USD',openingBalance:500,createdAt:new Date().toISOString()
     },state.version);

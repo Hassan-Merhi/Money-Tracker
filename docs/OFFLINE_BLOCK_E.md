@@ -44,13 +44,14 @@ This keeps an update from stranding unsynced money changes between incompatible 
 
 ## O19 — IndexedDB migrations
 
-Offline Block E introduced IndexedDB v4 with explicit additive migrations. Wave 100A subsequently extends the live schema to **v5** with additive Bank Feed cache/outbox stores; the v1–v4 migration guarantees below remain unchanged:
+Offline Block E introduced IndexedDB v4 with explicit additive migrations. Wave 100A extended the schema to **v5** with Bank Feed cache/outbox stores, and Wave 100B extends it to **v6** with recurring schedule/reminder cache + outbox stores; the v1–v4 migration guarantees below remain unchanged:
 
 - **v1** — meta + ledger stores;
 - **v2** — sync queue, sync state, tombstones;
 - **v3** — attachment + attachment queue;
 - **v4** — recorded FX cache;
-- **v5** — Bank Feed cache + durable Bank Feed queue (Wave 100A).
+- **v5** — Bank Feed cache + durable Bank Feed queue (Wave 100A);
+- **v6** — recurring schedules/reminders cache + durable recurring queue (Wave 100B).
 
 IndexedDB commits `onupgradeneeded` atomically. If a migration fails, the prior database remains intact.
 

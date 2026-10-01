@@ -226,3 +226,62 @@ test('Offline Block D: reconnect and repeated resume signals share one sync run'
 
   await context.close();
 });
+
+
+test('Offline Block D: service worker drains the durable outbox without foreground store sync',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:390,height:844}});
+  const page=await context.newPage();
+  await page.goto('/');
+  await loginStore(page);
+  await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
+  await expect.poll(()=>page.evaluate(async()=>{
+    const registration=await navigator.serviceWorker.ready;
+    return Boolean(registration.active||navigator.serviceWorker.controller);
+  })).toBe(true);
+
+  const queued=await page.evaluate(async()=>{
+    const db=await import('/lib/offline-db.js');
+    const [state,user]=await Promise.all([db.loadStateSnapshot(),db.loadAuthorizedUser()]);
+    const stamp=new Date().toISOString();
+    await db.enqueueLocalMutation({
+      operationId:'op_worker_background_person',
+      entity:'person',
+      entityId:'person_worker_background',
+      operation:'create',
+      expectedRevision:state.version,
+      payload:{
+        id:'person_worker_background',name:'Worker Background',note:'service worker queued write',
+        openingBalance:0,currency:'USD',direction:'to_me'
+      },
+      localRecord:{id:'person_worker_background',name:'Worker Background',note:'service worker queued write',createdAt:stamp}
+    },user.id);
+    return (await db.listQueuedOperations(user.id)).filter(row=>row.operationId==='op_worker_background_person').length;
+  });
+  expect(queued).toBe(1);
+
+  await page.evaluate(async()=>{
+    const registration=await navigator.serviceWorker.ready;
+    const worker=registration.active||navigator.serviceWorker.controller;
+    worker.postMessage({type:'RUN_BACKGROUND_SYNC'});
+  });
+
+  await expect.poll(()=>page.evaluate(async()=>{
+    const server=await (await fetch('/api/state',{credentials:'same-origin'})).json();
+    return server.people.some(row=>row.id==='person_worker_background');
+  }),{timeout:10000}).toBe(true);
+
+  await expect.poll(()=>page.evaluate(async()=>{
+    const db=await import('/lib/offline-db.js');
+    const user=await db.loadAuthorizedUser();
+    return (await db.listQueuedOperations(user.id)).filter(row=>row.operationId==='op_worker_background_person').length;
+  }),{timeout:10000}).toBe(0);
+
+  const health=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const status=await store.getSyncStatus();
+    return {pending:status.pending,lastSyncedAt:status.lastSyncedAt};
+  });
+  expect(health.pending).toBe(0);
+  expect(Date.parse(health.lastSyncedAt)).toBeGreaterThan(0);
+  await context.close();
+});

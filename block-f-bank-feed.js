@@ -11,6 +11,10 @@ let feed={items:[],rules:[],history:[],stats:{pending:0,posted:0,ignored:0}};
 let draft=null;
 let selectedAccountId='';
 let statusFilter='pending';
+let searchFilter='';
+let feedAccountFilter='';
+let feedFrom='';
+let feedTo='';
 let pageOffset=0;
 
 const PERSON_ACTIONS=new Set(['paid_for_person','received_from_person','borrowed_from_person','paid_to_person']);
@@ -185,6 +189,12 @@ function paint(main,state,ctx){
     ${importMarkup(state)}
     <section class="bank-feed-section">
       <div class="panel-head"><div><h3>Bank feed inbox</h3><p>Nothing touches balances until you post it.</p></div><div class="segmented bank-status-tabs">${['pending','posted','ignored','all'].map(s=>`<button class="${statusFilter===s?'active':''}" data-bank-status="${s}">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</div></div>
+      <div class="bank-search-filters">
+        <input class="input search" id="bankSearch" type="search" inputmode="search" autocomplete="off" placeholder="Search merchant, description, source…" value="${escapeHtml(searchFilter)}" aria-label="Search bank feed">
+        <select class="select" id="bankFilterAccount" aria-label="Filter bank feed by account"><option value="">All accounts</option>${state.accounts.map(a=>`<option value="${a.id}" ${feedAccountFilter===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}</select>
+        <input class="input" id="bankFilterFrom" type="date" value="${escapeHtml(feedFrom)}" aria-label="Bank feed from date">
+        <input class="input" id="bankFilterTo" type="date" value="${escapeHtml(feedTo)}" aria-label="Bank feed to date">
+      </div>
       <div class="bank-reconciliation"><h4>Reconciliation</h4>${reconciliation.map(a=>{const totals=accountStats.get(a.accountId)||{};const imported=Number(totals.imported||0);return `<div class="reconcile-row"><strong>${escapeHtml(a.name)}</strong><span>Imported: ${imported}</span><span>Posted / ignored / pending: ${totals.posted||0} / ${totals.ignored||0} / ${totals.pending||0}</span><span>Feed posted: ${money(a.postedAmount,a.currency)} · Ledger movements: ${money(a.ledgerAmount,a.currency)}</span></div>`;}).join('')}</div><div class="bank-feed-list">${shown.length?shown.map(i=>feedRowMarkup(i,state)).join(''):'<div class="card empty"><strong>No items in this view</strong>Import a statement or switch the status filter.</div>'}</div><div class="bank-pager"><button class="btn secondary" data-bank-prev ${page.offset<=0?'disabled':''}>Prev</button><span>Showing ${start}-${end} of ${page.total}</span><button class="btn secondary" data-bank-next ${page.offset+page.returned>=page.total?'disabled':''}>Next</button></div>
     </section>
     ${historyMarkup(state)}
@@ -229,6 +239,10 @@ function bind(main,state,ctx){
     }catch(error){ctx.showToast(error.message||'Could not import the statement.');}
   });
   main.querySelectorAll('[data-bank-status]').forEach(btn=>btn.addEventListener('click',async()=>{statusFilter=btn.dataset.bankStatus;pageOffset=0;await reloadFeed(main,state,ctx);}));
+  main.querySelector('#bankSearch')?.addEventListener('input',event=>{searchFilter=event.currentTarget.value;pageOffset=0;clearTimeout(event.currentTarget._filterTimer);event.currentTarget._filterTimer=setTimeout(()=>reloadFeed(main,state,ctx),180);});
+  main.querySelector('#bankFilterAccount')?.addEventListener('change',async event=>{feedAccountFilter=event.currentTarget.value;pageOffset=0;await reloadFeed(main,state,ctx);});
+  main.querySelector('#bankFilterFrom')?.addEventListener('change',async event=>{feedFrom=event.currentTarget.value;pageOffset=0;await reloadFeed(main,state,ctx);});
+  main.querySelector('#bankFilterTo')?.addEventListener('change',async event=>{feedTo=event.currentTarget.value;pageOffset=0;await reloadFeed(main,state,ctx);});
   main.querySelector('[data-bank-prev]')?.addEventListener('click',()=>{pageOffset=Math.max(0,(feed.page?.offset||0)-(feed.page?.limit||100));reloadFeed(main,state,ctx);});main.querySelector('[data-bank-next]')?.addEventListener('click',()=>{pageOffset=(feed.page?.offset||0)+(feed.page?.limit||100);reloadFeed(main,state,ctx);});
   main.querySelectorAll('[data-bank-item]').forEach(card=>{card.querySelector('.bank-action')?.addEventListener('change',()=>syncRow(card,state));syncRow(card,state);});
   main.querySelectorAll('.bank-post').forEach(btn=>btn.addEventListener('click',async()=>{
@@ -263,9 +277,9 @@ function bind(main,state,ctx){
   main.querySelectorAll('[data-delete-bank-rule]').forEach(btn=>btn.addEventListener('click',async()=>{try{const r=await deleteBankRule(btn.dataset.deleteBankRule);if(r.queued){await reloadFeed(main,state,ctx);ctx.showToast('Rule deletion queued for sync.');return;}feed.rules=feed.rules.filter(row=>row.id!==btn.dataset.deleteBankRule);paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not delete that rule.');}}));
 }
 
-async function reloadFeed(main,state,ctx){try{feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not load this bank feed page.');}}
+async function reloadFeed(main,state,ctx){try{feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,q:searchFilter,accountId:feedAccountFilter,from:feedFrom,to:feedTo,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){ctx.showToast(error.message||'Could not load this bank feed page.');}}
 
 export async function renderBankFeedPage(main,state,ctx){
   main.innerHTML='<div class="card panel"><div class="muted">Loading bank feed…</div></div>';
-  try{pageOffset=0;feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){main.innerHTML=`<div class="card empty"><strong>Could not load bank feed</strong>${escapeHtml(error.message||'Try again.')}</div>`;}
+  try{pageOffset=0;feed=await listBankFeed({status:statusFilter==='all'?'':statusFilter,q:searchFilter,accountId:feedAccountFilter,from:feedFrom,to:feedTo,limit:100,offset:pageOffset});paint(main,state,ctx);}catch(error){main.innerHTML=`<div class="card empty"><strong>Could not load bank feed</strong>${escapeHtml(error.message||'Try again.')}</div>`;}
 }

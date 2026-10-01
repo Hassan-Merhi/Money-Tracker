@@ -29,6 +29,7 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   const caps=await pageA.evaluate(async()=>{const lifecycle=await import('/lib/offline-lifecycle.js');return lifecycle.offlineLifecycleCapabilities();});
   expect(caps.webLocks).toBe(true);
 
+  await context.setOffline(true);
   await pageA.evaluate(async()=>{
     const db=await import('/lib/offline-db.js');
     const lifecycle=await import('/lib/offline-lifecycle.js');
@@ -78,20 +79,23 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   expect(aSaw).toBe('A');
   expect(bSaw).toBe('A');
 
-  const syncA=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-first-tab'});});
-  await pageA.waitForTimeout(40);
-  const syncB=pageB.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-second-tab'});});
-  await Promise.all([syncA,syncB]);
+  // Reconnect with both tabs alive. Their online/focus resume handlers can all wake,
+  // but the shared per-account lock plus idempotent operation ID must converge once.
+  await context.setOffline(false);
+  await expect.poll(()=>pageA.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    return (await store.getSyncStatus()).queue.filter(row=>row.entityId==='person_wave100f_peer'&&['pending','failed','conflict'].includes(row.status)).length;
+  }),{timeout:12000}).toBe(0);
   const multiTabResult=await pageA.evaluate(async()=>{
     const store=await import('/lib/store.js');
     const status=await store.getSyncStatus();
     const server=await (await fetch('/api/state',{credentials:'same-origin',cache:'no-store'})).json();
     return {
       serverCount:server.people.filter(row=>row.id==='person_wave100f_peer').length,
-      pending:status.queue.filter(row=>row.entityId==='person_wave100f_peer'&&['pending','failed','conflict'].includes(row.status)).length
+      failed:status.failed,conflicts:status.conflicts
     };
   });
-  expect(multiTabResult).toEqual({serverCount:1,pending:0});
+  expect(multiTabResult).toEqual({serverCount:1,failed:0,conflicts:0});
 
   await pageA.evaluate(async()=>{
     const db=await import('/lib/offline-db.js');

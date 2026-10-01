@@ -1041,9 +1041,11 @@ function applySyncOperation(user,raw){
     const result={operationId:op.operationId,status:'accepted',revision,reopenedFeedItems};
     syncQ.insertProcessed.run(user.user_id,op.operationId,requestHash,JSON.stringify(result),stamp);
     db.exec('COMMIT');
+    bumpSyncMetric('pushAccepted');
     return result;
   }catch(error){
     db.exec('ROLLBACK');
+    bumpSyncMetric(Number(error?.status)===409?'pushConflict':'pushRejected');
     throw error;
   }
 }

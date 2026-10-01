@@ -5,6 +5,16 @@ test.describe.configure({mode:'serial'});
 const EMAIL='wave100a-owner@example.test';
 const PASSWORD='correct horse battery staple';
 
+async function loginStore(page){
+  await page.goto('/');
+  await page.evaluate(async creds=>{
+    const store=await import('/lib/store.js');
+    await store.login(creds.email,creds.password);
+  },{email:EMAIL,password:PASSWORD});
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
+}
+
 async function registerOwner(page){
   await page.goto('/');
   await page.getByRole('button',{name:'Create account'}).first().click();
@@ -91,6 +101,10 @@ test('Wave 100A: cached Bank Feed survives airplane-mode reload and converges qu
   },seeded.itemId);
   expect(ignoreConverged).toEqual({queued:0,serverStatus:'ignored'});
 
+  const remoteContext=await browser.newContext({viewport:{width:1280,height:800}});
+  const remote=await remoteContext.newPage();
+  await loginStore(remote);
+
   const beforePost=await page.evaluate(async itemId=>{
     const store=await import('/lib/store.js');
     const db=await import('/lib/offline-db.js');
@@ -121,6 +135,14 @@ test('Wave 100A: cached Bank Feed survives airplane-mode reload and converges qu
   expect(queuedPost.entries).toBe(beforePost.entries);
   expect(queuedPost.pendingAction).toBe('post');
   expect(queuedPost.queue).toEqual(['post']);
+
+  const remoteRevision=await remote.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    let state=await store.loadState();
+    state=await store.createPerson({id:'wave100a_remote_revision',name:'Remote Revision',note:'forces safe Bank Feed rebase',openingBalance:0,currency:'USD',direction:'to_me'},state.version);
+    return state.version;
+  });
+  expect(remoteRevision).toBeGreaterThan(beforePost.version);
 
   await page.reload({waitUntil:'domcontentloaded'});
   const persistedPost=await page.evaluate(async itemId=>{
@@ -158,5 +180,34 @@ test('Wave 100A: cached Bank Feed survives airplane-mode reload and converges qu
   expect(postConverged.localEntries).toBe(postConverged.serverEntries);
   expect(postConverged.localEntries).toBe(postConverged.beforeEntries+1);
 
+  await context.setOffline(true);
+  const queuedImport=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    const result=await store.importBankFeed({
+      accountId:'account_wave100a',
+      sourceName:'offline-import.csv',
+      rows:[{date:'2026-10-01',description:'Queued offline import',merchant:'Offline CSV',signedAmount:-4,currency:'USD',externalId:'wave100a-offline-import'}]
+    });
+    const user=await db.loadAuthorizedUser();
+    const queue=await db.listBankFeedQueue(user.id||user.email);
+    return {queued:result.queued===true,actions:queue.map(row=>row.action)};
+  });
+  expect(queuedImport).toEqual({queued:true,actions:['import']});
+  await context.setOffline(false);
+  const importConverged=await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    const db=await import('/lib/offline-db.js');
+    await store.syncPendingOperations({source:'wave100a-import'});
+    const user=await db.loadAuthorizedUser();
+    const server=await (await fetch('/api/bank-feed?limit=500&offset=0',{credentials:'same-origin',cache:'no-store'})).json();
+    return {
+      queued:(await db.listBankFeedQueue(user.id||user.email)).length,
+      imported:server.items.some(row=>row.externalId==='wave100a-offline-import')
+    };
+  });
+  expect(importConverged).toEqual({queued:0,imported:true});
+
+  await remoteContext.close();
   await context.close();
 });

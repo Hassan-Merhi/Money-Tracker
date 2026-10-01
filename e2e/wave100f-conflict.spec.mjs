@@ -3,19 +3,21 @@ import { test, expect } from '@playwright/test';
 const EMAIL='wave100f-owner@example.test';
 const PASSWORD='correct horse battery staple';
 
-async function loginOwner(page){
+async function ensureOwner(page){
   await page.goto('/');
   if(await page.locator('#pageHeading').count())return;
+  const create=page.getByRole('button',{name:'Create account'}).first(),registrationOpen=await create.count()>0;
+  if(registrationOpen)await create.click();
   await page.getByLabel('Email').fill(EMAIL);
   await page.getByLabel('Password').fill(PASSWORD);
-  await page.locator('#authForm').getByRole('button',{name:'Sign in'}).click();
+  await page.locator('#authForm').getByRole('button',{name:registrationOpen?'Create account':'Sign in'}).click();
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
 }
 
 test('Wave 100F conflict: remote divergence remains explicit and use-server recovery preserves unrelated work',async({browser})=>{
   const localContext=await browser.newContext({viewport:{width:390,height:844}});
   const local=await localContext.newPage();
-  await loginOwner(local);
+  await ensureOwner(local);
 
   const baseline=await local.evaluate(async()=>{
     const store=await import('/lib/store.js');
@@ -27,7 +29,7 @@ test('Wave 100F conflict: remote divergence remains explicit and use-server reco
 
   const remoteContext=await browser.newContext({viewport:{width:390,height:844}});
   const remote=await remoteContext.newPage();
-  await loginOwner(remote);
+  await ensureOwner(remote);
   await remote.evaluate(async()=>{const store=await import('/lib/store.js');await store.loadState();});
 
   await localContext.setOffline(true);

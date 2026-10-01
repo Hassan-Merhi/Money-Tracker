@@ -22,6 +22,19 @@ self.addEventListener('message',event=>{
   if(event.data?.type==='SKIP_WAITING')self.skipWaiting();
 });
 
+async function requestClientSync(reason){
+  const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});
+  for(const client of windows)client.postMessage({type:'MONEY_TRACKER_SYNC_REQUEST',reason});
+}
+
+self.addEventListener('sync',event=>{
+  if(event.tag==='money-tracker-sync')event.waitUntil(requestClientSync('background-sync'));
+});
+
+self.addEventListener('periodicsync',event=>{
+  if(event.tag==='money-tracker-periodic-sync')event.waitUntil(requestClientSync('periodic-sync'));
+});
+
 async function currentCache(){return await caches.open(CACHE);}
 
 async function networkFirst(request){

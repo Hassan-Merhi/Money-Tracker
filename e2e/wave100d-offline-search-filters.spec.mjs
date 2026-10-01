@@ -39,7 +39,7 @@ test('Wave 100D: local search and compound filters survive airplane-mode reload 
 
     await store.createRecurringRule({
       id:'rule_wave100d_rent',title:'Rent transfer',frequency:'monthly',interval:1,anchorDate:'2026-10-05',nextDueDate:'2026-10-05',endDate:null,remindDaysBefore:3,isActive:true,
-      template:{type:'account_transfer',fromAccountId:'account_wave100d_card',toAccountId:'account_wave100d_cash',amount:100,description:'Home rent'}
+      template:{type:'account_expense',accountId:'account_wave100d_card',amount:100,merchant:'Landlord',description:'Home rent'}
     });
     await store.createRecurringRule({
       id:'rule_wave100d_amazon',title:'Amazon for Ána',frequency:'monthly',interval:1,anchorDate:'2026-10-10',nextDueDate:'2026-10-10',endDate:null,remindDaysBefore:3,isActive:true,

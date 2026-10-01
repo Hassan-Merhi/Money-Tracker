@@ -3,19 +3,21 @@ import { test, expect } from '@playwright/test';
 const EMAIL='wave100f-owner@example.test';
 const PASSWORD='correct horse battery staple';
 
-async function registerOwner(page){
+async function ensureOwner(page){
   await page.goto('/');
-  await page.getByRole('button',{name:'Create account'}).first().click();
+  if(await page.locator('#pageHeading').count())return;
+  const create=page.getByRole('button',{name:'Create account'}).first();
+  if(await create.count())await create.click();
   await page.getByLabel('Email').fill(EMAIL);
   await page.getByLabel('Password').fill(PASSWORD);
-  await page.locator('#authForm').getByRole('button',{name:'Create account'}).click();
+  await page.locator('#authForm').getByRole('button',{name:await create.count()?'Create account':'Sign in'}).click();
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
 }
 
 test('Wave 100F connectivity: transient failures and a lost accepted response remain retryable/idempotent',async({browser})=>{
   const context=await browser.newContext({viewport:{width:390,height:844}});
   const page=await context.newPage();
-  await registerOwner(page);
+  await ensureOwner(page);
 
   const seeded=await page.evaluate(async()=>{
     const store=await import('/lib/store.js');

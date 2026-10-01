@@ -75,6 +75,7 @@ test('O15 sync is single-flight and resume/background hooks are installed',()=>{
   assert.match(sw,/fetch\('\/api\/sync\/push'/);
   assert.match(sw,/fetch\('\/api\/sync\/attachments'/);
   assert.match(sw,/RUN_BACKGROUND_SYNC/);
+  assert.match(sw,/filter\(row=>row\.identity===identity\)/);
   assert.match(sw,/self\.addEventListener\('periodicsync'/);
 });
 

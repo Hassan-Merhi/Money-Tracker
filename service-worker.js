@@ -130,7 +130,7 @@ async function runBackgroundSync(source='background-sync'){
       let lastRevision=null,reopenedFeedItems=0;
       const headers={'Content-Type':'application/json','X-CSRF-Token':auth.csrfToken};
 
-      for(const snapshot of sortedLedgerQueue(await readStore(db,'syncQueue'))){
+      for(const snapshot of sortedLedgerQueue((await readStore(db,'syncQueue')).filter(row=>row.identity===identity))){
         const operation=await readRow(db,'syncQueue',snapshot.operationId);
         if(!operation)continue;
         if(operation.status==='failed'||operation.status==='conflict'){
@@ -167,13 +167,13 @@ async function runBackgroundSync(source='background-sync'){
         await deleteRow(db,'syncQueue',operation.operationId);
       }
 
-      const ledgerRemaining=(await readStore(db,'syncQueue')).filter(row=>['pending','failed','conflict'].includes(String(row.status||'pending')));
+      const ledgerRemaining=(await readStore(db,'syncQueue')).filter(row=>row.identity===identity&&['pending','failed','conflict'].includes(String(row.status||'pending')));
       if(ledgerRemaining.length){
         await requestClientSync('background-ledger-pending');
         return false;
       }
 
-      for(const snapshot of sortedAttachmentQueue(await readStore(db,'attachmentQueue'))){
+      for(const snapshot of sortedAttachmentQueue((await readStore(db,'attachmentQueue')).filter(row=>row.identity===identity))){
         const operation=await readRow(db,'attachmentQueue',snapshot.operationId);
         if(!operation)continue;
         if(operation.status==='failed'){
@@ -213,7 +213,7 @@ async function runBackgroundSync(source='background-sync'){
       const remaining=[
         ...(await readStore(db,'syncQueue')),
         ...(await readStore(db,'attachmentQueue'))
-      ].filter(row=>['pending','failed','conflict'].includes(String(row.status||'pending')));
+      ].filter(row=>row.identity===identity&&['pending','failed','conflict'].includes(String(row.status||'pending')));
       if(remaining.length){
         await requestClientSync('background-pending');
         return false;

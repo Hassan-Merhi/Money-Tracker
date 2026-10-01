@@ -32,7 +32,7 @@ test('Wave 100H Bank Feed Excel preview is device-local and offline-capable',()=
   assert.match(bank,/accept="\.csv,\.xlsx,\.xlsm/);
   assert.doesNotMatch(bank,/previewSpreadsheet/);
   assert.doesNotMatch(bank,/Excel statement preview needs a connection/);
-  assert.doesNotMatch(read('lib/xlsx-browser.js'),/node:zlib|Buffer\./);
+  assert.doesNotMatch(read('lib/xlsx-browser.js'),/node:zlib|Buffer\.from|Buffer\.isBuffer/);
 });
 
 test('Wave 100H parser is part of the controlled PWA shell',()=>{

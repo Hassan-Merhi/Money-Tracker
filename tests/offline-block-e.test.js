@@ -105,6 +105,8 @@ test('O19 uses explicit additive v1-v4 migrations with post-open FX backfill',()
   assert.match(offline,/fxBackfilledAt/);
   assert.match(offline,/export async function offlineSchemaInfo/);
   assert.match(offline,/export async function offlineFxRates/);
+  assert.match(offline,/applyPulledChanges[\s\S]*?rebuildFxRateCache\(identity\)/);
+  assert.match(offline,/strategy:'retained-after-user-clear'/);
 });
 
 test('Block E is wired into shell, health and CI gates',()=>{

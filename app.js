@@ -5,6 +5,7 @@ import { CURRENCIES, money, today, dateInTimeZone, escapeHtml, downloadText, bal
 import { currencyExponent, fromMinor, sumMinor, toMinor } from './lib/money.js';
 import { renderReports, exportPersonPdf } from './lib/reports-ui.js';
 import { filterTransactionList, dateRangeForPreset } from './lib/reporting.js';
+import { matchesSearchText, peopleSearchText } from './lib/offline-query.js';
 import { renderRecurringPage, mountRecurringDashboardWidget } from './block-e-recurring.js';
 import { renderBankFeedPage } from './block-f-bank-feed.js';
 import { renderInsightsPage, mountBudgetDashboardWidget } from './block-g-insights.js';
@@ -287,8 +288,8 @@ function renderDashboard(main) {
 
 function renderPeople(main) {
   const balances = personBalances(state.entries,state.people);
-  const query = (route.params.get('q')||'').toLowerCase();
-  const people = [...state.people].filter(p => !query || `${p.name} ${p.note||''}`.toLowerCase().includes(query)).sort((a,b)=>a.name.localeCompare(b.name));
+  const query = route.params.get('q')||'';
+  const people = [...state.people].filter(p => matchesSearchText(peopleSearchText(p),query)).sort((a,b)=>a.name.localeCompare(b.name));
   main.innerHTML = `
     <section class="people-page" aria-label="People">
       <div class="people-toolbar">
@@ -580,21 +581,21 @@ function openAccountDetail(accountId){
 }
 
 function renderTransactions(main) {
-  const type=route.params.get('type')||'',person=route.params.get('person')||'',category=route.params.get('category')||'';
+  const type=route.params.get('type')||'',person=route.params.get('person')||'',category=route.params.get('category')||'',textQuery=route.params.get('q')||'';
   const period=route.params.get('period')||'this_month',customFrom=route.params.get('from')||'',customTo=route.params.get('to')||'';
   const anchor=dateInTimeZone(state.settings?.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC');
   const range=dateRangeForPreset(period,anchor,customFrom,customTo);
   const visible=state.entries.filter(e=>advancedMode()||PERSON_ENTRY_TYPES.includes(e.type));
-  const entries=filterTransactionList(visible,{type,personId:person,categoryId:category,people:state.people,from:range.from,to:range.to})
+  const entries=filterTransactionList(visible,{type,personId:person,categoryId:category,people:state.people,accounts:state.accounts,categories:state.categories||[],from:range.from,to:range.to,q:textQuery})
     .sort((a,b)=>new Date(b.date)-new Date(a.date)||new Date(b.createdAt)-new Date(a.createdAt));
   const categoryFilter=advancedMode()?`<select class='select' id='filterCategory' aria-label='Filter by category'><option value=''>All categories</option><option value='uncategorized' ${category==='uncategorized'?'selected':''}>Uncategorized</option>${(state.categories||[]).map(c=>`<option value='${escapeHtml(c.id)}' ${category===c.id?'selected':''}>${escapeHtml(c.name)}${c.archived?' (archived)':''}</option>`).join('')}</select>`:'';
   const customDateFilters=period==='custom'?`<div class='field activity-date-field'><label for='filterFrom'>From</label><input class='input' id='filterFrom' type='date' value='${escapeHtml(customFrom||range.from)}'></div><div class='field activity-date-field'><label for='filterTo'>To</label><input class='input' id='filterTo' type='date' value='${escapeHtml(customTo||range.to)}'></div>`:'';
-  main.innerHTML=`<div class='panel-head activity-toolbar'><div class='filters activity-filters'><select class='select' id='filterType' aria-label='Filter by activity type'><option value=''>${advancedMode()?'All activity':'All debt activity'}</option>${entryTypeOptions(type,true)}</select><select class='select' id='filterPerson' aria-label='Filter by person'><option value=''>All people</option>${state.people.map(p=>`<option value='${escapeHtml(p.id)}' ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class='select' id='filterPeriod' aria-label='Filter by date'><option value='this_month' ${period==='this_month'?'selected':''}>This month</option><option value='last_month' ${period==='last_month'?'selected':''}>Last month</option><option value='last_30_days' ${period==='last_30_days'?'selected':''}>Last 30 days</option><option value='all' ${period==='all'?'selected':''}>All time</option><option value='custom' ${period==='custom'?'selected':''}>Custom dates</option></select>${categoryFilter}${customDateFilters}</div><button class='btn primary' id='addTxn'>＋ Add</button></div>
+  main.innerHTML=`<div class='panel-head activity-toolbar'><div class='filters activity-filters'><input class='input search activity-search' id='filterSearch' type='search' inputmode='search' autocomplete='off' aria-label='Search activity' placeholder='Search activity…' value='${escapeHtml(textQuery)}'><select class='select' id='filterType' aria-label='Filter by activity type'><option value=''>${advancedMode()?'All activity':'All debt activity'}</option>${entryTypeOptions(type,true)}</select><select class='select' id='filterPerson' aria-label='Filter by person'><option value=''>All people</option>${state.people.map(p=>`<option value='${escapeHtml(p.id)}' ${person===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select><select class='select' id='filterPeriod' aria-label='Filter by date'><option value='this_month' ${period==='this_month'?'selected':''}>This month</option><option value='last_month' ${period==='last_month'?'selected':''}>Last month</option><option value='last_30_days' ${period==='last_30_days'?'selected':''}>Last 30 days</option><option value='all' ${period==='all'?'selected':''}>All time</option><option value='custom' ${period==='custom'?'selected':''}>Custom dates</option></select>${categoryFilter}${customDateFilters}</div><button class='btn primary' id='addTxn'>＋ Add</button></div>
   <section class='card panel activity-list-panel'>${entries.length?transactionTable(entries):'<div class="empty"><strong>No matching activity</strong>Change the filters or date range, or add a transaction.</div>'}</section>`;
   const update=()=>{
     const q=new URLSearchParams();
-    const t=main.querySelector('#filterType')?.value||'',p=main.querySelector('#filterPerson')?.value||'',c=main.querySelector('#filterCategory')?.value||'',d=main.querySelector('#filterPeriod')?.value||'this_month';
-    if(t)q.set('type',t);if(p)q.set('person',p);if(c)q.set('category',c);if(d!=='this_month')q.set('period',d);
+    const text=main.querySelector('#filterSearch')?.value.trim()||'',t=main.querySelector('#filterType')?.value||'',p=main.querySelector('#filterPerson')?.value||'',c=main.querySelector('#filterCategory')?.value||'',d=main.querySelector('#filterPeriod')?.value||'this_month';
+    if(text)q.set('q',text);if(t)q.set('type',t);if(p)q.set('person',p);if(c)q.set('category',c);if(d!=='this_month')q.set('period',d);
     if(d==='custom'){
       const defaults=dateRangeForPreset('this_month',anchor);
       const f=main.querySelector('#filterFrom')?.value||customFrom||defaults.from,to=main.querySelector('#filterTo')?.value||customTo||defaults.to;
@@ -603,6 +604,7 @@ function renderTransactions(main) {
     location.hash=`#transactions${q.toString()?'?'+q:''}`;
   };
   ['#filterType','#filterPerson','#filterCategory','#filterPeriod','#filterFrom','#filterTo'].forEach(s=>main.querySelector(s)?.addEventListener('change',update));
+  main.querySelector('#filterSearch')?.addEventListener('input',event=>{clearTimeout(event.currentTarget._filterTimer);event.currentTarget._filterTimer=setTimeout(update,180);});
   main.querySelector('#addTxn')?.addEventListener('click',()=>openQuickMenu());
   main.querySelectorAll('[data-edit-entry]').forEach(b=>b.addEventListener('click',()=>openTransactionModal(state.entries.find(e=>e.id===b.dataset.editEntry))));
   main.querySelectorAll('[data-delete-entry]').forEach(b=>b.addEventListener('click',()=>deleteEntry(b.dataset.deleteEntry)));

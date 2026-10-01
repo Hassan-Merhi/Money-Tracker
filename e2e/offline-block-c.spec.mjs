@@ -467,7 +467,14 @@ test('Offline Block C: transfers and attachments survive offline reload and conv
   });
   expect(droppedAttachmentResponse).toBe(true);
   expect(ambiguous.id).toContain('attachment_');
-  expect(ambiguous.pending).toBe(1);
+  // A coalesced foreground rerun may replay the same idempotent create immediately.
+  // Either state is safe: pending means retry later; zero means replay already converged.
+  expect([0,1]).toContain(ambiguous.pending);
+  const ambiguousServer=await page.evaluate(async id=>{
+    const data=await (await fetch('/api/attachments?entry=entry_block_c_attachment_host',{credentials:'same-origin',cache:'no-store'})).json();
+    return data.attachments.filter(row=>row.id===id).length;
+  },ambiguous.id);
+  expect(ambiguousServer).toBe(1);
   await page.unroute('**/api/sync/attachments');
 
   await context.setOffline(true);

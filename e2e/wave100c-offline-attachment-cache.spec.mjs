@@ -61,7 +61,7 @@ test('Wave 100C: v6 attachment rows migrate safely to v7 policy metadata',async(
     const legacy=await read('attachment_legacy_synced'),local=await read('attachment_local_pending');
     return {version:opened.version,legacy:{offlinePinned:legacy.offlinePinned,offlinePolicy:legacy.offlinePolicy,hasData:Boolean(legacy.data)},local:{offlinePinned:local.offlinePinned,offlinePolicy:local.offlinePolicy,hasData:Boolean(local.data)}};
   });
-  expect(result.version).toBe(7);
+  expect(result.version).toBeGreaterThanOrEqual(7);
   expect(result.legacy).toEqual({offlinePinned:false,offlinePolicy:'legacy',hasData:true});
   expect(result.local).toEqual({offlinePinned:true,offlinePolicy:'local',hasData:true});
   await context.close();

@@ -264,6 +264,14 @@ async function runBackgroundSync(source='background-sync'){
             return false;
           }
           await deleteRow(db,'recurringQueue',operation.operationId);
+          if(data?.rule?.updatedAt&&operation.ruleId){
+            const remainingRecurring=await readStore(db,'recurringQueue');
+            for(const later of remainingRecurring){
+              if(later.identity===identity&&later.ruleId===operation.ruleId&&later.status==='pending'){
+                await updateRow(db,'recurringQueue',later.operationId,{baseUpdatedAt:data.rule.updatedAt});
+              }
+            }
+          }
         }
         try{
           const [rulesResponse,remindersResponse]=await Promise.all([

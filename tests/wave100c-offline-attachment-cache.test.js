@@ -49,8 +49,9 @@ test('Wave 100C exposes user controls without changing server-delete semantics',
 
 test('Wave 100C production/PWA and CI contracts are wired',()=>{
   const version=read('pwa-version.js'),server=read('server.mjs'),smoke=read('lib/production-smoke.js'),pkg=JSON.parse(read('package.json')),ci=read('.github/workflows/ci.yml');
-  assert.match(version,/version:33/);
-  assert.match(version,/cacheName:'money-tracker-debt-v33'/);
+  const pwaVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(pwaVersion>=33,`Wave 100C requires PWA v33 or newer; found v${pwaVersion}.`);
+  assert.match(version,new RegExp(`cacheName:'money-tracker-debt-v${pwaVersion}'`));
   assert.match(version,/offlineDbVersion:7/);
   assert.match(server,/offlineWave100CVersion:1/);
   assert.match(smoke,/offlineWave100CVersion/);

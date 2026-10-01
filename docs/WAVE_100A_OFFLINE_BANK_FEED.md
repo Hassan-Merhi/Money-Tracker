@@ -59,7 +59,7 @@ For **Post to ledger** and **Undo posting**:
 5. the client then pulls or performs a full authoritative refresh;
 6. balances are derived from the refreshed ledger.
 
-If the ledger revision moved while the device was offline, the client may rebase the queued post/undo once only when the same Bank Feed row is still in the expected state. Otherwise the operation becomes an explicit conflict.
+If the ledger revision moved while the device was offline, the client may rebase the queued post/undo once only when the same Bank Feed row is still in the expected state. Otherwise the operation becomes an explicit conflict. Settings exposes a targeted **Use server** action for Bank Feed conflicts: it discards only the conflicting row/rule chain, refreshes the authoritative Bank Feed and ledger snapshots, and preserves unrelated queued work.
 
 ## Idempotent server sync
 
@@ -103,7 +103,8 @@ Wave 100A is complete when:
 - post/undo never fake local money changes before sync;
 - reconnect applies queued Bank Feed work in order;
 - a lost response cannot duplicate a Bank Feed action or ledger posting;
-- stale post/undo work rebases only when safe and otherwise becomes visible conflict;
+- stale post/undo work rebases only when safe and otherwise becomes a visible, targeted **Use server** conflict;
+- resolving a Bank Feed conflict preserves unrelated queued ledger and Bank Feed work;
 - logout/account switching/recovery include Bank Feed queue protection;
 - service-worker background sync drains only non-ledger Bank Feed work;
 - IndexedDB v4 → v5 preserves all prior offline data;

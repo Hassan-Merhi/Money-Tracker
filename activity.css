@@ -2,7 +2,7 @@
 .activity-toolbar{align-items:flex-end}
 .activity-toolbar .activity-filters{
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-columns:repeat(4,minmax(0,1fr));
   gap:10px;
   flex:1;
   min-width:0;
@@ -113,6 +113,7 @@
 @media(max-width:760px){
   .activity-toolbar{display:block;margin-bottom:12px}
   .activity-toolbar .activity-filters{grid-template-columns:1fr 1fr;width:100%}
+  .activity-toolbar .activity-filters .activity-search{grid-column:1/-1}
   .activity-toolbar .activity-filters #filterPeriod{grid-column:1/-1}
   .activity-toolbar>#addTxn{display:none!important}
   .activity-list-panel{
@@ -125,6 +126,7 @@
 
 @media(max-width:520px){
   .activity-toolbar .activity-filters{grid-template-columns:1fr}
+  .activity-toolbar .activity-filters .activity-search{grid-column:auto}
   .activity-toolbar .activity-filters #filterPeriod{grid-column:auto}
   .activity-list-row,
   .activity-list-compact .activity-list-row{padding:13px}

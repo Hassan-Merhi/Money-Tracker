@@ -124,6 +124,10 @@ test('Offline Block D: failed work can be exported, retried, and sync health is 
   expect(queued.attachmentQueue).toBe(true);
   expect(queued.hasSecrets).toBe(false);
 
+  // The failed status was written directly to IndexedDB to simulate a persisted failure.
+  // Reload through normal offline boot so syncInfo is reconstructed from the durable queue.
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
   await page.evaluate(()=>{location.hash='#settings';});
   await expect(page.locator('#pageHeading')).toHaveText('Settings');
   await expect(page.locator('#retrySync')).toBeVisible();

@@ -99,7 +99,7 @@ test('Wave 100E wires transactional local restore, UI, PWA and production contra
   assert.match(server,/offlineWave100EVersion:1/);
   assert.match(smoke,/offlineWave100EVersion/);
   assert.match(doc,/server remains authoritative/i);
-  assert.match(doc,/does not contain passwords, CSRF tokens, session cookies/i);
+  assert.match(doc,/does \*\*not\*\* contain passwords, CSRF tokens, session cookies/i);
   assert.equal(pkg.scripts['test:wave100e'],'node --test tests/wave100e-offline-recovery-restore.test.js');
   assert.equal(pkg.scripts['test:wave100e-e2e'],'playwright test e2e/wave100e-offline-recovery-restore.spec.mjs --workers=1');
   assert.match(ci,/Run Wave 100E Offline Recovery Restore gate/);

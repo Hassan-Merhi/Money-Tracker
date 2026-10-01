@@ -38,7 +38,9 @@
     "test:wave100b": "node --test tests/wave100b-offline-recurring.test.js tests/wave100b-recurring-server.test.js",
     "test:wave100b-e2e": "playwright test e2e/wave100b-offline-recurring.spec.mjs --workers=1",
     "test:wave100c": "node --test tests/wave100c-offline-attachment-cache.test.js",
-    "test:wave100c-e2e": "playwright test e2e/wave100c-offline-attachment-cache.spec.mjs --workers=1"
+    "test:wave100c-e2e": "playwright test e2e/wave100c-offline-attachment-cache.spec.mjs --workers=1",
+    "test:wave100d": "node --test tests/wave100d-offline-search-filters.test.js",
+    "test:wave100d-e2e": "playwright test e2e/wave100d-offline-search-filters.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

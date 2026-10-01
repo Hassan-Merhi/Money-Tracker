@@ -35,6 +35,7 @@ test('O7 stores conflict bases and supports automatic rebase plus explicit resol
   assert.match(app,/canKeepMine=row\.operation!=='create'&&!serverDeleted/);
   assert.match(store,/operation\.operation==='delete'&&serverRecord==null/);
   assert.match(offline,/function sameQueuedBase/);
+  assert.match(offline,/key==='updatedAt'/);
   assert.match(offline,/automatic&&row\.status!=='failed'&&!sameQueuedBase/);
   assert.match(offline,/row\.status='conflict'/);
   assert.match(store,/if\(operation\.status==='failed'\|\|operation\.status==='conflict'\)/);

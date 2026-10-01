@@ -61,6 +61,10 @@ test('Wave 100A: cached Bank Feed survives airplane-mode reload and converges qu
   expect(offlineIgnore.queueActions).toEqual(['ignore']);
 
   await page.reload({waitUntil:'domcontentloaded'});
+  await page.evaluate(()=>{location.hash='#bank';});
+  await expect(page.locator('#pageHeading')).toHaveText('Bank Feed');
+  await expect(page.getByText('Bank Feed needs a connection')).toHaveCount(0);
+  await expect(page.locator('.bank-feed-section')).toBeVisible();
   const persistedIgnore=await page.evaluate(async itemId=>{
     const store=await import('/lib/store.js');
     const db=await import('/lib/offline-db.js');

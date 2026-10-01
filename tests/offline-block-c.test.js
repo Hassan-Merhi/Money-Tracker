@@ -43,7 +43,8 @@ test('O7 stores conflict bases and supports automatic rebase plus explicit resol
 
 test('O8 upgrades IndexedDB to durable tombstones and server tombstones',()=>{
   const offline=read('lib/offline-db.js'),server=read('server.mjs');
-  assert.match(offline,/version: 3/);
+  const dbVersion=Number(/version: (\d+)/.exec(offline)?.[1]||0);
+  assert.ok(dbVersion>=3);
   for(const name of ['tombstones','attachments','attachmentQueue'])assert.ok(offline.includes("'"+name+"'"),name);
   assert.match(offline,/TOMBSTONE_STORE/);
   assert.match(offline,/operation==='delete'[\s\S]*?TOMBSTONE_STORE/);

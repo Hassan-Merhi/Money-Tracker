@@ -38,7 +38,7 @@ test('date filters affect report activity but not current outstanding balances',
 
 test('workbook contains expected sheets and transaction columns',()=>{
   const sheets=workbookSheets(state);
-  assert.deepEqual(sheets.map(s=>s.name),['Metadata','Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Monthly','Transactions']);
+  assert.deepEqual(sheets.map(s=>s.name),['Metadata','Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Monthly','FX Rates','Transactions']);
   assert.ok(sheets.at(-1).rows[0].includes('Merchant'));
   assert.ok(sheets.at(-1).rows[0].includes('Category'));
   assert.ok(sheets.at(-1).rows[0].includes('Entry ID'));
@@ -132,7 +132,7 @@ test('transfer flow includes both legs, cancels same-currency transfers, exclude
 
 test('Monthly workbook labels each measure without changing the sheet list',()=>{
   const sheets=workbookSheets(wave0);
-  assert.deepEqual(sheets.map(s=>s.name),['Metadata','Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Monthly','Transactions']);
+  assert.deepEqual(sheets.map(s=>s.name),['Metadata','Overview','Outstanding','People','Accounts','Categories','Budgets','Spending','Monthly','FX Rates','Transactions']);
   assert.deepEqual(sheets.find(s=>s.name==='Monthly').rows,[
     ['Measure','Month','Currency','Net Movement'],
     ['Receivables movement','2026-09','USD',75],['Receivables movement','2026-09','EUR',30],

@@ -6,11 +6,16 @@ const EMAIL='offline-d-owner@example.test';
 const PASSWORD='correct horse battery staple';
 
 async function loginStore(page){
-  return await page.evaluate(async({email,password})=>{
+  await page.evaluate(async creds=>{
     const store=await import('/lib/store.js');
-    await store.login(email,password);
-    return await store.loadState();
+    await store.login(creds.email,creds.password);
   },{email:EMAIL,password:PASSWORD});
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
+  return await page.evaluate(async()=>{
+    const store=await import('/lib/store.js');
+    return await store.loadState();
+  });
 }
 
 test('Offline Block D: expired offline authorization locks UI but preserves the local ledger',async({browser})=>{

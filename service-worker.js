@@ -109,7 +109,7 @@ function sortedBankFeedQueue(rows){
   return [...rows].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId)));
 }
 function sortedRecurringQueue(rows){
-  return [...rows].sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId)));
+  return [...rows].sort((a,b)=>Number(a.queueOrder||0)-Number(b.queueOrder||0)||String(a.createdAt).localeCompare(String(b.createdAt))||String(a.operationId).localeCompare(String(b.operationId)));
 }
 async function saveWorkerBankFeedSnapshot(db,identity,snapshot){
   if(!db.objectStoreNames.contains('bankFeedState'))return false;

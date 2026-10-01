@@ -230,7 +230,7 @@ async function runBackgroundSync(source='background-sync'){
 
 self.addEventListener('message',event=>{
   if(event.data?.type==='GET_UPDATE_INFO'){
-    const payload={type:'MONEY_TRACKER_UPDATE_INFO',version:self.MONEY_TRACKER_PWA.version,offlineDbVersion:self.MONEY_TRACKER_PWA.offlineDbVersion||null};
+    const payload={type:'MONEY_TRACKER_UPDATE_INFO',version:self.MONEY_TRACKER_PWA.version,offlineDbVersion:self.MONEY_TRACKER_PWA.offlineDbVersion||null,minMigratableOfflineDbVersion:self.MONEY_TRACKER_PWA.minMigratableOfflineDbVersion||null};
     if(event.ports?.[0])event.ports[0].postMessage(payload);
     else event.source?.postMessage?.(payload);
     return;

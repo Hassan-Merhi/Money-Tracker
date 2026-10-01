@@ -70,6 +70,11 @@ test('O15 sync is single-flight and resume/background hooks are installed',()=>{
   assert.match(sw,/self\.addEventListener\('sync'/);
   assert.match(sw,/money-tracker-sync/);
   assert.match(sw,/MONEY_TRACKER_SYNC_REQUEST/);
+  assert.match(sw,/async function runBackgroundSync/);
+  assert.match(sw,/fetch\('\/api\/auth\/me'/);
+  assert.match(sw,/fetch\('\/api\/sync\/push'/);
+  assert.match(sw,/fetch\('\/api\/sync\/attachments'/);
+  assert.match(sw,/RUN_BACKGROUND_SYNC/);
   assert.match(sw,/self\.addEventListener\('periodicsync'/);
 });
 
@@ -79,7 +84,8 @@ test('Block D has dedicated gates, health marker, and PWA v27',()=>{
   assert.equal(pkg.scripts['test:offline-d-e2e'],'playwright test e2e/offline-block-d.spec.mjs --workers=1');
   assert.match(ci,/Run Offline Block D contract gate/);
   assert.match(ci,/Run Offline Block D browser gate/);
-  assert.match(version,/version:27/);
-  assert.match(version,/money-tracker-debt-v27/);
+  const match=version.match(/version:(\d+)/),cache=version.match(/money-tracker-debt-v(\d+)/);
+  assert.ok(match&&Number(match[1])>=27);
+  assert.equal(cache?.[1],match?.[1]);
   assert.match(server,/offlineBlockDVersion:1/);
 });

@@ -68,9 +68,11 @@ test('Wave 100F PWA, production and CI contracts are wired',()=>{
   assert.match(server,/offlineWave100FVersion:1/);
   assert.match(smoke,/offlineWave100FVersion/);
   assert.equal(pkg.scripts['test:wave100f'],'node --test tests/wave100f-hostile-connectivity-lifecycle.test.js');
-  assert.equal(pkg.scripts['test:wave100f-e2e'],'playwright test e2e/wave100f-hostile-connectivity-lifecycle.spec.mjs --workers=1');
+  assert.equal(pkg.scripts['test:wave100f-e2e'],'playwright test e2e/wave100f-connectivity.spec.mjs e2e/wave100f-lifecycle.spec.mjs e2e/wave100f-conflict.spec.mjs --workers=1');
   assert.match(ci,/Run Wave 100F Hostile Connectivity & Lifecycle gate/);
   assert.match(ci,/Run Wave 100F Hostile Connectivity & Lifecycle browser gate/);
-  assert.match(ci,/node --check e2e\/wave100f-hostile-connectivity-lifecycle\.spec\.mjs/);
+  assert.match(ci,/node --check e2e\/wave100f-connectivity\.spec\.mjs/);
+  assert.match(ci,/node --check e2e\/wave100f-lifecycle\.spec\.mjs/);
+  assert.match(ci,/node --check e2e\/wave100f-conflict\.spec\.mjs/);
   assert.match(ci,/node --check lib\/offline-lifecycle\.js/);
 });

@@ -38,8 +38,9 @@ test('Wave 100H Bank Feed Excel preview is device-local and offline-capable',()=
 test('Wave 100H parser is part of the controlled PWA shell',()=>{
   const sw=read('service-worker.js'),version=read('pwa-version.js');
   assert.ok(sw.includes("'/lib/xlsx-browser.js'"));
-  assert.match(version,/version:38/);
-  assert.match(version,/cacheName:'money-tracker-debt-v38'/);
+  const shellVersion=Number(/version:(\d+)/.exec(version)?.[1]||0);
+  assert.ok(shellVersion>=38,'Wave 100H requires PWA shell v38 or newer.');
+  assert.match(version,/cacheName:'money-tracker-debt-v\d+'/);
   assert.match(version,/offlineDbVersion:8/);
 });
 

@@ -3,19 +3,21 @@ import { test, expect } from '@playwright/test';
 const EMAIL='wave100f-owner@example.test';
 const PASSWORD='correct horse battery staple';
 
-async function loginOwner(page){
+async function ensureOwner(page){
   await page.goto('/');
   if(await page.locator('#pageHeading').count())return;
+  const create=page.getByRole('button',{name:'Create account'}).first(),registrationOpen=await create.count()>0;
+  if(registrationOpen)await create.click();
   await page.getByLabel('Email').fill(EMAIL);
   await page.getByLabel('Password').fill(PASSWORD);
-  await page.locator('#authForm').getByRole('button',{name:'Sign in'}).click();
+  await page.locator('#authForm').getByRole('button',{name:registrationOpen?'Create account':'Sign in'}).click();
   await expect(page.locator('#pageHeading')).toHaveText('Dashboard');
 }
 
 test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill and update guard keep one durable outbox',async({browser})=>{
   const context=await browser.newContext({viewport:{width:390,height:844}});
   const pageA=await context.newPage();
-  await loginOwner(pageA);
+  await ensureOwner(pageA);
   await pageA.evaluate(async()=>{await navigator.serviceWorker.ready;});
 
   const pageB=await context.newPage();

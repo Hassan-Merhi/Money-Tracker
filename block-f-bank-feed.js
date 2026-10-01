@@ -1,8 +1,9 @@
 import {
   listBankFeed, importBankFeed, postBankFeedItem, undoBankFeedItem, ignoreBankFeedItem, reopenBankFeedItem,
-  deleteBankFeedItem, createBankRule, deleteBankRule, previewSpreadsheet, loadState
+  deleteBankFeedItem, createBankRule, deleteBankRule, loadState
 } from './lib/store.js';
 import { parseBankCsv, suggestBankMapping, normalizeBankRows, bankDirectionLabel, reconcileFeed } from './lib/bank-feed.js';
+import { parseWorkbookInBrowser } from './lib/xlsx-browser.js';
 import { categoryOptionsForType } from './lib/insights.js';
 import { fromMinor } from './lib/money.js';
 import { escapeHtml, money } from './lib/utils.js';
@@ -40,11 +41,6 @@ function categoryOptions(state,action,selected=''){
   const archived=(state.categories||[]).find(c=>c.id===selected&&c.archived);
   return '<option value="">Uncategorized</option>'+categories.map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${escapeHtml((c.icon?c.icon+' ':'')+c.name)}</option>`).join('')+(archived?`<option value="${archived.id}" selected>${escapeHtml((archived.icon?archived.icon+' ':'')+archived.name)} (archived)</option>`:'');
 }
-function bytesToBase64(buffer){
-  const bytes=new Uint8Array(buffer);let binary='';const chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(bytes.length,i+chunk)));
-  return btoa(binary);
-}
 function headersOptions(headers,selected){
   return `<option value="">Not used</option>`+headers.map(h=>`<option value="${escapeHtml(h)}" ${h===selected?'selected':''}>${escapeHtml(h)}</option>`).join('');
 }
@@ -72,8 +68,7 @@ async function readStatementFile(file,ctx){
       const parsed=parseBankCsv(await file.text());
       draft={filename:file.name,sheets:[{name:'CSV',...parsed}],sheetIndex:0};
     }else if(lower.endsWith('.xlsx')||lower.endsWith('.xlsm')){
-      if(typeof navigator!=='undefined'&&navigator.onLine===false)throw new Error('Excel statement preview needs a connection. Use CSV to import a bank statement while offline.');
-      const preview=await previewSpreadsheet(file.name,bytesToBase64(await file.arrayBuffer()));
+      const preview=await parseWorkbookInBrowser(await file.arrayBuffer(),{limitRows:5000,limitCols:100,maxFiles:250,maxUncompressed:20_000_000});
       draft={filename:file.name,sheets:preview.sheets||[],sheetIndex:0};
     }else throw new Error('Use a CSV, XLSX, or XLSM bank statement.');
     const first=(draft.sheets||[]).findIndex(s=>(s.rows||[]).length);
@@ -88,7 +83,7 @@ async function readStatementFile(file,ctx){
 function importMarkup(state){
   const sheet=activeSheet(),headers=sheet?.headers||[],mapping=draft?.mapping||{};
   return `<section class="card panel bank-import">
-    <div class="panel-head"><div><h3>Import bank statement</h3><p>CSV or Excel · rows go to a review inbox before they affect balances.</p></div></div>
+    <div class="panel-head"><div><h3>Import bank statement</h3><p>CSV or Excel · parsed on this device and queued safely even while offline.</p></div></div>
     <div class="bank-import-grid">
       <div class="field"><label>Ledger account</label><select class="select" id="bankAccount">${state.accounts.map(a=>`<option value="${a.id}" ${a.id===(selectedAccountId||state.accounts[0]?.id)?'selected':''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></div>
       <div class="field"><label>Statement file</label><input class="input file-input" id="bankFile" type="file" accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>

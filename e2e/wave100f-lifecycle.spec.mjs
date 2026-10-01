@@ -97,6 +97,7 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
   });
   expect(multiTabResult).toEqual({serverCount:1,failed:0,conflicts:0});
 
+  await context.setOffline(true);
   await pageA.evaluate(async()=>{
     const db=await import('/lib/offline-db.js');
     const [state,user]=await Promise.all([db.loadStateSnapshot(),db.loadAuthorizedUser()]);
@@ -109,7 +110,17 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
       localRecord:{id:'person_wave100f_worker',name:'Worker Lock Person',note:'worker and foreground race',createdAt:stamp}
     },user.id||user.email);
   });
-
+  const workerGate=pageA.evaluate(async()=>{
+    const lifecycle=await import('/lib/offline-lifecycle.js');
+    const db=await import('/lib/offline-db.js');
+    const user=await db.loadAuthorizedUser(),identity=user.id||user.email;
+    return await lifecycle.withOfflineSyncLock(identity,async()=>{
+      await new Promise(resolve=>setTimeout(resolve,300));
+      return true;
+    });
+  });
+  await pageA.waitForTimeout(60);
+  await context.setOffline(false);
   const foreground=pageA.evaluate(async()=>{const store=await import('/lib/store.js');return await store.syncPendingOperations({source:'wave100f-foreground-overlap'});});
   const workerSignal=pageA.evaluate(async()=>{
     const registration=await navigator.serviceWorker.ready;
@@ -117,7 +128,7 @@ test('Wave 100F lifecycle: slow multi-tab/worker sync, peer refresh, page kill a
     worker.postMessage({type:'RUN_BACKGROUND_SYNC'});
     return true;
   });
-  await Promise.all([foreground,workerSignal]);
+  await Promise.all([workerGate,foreground,workerSignal]);
   await expect.poll(()=>pageA.evaluate(async()=>{const store=await import('/lib/store.js');return (await store.getSyncStatus()).pending;}),{timeout:10000}).toBe(0);
   const workerResult=await pageA.evaluate(async()=>{
     const server=await (await fetch('/api/state',{credentials:'same-origin',cache:'no-store'})).json();

@@ -303,7 +303,7 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
 .report-export-menu span{font-size:13px;font-weight:800}
 .report-export-menu small{font-size:11px;color:var(--muted)}
 .report-filter-card{padding:16px 18px;box-shadow:none}
-.report-filter-row{display:grid;grid-template-columns:minmax(160px,.7fr) minmax(220px,1fr) auto;gap:10px;align-items:end}
+.report-filter-row{display:grid;grid-template-columns:minmax(240px,1.35fr) minmax(150px,.65fr) minmax(200px,1fr) auto;gap:10px;align-items:end}
 .report-filter-field{min-width:0}
 .report-reset{min-height:42px;border:0;background:transparent;color:var(--muted);font-weight:800;padding:0 8px;border-radius:10px}
 .report-reset:hover{color:var(--text);background:var(--panel-2)}
@@ -336,6 +336,7 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
   .report-export-menu button{min-height:54px;padding:10px 12px}
   .report-filter-card{padding:14px;border-radius:17px}
   .report-filter-row{grid-template-columns:1fr 1fr;gap:9px}
+  .report-search-field{grid-column:1/-1}
   .report-reset{grid-column:1/-1;justify-self:start;min-height:36px;padding:0 4px}
   .report-custom-dates{grid-template-columns:1fr 1fr}
   .report-custom-dates>.btn{grid-column:1/-1;width:100%}
@@ -357,6 +358,7 @@ html[data-theme="dark"] .entry-menu-item.danger:hover{background:rgba(220,38,38,
 
 @media(max-width:520px){
   .report-filter-row{grid-template-columns:1fr}
+  .report-search-field{grid-column:auto}
   .report-reset{grid-column:auto}
   .report-custom-dates{grid-template-columns:1fr}
   .report-custom-dates>.btn{grid-column:auto}

@@ -82,7 +82,7 @@ test('Wave 100D: local search and compound filters survive airplane-mode reload 
   await page.evaluate(()=>{location.hash='#transactions?period=all&q=offline%20cafe&person=person_wave100d_ana';});
   await expect(page.locator('#pageHeading')).toHaveText('Transactions');
   await expect(page.locator('#filterSearch')).toHaveValue('offline cafe');
-  await expect(page.locator('#main')).toContainText('Offline Café');
+  await expect(page.locator('#main')).toContainText('Coffee receipt created offline');
   await expect(page.locator('#main')).not.toContainText('Older headphones');
 
   await page.reload({waitUntil:'domcontentloaded'});

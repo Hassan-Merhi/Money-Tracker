@@ -88,7 +88,7 @@ test('Wave 100D: local search and compound filters survive airplane-mode reload 
   await page.reload({waitUntil:'domcontentloaded'});
   await expect(page.locator('#pageHeading')).toHaveText('Transactions');
   await expect(page.locator('#filterSearch')).toHaveValue('offline cafe');
-  await expect(page.locator('#main')).toContainText('Offline Café');
+  await expect(page.locator('#main')).toContainText('Coffee receipt created offline');
 
   await page.evaluate(()=>{location.hash='#reports?period=all&q=offline%20cafe&person=person_wave100d_ana';});
   await expect(page.locator('#pageHeading')).toHaveText('Reports & Exports');
@@ -100,17 +100,23 @@ test('Wave 100D: local search and compound filters survive airplane-mode reload 
   await expect(page.locator('#pageHeading')).toHaveText('Bank Feed');
   await expect(page.locator('.bank-offline-status')).toContainText('Offline Bank Feed');
   await page.locator('#bankSearch').fill('cafe grocer october');
+  await expect(page.locator('.bank-feed-list')).toContainText('Café Grocer');
   await page.locator('#bankFilterAccount').selectOption('account_wave100d_card');
+  await expect(page.locator('#bankFilterAccount')).toHaveValue('account_wave100d_card');
   await page.locator('#bankFilterFrom').fill('2026-10-01');
+  await page.locator('#bankFilterFrom').press('Tab');
+  await expect(page.locator('#bankFilterFrom')).toHaveValue('2026-10-01');
   await page.locator('#bankFilterTo').fill('2026-10-31');
+  await page.locator('#bankFilterTo').press('Tab');
   await expect(page.locator('.bank-feed-list')).toContainText('Café Grocer');
   await expect(page.locator('.bank-feed-list')).not.toContainText('Taxi');
 
   await page.evaluate(()=>{location.hash='#scheduled';});
   await expect(page.locator('#pageHeading')).toHaveText('Scheduled & Reminders');
   await expect(page.locator('.recurring-note')).toContainText('Offline reminders are active');
-  await page.locator('#recurringSearch').fill('amazon ana');
   await page.locator('#recurringStatusFilter').selectOption('paused');
+  await expect(page.locator('#recurringStatusFilter')).toHaveValue('paused');
+  await page.locator('#recurringSearch').fill('amazon ana');
   await expect(page.locator('#main')).toContainText('Amazon for Ána');
   await expect(page.locator('#main')).not.toContainText('Rent transfer');
 
